@@ -14,7 +14,8 @@
   --surface-active: rgba(0, 0, 0, 0.075);
   --text: #1a1a1a;
   --text-secondary: #575757;
-  --text-tertiary: #747474;
+  /* ライト時の三次テキスト。#747474 は白地で 4.48:1 と AA(4.5:1) にわずかに届かないため濃くする。 */
+  --text-tertiary: #6b6b6b;
   --border: rgba(0, 0, 0, 0.11);
   --border-strong: rgba(0, 0, 0, 0.2);
   --safe: #177245;
@@ -116,7 +117,8 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .error-banner > svg { flex: 0 0 auto; color: var(--caution); margin-top: 2px; }
 .error-banner > div { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline; flex: 1; }
 .error-banner span { color: var(--text-secondary); font-size: 12px; }
-.error-banner code { color: var(--text-tertiary); font-size: 10px; }
+/* エラー帯は色付き地の上に載るため、三次テキストではAAに届かない。二次テキストを使う。 */
+.error-banner code { color: var(--text-secondary); font-size: 10px; }
 .error-banner button, .notice-toast button { display: grid; place-items: center; border: 0; background: transparent; padding: 2px; }
 
 .view-heading { display: flex; justify-content: space-between; gap: 28px; margin-bottom: 26px; }
