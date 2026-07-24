@@ -254,6 +254,17 @@ export interface ImportResult {
   skipped: readonly ImportSkip[];
 }
 
+export interface ThemeSchedule {
+  enabled: boolean;
+  lightAtMinutes: number;
+  darkAtMinutes: number;
+}
+
+export interface ThemeScheduleState {
+  schedule: ThemeSchedule;
+  lastError: string | null;
+}
+
 export interface SetupAppDto {
   id: string;
   name: string;

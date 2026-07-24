@@ -88,7 +88,11 @@ pub struct ProfileWatcher {
 }
 
 impl ProfileWatcher {
-    pub fn spawn(engine: Arc<TotonoeEngine>, store: Arc<ProfileStore>) -> CoreResult<Self> {
+    pub fn spawn(
+        engine: Arc<TotonoeEngine>,
+        store: Arc<ProfileStore>,
+        theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
+    ) -> CoreResult<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let health = WatcherHealth::new();
         let stop_thread = stop.clone();
@@ -97,7 +101,7 @@ impl ProfileWatcher {
             .name("totonoe-profile-watcher".to_owned())
             .spawn(move || {
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    run_loop(engine, store, stop_thread, &health_thread)
+                    run_loop(engine, store, theme_schedule, stop_thread, &health_thread)
                 }))
                 .unwrap_or_else(|_| {
                     Err(CoreError::recovery_required(
@@ -160,14 +164,20 @@ impl Drop for ProfileWatcher {
 fn run_loop(
     engine: Arc<TotonoeEngine>,
     store: Arc<ProfileStore>,
+    theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     stop: Arc<AtomicBool>,
     health: &WatcherHealth,
 ) -> CoreResult<()> {
+    let theme_engine = engine.clone();
     let sink = EngineProfileSink::new(engine);
     let mut runtime = ProfileRuntime::new(sink);
+    let mut theme_tracker = crate::theme_schedule::ThemeScheduleTracker::default();
 
     while !stop.load(Ordering::SeqCst) {
         run_cycle(&mut runtime, &store, health);
+        if let Some(theme_store) = theme_schedule.as_ref() {
+            apply_theme_schedule_if_due(&theme_engine, theme_store, &mut theme_tracker);
+        }
 
         let ticks = (POLL_INTERVAL.as_millis() / STOP_CHECK.as_millis()).max(1);
         for _ in 0..ticks {
@@ -185,6 +195,55 @@ fn run_loop(
         return Err(error);
     }
     Ok(())
+}
+
+/// 時間帯によるライト/ダーク自動切り替え。
+/// 境界をまたいだ時だけ、検証済みの `theme.color_mode` を preview→commit で適用する。
+/// 失敗は握り潰さず store へ記録し、UIから見えるようにする。
+fn apply_theme_schedule_if_due(
+    engine: &TotonoeEngine,
+    store: &crate::theme_schedule::ThemeScheduleStore,
+    tracker: &mut crate::theme_schedule::ThemeScheduleTracker,
+) {
+    use chrono::Timelike;
+
+    let schedule = store.get();
+    let now = chrono::Local::now();
+    let now_minutes = now.hour() * 60 + now.minute();
+    let Some(mode) = tracker.evaluate(&schedule, now_minutes) else {
+        return;
+    };
+
+    let mut parameters = serde_json::Map::new();
+    parameters.insert(
+        "mode".to_owned(),
+        serde_json::Value::String(mode.as_parameter().to_owned()),
+    );
+    let request = crate::presentation::PreviewActionsRequest {
+        actions: vec![crate::presentation::PreviewActionRequest {
+            action_id: "theme.color_mode".to_owned(),
+            parameters,
+        }],
+    };
+
+    match engine.preview(request) {
+        Ok(preview) => {
+            // 既に望ましい表示になっている場合は、履歴を増やさず何もしない。
+            if preview
+                .changes
+                .iter()
+                .all(|change| change.before == change.after)
+            {
+                store.record_apply_result(None);
+                return;
+            }
+            match engine.commit_preview(&preview.preview_token) {
+                Ok(_) => store.record_apply_result(None),
+                Err(error) => store.record_apply_result(Some(error.user_message)),
+            }
+        }
+        Err(error) => store.record_apply_result(Some(error.user_message)),
+    }
 }
 
 fn run_cycle(
@@ -449,7 +508,7 @@ mod tests {
         let engine = Arc::new(
             TotonoeEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).expect("engine"),
         );
-        let mut watcher = ProfileWatcher::spawn(engine, store).expect("spawn watcher");
+        let mut watcher = ProfileWatcher::spawn(engine, store, None).expect("spawn watcher");
         watcher.shutdown().expect("graceful shutdown");
         assert!(watcher.health_error().is_none());
     }

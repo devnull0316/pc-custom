@@ -12,6 +12,7 @@ pub mod ipc;
 pub mod journal;
 pub mod presentation;
 pub mod setup;
+pub mod theme_schedule;
 pub mod windows;
 
 use tauri::Manager;
@@ -58,6 +59,8 @@ pub fn run() {
             commands::setup_app_catalog,
             commands::setup_app_install,
             commands::config_snapshot_export,
+            commands::theme_schedule_get,
+            commands::theme_schedule_set,
         ])
         .run(tauri::generate_context!())
         .expect("Totonoe runtime terminated unexpectedly");

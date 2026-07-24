@@ -9,6 +9,7 @@ import type {
 } from "../model";
 import { isMutationAllowed, riskLabel } from "../model";
 import { Icon } from "./Icon";
+import { ThemeSchedulePanel } from "./ThemeSchedulePanel";
 
 interface ActionBrowserProps {
   actions: readonly ActionPresentation[];
@@ -90,6 +91,7 @@ export function ActionBrowser({
           <p>左で結果を選び、右で現在の状態、適用後、戻し方まで確認できます。</p>
         </div>
       </header>
+      {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
       <div className="action-workspace">
         <div className="action-master">
           <div aria-label="Actionカテゴリ" className="category-list">

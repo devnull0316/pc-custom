@@ -455,3 +455,24 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .setup-card__result--fail { color: color-mix(in srgb, var(--text) 62%, transparent); }
 .setup-card .secondary-button { flex-shrink: 0; }
 .setup-view__message { margin: 0; font-size: .85rem; color: var(--accent); }
+
+/* --- 時間帯によるテーマ切り替え --- */
+.theme-schedule { margin-bottom: 1.1rem; padding: 1rem 1.15rem; border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  display: flex; flex-direction: column; gap: .7rem; }
+.theme-schedule__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.theme-schedule__head h2 { margin: 0 0 .25rem; font-size: 1rem; font-weight: 600; }
+.theme-schedule__head p { margin: 0; max-width: 62ch; }
+.theme-schedule__toggle { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; flex-shrink: 0; }
+.theme-schedule__row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .8rem; }
+.theme-schedule__row label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem;
+  color: color-mix(in srgb, var(--text) 70%, transparent); }
+.theme-schedule__row input[type="time"] { font: inherit; font-size: .9rem; color: var(--text);
+  padding: .4rem .55rem; border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
+.theme-schedule__row input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.theme-schedule__error { margin: 0; font-size: .82rem; display: inline-flex; align-items: center; gap: .35rem;
+  color: color-mix(in srgb, var(--text) 72%, transparent); }
+.theme-schedule__message { margin: 0; font-size: .82rem; color: var(--accent); }

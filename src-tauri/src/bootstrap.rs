@@ -17,6 +17,7 @@ use crate::{
 pub struct ApplicationState {
     engine: Option<Arc<TotonoeEngine>>,
     profile_store: Option<Arc<crate::game_profile::ProfileStore>>,
+    theme_schedule_store: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     initialization_error: Option<CoreError>,
     _instance_guard: Option<crate::windows::AppInstanceGuard>,
     profile_watcher: Option<crate::game_profile::ProfileWatcher>,
@@ -25,17 +26,19 @@ pub struct ApplicationState {
 impl ApplicationState {
     pub fn initialize() -> Self {
         match initialize_engine() {
-            Ok((engine, instance_guard, profile_store)) => {
+            Ok((engine, instance_guard, profile_store, theme_schedule_store)) => {
                 let engine = Arc::new(engine);
                 // 有効プロファイルのゲーム起動を検知して準備を適用/復元する背景監視。
                 // 既定ではどのプロファイルも自動適用オフのため、実質待機で始まる。
                 match crate::game_profile::ProfileWatcher::spawn(
                     engine.clone(),
                     profile_store.clone(),
+                    Some(theme_schedule_store.clone()),
                 ) {
                     Ok(watcher) => Self {
                         engine: Some(engine),
                         profile_store: Some(profile_store),
+                        theme_schedule_store: Some(theme_schedule_store),
                         initialization_error: None,
                         _instance_guard: Some(instance_guard),
                         profile_watcher: Some(watcher),
@@ -45,6 +48,7 @@ impl ApplicationState {
                         // engine() は initialization_error により fail-closed になる。
                         engine: Some(engine),
                         profile_store: Some(profile_store),
+                        theme_schedule_store: Some(theme_schedule_store),
                         initialization_error: Some(error),
                         _instance_guard: Some(instance_guard),
                         profile_watcher: None,
@@ -54,6 +58,7 @@ impl ApplicationState {
             Err(error) => Self {
                 engine: None,
                 profile_store: None,
+                theme_schedule_store: None,
                 initialization_error: Some(error),
                 _instance_guard: None,
                 profile_watcher: None,
@@ -82,6 +87,18 @@ impl ApplicationState {
             self.initialization_error.clone().unwrap_or_else(|| {
                 CoreError::recovery_required(
                     "安全コアを初期化できないため、プロファイル操作を停止しています。",
+                )
+            })
+        })
+    }
+
+    pub fn theme_schedule_store(
+        &self,
+    ) -> CoreResult<Arc<crate::theme_schedule::ThemeScheduleStore>> {
+        self.theme_schedule_store.clone().ok_or_else(|| {
+            self.initialization_error.clone().unwrap_or_else(|| {
+                CoreError::recovery_required(
+                    "安全コアを初期化できないため、自動切り替え設定を操作できません。",
                 )
             })
         })
@@ -129,6 +146,7 @@ type EngineBootstrap = (
     TotonoeEngine,
     crate::windows::AppInstanceGuard,
     Arc<crate::game_profile::ProfileStore>,
+    Arc<crate::theme_schedule::ThemeScheduleStore>,
 );
 
 fn initialize_engine() -> CoreResult<EngineBootstrap> {
@@ -156,7 +174,10 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
     let profile_store = Arc::new(crate::game_profile::ProfileStore::open(
         data_directory.join("profiles.json"),
     )?);
-    Ok((engine, instance_guard, profile_store))
+    let theme_schedule_store = Arc::new(crate::theme_schedule::ThemeScheduleStore::open(
+        data_directory.join("theme-schedule.json"),
+    )?);
+    Ok((engine, instance_guard, profile_store, theme_schedule_store))
 }
 
 fn data_directory() -> CoreResult<PathBuf> {

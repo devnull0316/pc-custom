@@ -13,6 +13,8 @@ import type {
   ImportResult,
   InstallOutcome,
   SetupAppDto,
+  ThemeSchedule,
+  ThemeScheduleState,
   PreviewActionsRequest,
   PreviewResponse,
   ReconcileResult,
@@ -212,6 +214,14 @@ export function importPreview(json: string): Promise<readonly ImportPreviewItem[
 
 export function importApply(json: string): Promise<ImportResult> {
   return call<ImportResult>("config_import_apply", { json });
+}
+
+export function themeScheduleGet(): Promise<ThemeScheduleState> {
+  return call<ThemeScheduleState>("theme_schedule_get");
+}
+
+export function themeScheduleSet(schedule: ThemeSchedule): Promise<ThemeScheduleState> {
+  return call<ThemeScheduleState>("theme_schedule_set", { schedule });
 }
 
 export function configSnapshotExport(): Promise<string> {

@@ -101,6 +101,23 @@ pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreRes
     state.profile_store()?.delete(&id)
 }
 
+#[tauri::command]
+pub fn theme_schedule_get(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::theme_schedule::ThemeScheduleState> {
+    Ok(state.theme_schedule_store()?.state())
+}
+
+#[tauri::command]
+pub fn theme_schedule_set(
+    state: State<'_, ApplicationState>,
+    schedule: crate::theme_schedule::ThemeSchedule,
+) -> CoreResult<crate::theme_schedule::ThemeScheduleState> {
+    let store = state.theme_schedule_store()?;
+    store.set(schedule)?;
+    Ok(store.state())
+}
+
 /// 現在設定の控え（read-only）。Windowsを変更せず、検出済み状態をJSONで書き出す。
 #[tauri::command]
 pub fn config_snapshot_export(state: State<'_, ApplicationState>) -> CoreResult<String> {
