@@ -36,12 +36,13 @@ npx tauri dev                                            # 実アプリ窓（要
 ```
 
 ## 次にやること（優先順）
-1. ゲームプロファイル実配線: `ProfileActionSink`→engine(preview/commit/rollback_item)、`ObservedProcess`供給→Toolhelp/WMI+handle待ち（windows/process.rs, wmi_process.rs流用）。ポーラ+補正snapshot。
-2. プロファイルTauriコマンド＋UI（作成/一覧/有効化/実行中状態/準備チェック）。DESIGN_LANGUAGE準拠。
-3. `cargo build` binリンク→`tauri dev`実起動→ホーム/カード/適用プレビュー/タイムライン/プロファイルの実操作。
-4. theme.color_mode を実HKCUで apply→目視→rollback の実機縦切り（本番・事前バックアップ確認）。
-5. A/B常駐メモリ実測（scripts/measure-private-working-set.ps1）。
-6. 7/30 Codex復帰後: 残りをcodex実装 → CC監査（`CC_REVIEW.md`, 差し戻し1回まで）。追加Action/共有/AI/実験モジュール。
+残るのは**2つの薄いI/Oアダプタ＋起動配線**のみ（論理は`ProfileRuntime`まで完成・テスト済み）:
+1. 実`ProfileActionSink`(engine背面): action集合を適用しper-item復元参照を返す。engineに per-item id を返すapply経路を1つ追加(現状commit_previewはtransaction_idのみ)＋既存rollback_item流用。**実HKCUを触るため実機縦切り検証必須**。
+2. 実`ObservedProcess`供給: windows/process.rs `snapshot_process_identities`＋wmi_process をポーラ(例1〜2秒間隔+補正)で`ProfileRuntime.tick`へ。背景スレッド。
+3. `ProfileRuntime`をApplicationStateへ配線し、プロファイル有効化で起動。
+4. `cargo build` binリンク→`tauri dev`実起動→全画面の実操作。
+5. theme.color_mode を実HKCUで apply→目視→rollback の実機縦切り。A/B常駐メモリ実測。
+6. 7/30 Codex復帰後: 追加Action/準備チェックpreflight/data-only共有/AI候補/実験モジュール → CC監査。
 
 ## オーケストレーション記録
 Codex(実装) × CC(設計統括/監査/実ビルド検証) ループ。ドライバ: `../claude-codex-orchestrator/scripts/codex-worker.sh "<task>" sol <workdir>`（SANDBOX=workspace-write, EFFORT=ultra, 通信オフ=コード生成のみ）。
