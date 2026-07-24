@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { publicErrorMessage, setupCatalog, setupInstall } from "../backend";
+import { configSnapshotExport, publicErrorMessage, setupCatalog, setupInstall } from "../backend";
 import type { DataMode, InstallOutcome, SetupAppDto } from "../model";
 import { Icon } from "./Icon";
 
@@ -21,6 +21,21 @@ export function SetupView({ dataMode }: SetupViewProps) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [results, setResults] = useState<Readonly<Record<string, InstallOutcome>>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<string | null>(null);
+  const [snapshotBusy, setSnapshotBusy] = useState(false);
+
+  async function captureSnapshot() {
+    if (!live) return;
+    setSnapshotBusy(true);
+    setMessage(null);
+    try {
+      setSnapshot(await configSnapshotExport());
+    } catch (error: unknown) {
+      setMessage(publicErrorMessage(error));
+    } finally {
+      setSnapshotBusy(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -123,6 +138,34 @@ export function SetupView({ dataMode }: SetupViewProps) {
           </ul>
         </div>
       ))}
+
+      <div className="setup-group">
+        <h2>今の設定を控えておく</h2>
+        <p className="muted small">
+          いま検出できている設定の状態を、読み取り専用の控えとして書き出します。Windowsは変更しません。
+          新しいPCへ移すときの参照や、変更前後の記録に使えます。
+        </p>
+        <div className="config-io__row">
+          <button
+            className="secondary-button"
+            disabled={!live || snapshotBusy}
+            onClick={() => void captureSnapshot()}
+            type="button"
+          >
+            {snapshotBusy ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}
+            今の設定を控える
+          </button>
+          {snapshot === null ? null : (
+            <textarea
+              aria-label="現在設定の控え（JSON）"
+              className="config-io__text"
+              readOnly
+              rows={5}
+              value={snapshot}
+            />
+          )}
+        </div>
+      </div>
 
       {message === null ? null : <p className="setup-view__message" role="status">{message}</p>}
       <p className="muted small">

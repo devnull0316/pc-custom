@@ -101,6 +101,19 @@ pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreRes
     state.profile_store()?.delete(&id)
 }
 
+/// 現在設定の控え（read-only）。Windowsを変更せず、検出済み状態をJSONで書き出す。
+#[tauri::command]
+pub fn config_snapshot_export(state: State<'_, ApplicationState>) -> CoreResult<String> {
+    let bootstrap = state.bootstrap_status();
+    let actions = state.engine()?.list_actions();
+    let snapshot = crate::config_snapshot::build_settings_snapshot(
+        &actions,
+        bootstrap.build,
+        chrono::Utc::now().to_rfc3339(),
+    );
+    serde_json::to_string_pretty(&snapshot).map_err(|_| CoreError::storage())
+}
+
 #[tauri::command]
 pub fn setup_app_catalog() -> Vec<crate::setup::SetupAppDto> {
     crate::setup::app_catalog()

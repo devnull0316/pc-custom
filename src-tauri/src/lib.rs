@@ -4,6 +4,7 @@ pub mod backup;
 mod bootstrap;
 mod commands;
 pub mod compatibility;
+pub mod config_snapshot;
 pub mod engine;
 pub mod error;
 pub mod game_profile;
@@ -56,6 +57,7 @@ pub fn run() {
             commands::config_import_apply,
             commands::setup_app_catalog,
             commands::setup_app_install,
+            commands::config_snapshot_export,
         ])
         .run(tauri::generate_context!())
         .expect("Totonoe runtime terminated unexpectedly");

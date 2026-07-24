@@ -214,6 +214,10 @@ export function importApply(json: string): Promise<ImportResult> {
   return call<ImportResult>("config_import_apply", { json });
 }
 
+export function configSnapshotExport(): Promise<string> {
+  return call<string>("config_snapshot_export");
+}
+
 export function setupCatalog(): Promise<readonly SetupAppDto[]> {
   return call<readonly SetupAppDto[]>("setup_app_catalog");
 }
