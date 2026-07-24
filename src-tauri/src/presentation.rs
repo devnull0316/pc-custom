@@ -287,6 +287,10 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         }
         ActionId::TaskbarTaskView => ActionParameters::TaskbarTaskView { show: true },
         ActionId::TaskbarWidgets => ActionParameters::TaskbarWidgets { show: true },
+        ActionId::ExplorerItemCheckboxes => {
+            ActionParameters::ExplorerItemCheckboxes { show: true }
+        }
+        ActionId::ExplorerCompactView => ActionParameters::ExplorerCompactView { enabled: true },
         ActionId::ThemeColorMode => ActionParameters::ThemeColorMode {
             mode: ThemeColorMode::Dark,
         },
@@ -317,7 +321,9 @@ fn category_for(action_id: ActionId) -> &'static str {
         ActionId::PowerActiveSchemeCheck => "power",
         ActionId::ExplorerShowExtensions
         | ActionId::ExplorerShowHidden
-        | ActionId::ExplorerClockSeconds => "explorer",
+        | ActionId::ExplorerClockSeconds
+        | ActionId::ExplorerItemCheckboxes
+        | ActionId::ExplorerCompactView => "explorer",
         ActionId::ThemeColorMode
         | ActionId::AppearanceTransparency
         | ActionId::TaskbarTaskView
@@ -337,6 +343,8 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::AppearanceTransparency => "透明効果のオン・オフを切り替えたい人向け",
         ActionId::TaskbarTaskView => "タスクビューボタンの表示を切り替えたい人向け",
         ActionId::TaskbarWidgets => "ウィジェットボタンの表示を切り替えたい人向け",
+        ActionId::ExplorerItemCheckboxes => "チェックボックスでの複数選択を切り替えたい人向け",
+        ActionId::ExplorerCompactView => "一覧の行間（コンパクト表示）を切り替えたい人向け",
         ActionId::ThemeColorMode => "Windowsとアプリの明暗を揃えたい人向け",
         ActionId::GamesProcessWatch => "登録したゲームの起動と終了だけを安全に検知したい人向け",
     }
@@ -352,6 +360,8 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::AppearanceTransparency => "選択した透明効果の状態",
         ActionId::TaskbarTaskView => "選択したタスクビューボタンの表示",
         ActionId::TaskbarWidgets => "選択したウィジェットボタンの表示",
+        ActionId::ExplorerItemCheckboxes => "選択した項目チェックボックスの表示",
+        ActionId::ExplorerCompactView => "選択したコンパクト表示の状態",
         ActionId::ThemeColorMode => "選択したライト／ダーク表示",
         ActionId::GamesProcessWatch => "本人性を確認できたプロセスだけ監視",
     }

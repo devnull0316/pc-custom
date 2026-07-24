@@ -10,9 +10,10 @@ mod process_watch;
 pub use active_scheme_check::{ActiveSchemeCheckAction, ACTIVE_SCHEME_CHECK_ACTION};
 pub use color_mode::{ColorModeAction, COLOR_MODE_ACTION};
 pub use explorer_visibility::{
-    ClockSecondsAction, ShowExtensionsAction, ShowHiddenAction, TaskViewAction,
-    TransparencyAction, WidgetsAction, CLOCK_SECONDS_ACTION, SHOW_EXTENSIONS_ACTION,
-    SHOW_HIDDEN_ACTION, TASK_VIEW_ACTION, TRANSPARENCY_ACTION, WIDGETS_ACTION,
+    ClockSecondsAction, CompactViewAction, ItemCheckboxesAction, ShowExtensionsAction,
+    ShowHiddenAction, TaskViewAction, TransparencyAction, WidgetsAction, CLOCK_SECONDS_ACTION,
+    COMPACT_VIEW_ACTION, ITEM_CHECKBOXES_ACTION, SHOW_EXTENSIONS_ACTION, SHOW_HIDDEN_ACTION,
+    TASK_VIEW_ACTION, TRANSPARENCY_ACTION, WIDGETS_ACTION,
 };
 pub use prevent_sleep::{PreventSleepAction, PREVENT_SLEEP_ACTION};
 pub use process_watch::{ProcessWatchAction, PROCESS_WATCH_ACTION};

@@ -35,6 +35,10 @@ const TASK_VIEW_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "ShowTaskViewButton");
 const WIDGETS_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "TaskbarDa");
+const ITEM_CHECKBOXES_TARGET: RegistryTarget =
+    RegistryTarget::current_user_64(ADVANCED_SUBKEY, "AutoCheckSelect");
+const COMPACT_VIEW_TARGET: RegistryTarget =
+    RegistryTarget::current_user_64(ADVANCED_SUBKEY, "UseCompactMode");
 
 pub struct ShowExtensionsAction;
 pub struct ShowHiddenAction;
@@ -42,12 +46,16 @@ pub struct ClockSecondsAction;
 pub struct TransparencyAction;
 pub struct TaskViewAction;
 pub struct WidgetsAction;
+pub struct ItemCheckboxesAction;
+pub struct CompactViewAction;
 pub static SHOW_EXTENSIONS_ACTION: ShowExtensionsAction = ShowExtensionsAction;
 pub static SHOW_HIDDEN_ACTION: ShowHiddenAction = ShowHiddenAction;
 pub static CLOCK_SECONDS_ACTION: ClockSecondsAction = ClockSecondsAction;
 pub static TRANSPARENCY_ACTION: TransparencyAction = TransparencyAction;
 pub static TASK_VIEW_ACTION: TaskViewAction = TaskViewAction;
 pub static WIDGETS_ACTION: WidgetsAction = WidgetsAction;
+pub static ITEM_CHECKBOXES_ACTION: ItemCheckboxesAction = ItemCheckboxesAction;
+pub static COMPACT_VIEW_ACTION: CompactViewAction = CompactViewAction;
 
 static EXTENSIONS_METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::ExplorerShowExtensions,
@@ -293,6 +301,90 @@ fn widgets_desired(parameters: &ActionParameters) -> ActionResult<u32> {
 
 fn boolean_value_is_valid(value: u32) -> bool {
     value <= 1
+}
+
+static ITEM_CHECKBOXES_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::ExplorerItemCheckboxes,
+    name: "項目チェックボックスを表示・非表示",
+    description: "Explorerでファイル/フォルダーを選ぶチェックボックスの表示を、HKCUの文書化された設定で変更します。",
+    category: "explorer",
+    tags: &["files", "checkboxes", "explorer"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+    ],
+    minimumBuild: 26_100,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Persistent,
+    parameter_schema: r#"{"show":"boolean"}"#,
+    resource_keys: &[
+        "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:autocheckselect",
+    ],
+    method_class: MethodClass::DocumentedRegistry,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11",
+    ],
+    compatibility_key: "explorer.item_checkboxes.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: true,
+    windows_update_impact: "中。Windows更新後に値と非破壊通知の実機スモークを再実施します。",
+};
+
+static COMPACT_VIEW_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::ExplorerCompactView,
+    name: "コンパクト表示を切り替える",
+    description: "Explorerの一覧の行間を詰めるコンパクト表示を、HKCUの文書化された設定で変更します。",
+    category: "explorer",
+    tags: &["files", "compact", "explorer"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+    ],
+    minimumBuild: 26_100,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Persistent,
+    parameter_schema: r#"{"enabled":"boolean"}"#,
+    resource_keys: &[
+        "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:usecompactmode",
+    ],
+    method_class: MethodClass::DocumentedRegistry,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11",
+    ],
+    compatibility_key: "explorer.compact_view.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: true,
+    windows_update_impact: "中。Windows更新後に値と非破壊通知の実機スモークを再実施します。",
+};
+
+fn item_checkboxes_desired(parameters: &ActionParameters) -> ActionResult<u32> {
+    match parameters {
+        ActionParameters::ExplorerItemCheckboxes { show } => Ok(u32::from(*show)),
+        _ => Err(wrong_parameters()),
+    }
+}
+
+fn compact_view_desired(parameters: &ActionParameters) -> ActionResult<u32> {
+    match parameters {
+        ActionParameters::ExplorerCompactView { enabled } => Ok(u32::from(*enabled)),
+        _ => Err(wrong_parameters()),
+    }
 }
 
 fn extensions_desired(parameters: &ActionParameters) -> ActionResult<u32> {
@@ -708,6 +800,24 @@ impl_explorer_action!(
     "ウィジェットボタンの表示を選択した状態へ変更します。"
 );
 
+impl_explorer_action!(
+    ItemCheckboxesAction,
+    ITEM_CHECKBOXES_METADATA,
+    ITEM_CHECKBOXES_TARGET,
+    item_checkboxes_desired,
+    boolean_value_is_valid,
+    "項目チェックボックスの表示を選択した状態へ変更します。"
+);
+
+impl_explorer_action!(
+    CompactViewAction,
+    COMPACT_VIEW_METADATA,
+    COMPACT_VIEW_TARGET,
+    compact_view_desired,
+    boolean_value_is_valid,
+    "コンパクト表示を選択した状態へ変更します。"
+);
+
 #[cfg(all(test, windows))]
 mod tests {
     use uuid::Uuid;
@@ -882,6 +992,30 @@ mod tests {
             unique_target("TaskbarDa"),
             &ActionParameters::TaskbarWidgets { show: true },
             widgets_desired,
+            boolean_value_is_valid,
+            None,
+        );
+    }
+
+    #[test]
+    fn item_checkboxes_storage_apply_detect_rollback_detect_is_isolated() {
+        round_trip(
+            &ITEM_CHECKBOXES_METADATA,
+            unique_target("AutoCheckSelect"),
+            &ActionParameters::ExplorerItemCheckboxes { show: true },
+            item_checkboxes_desired,
+            boolean_value_is_valid,
+            None,
+        );
+    }
+
+    #[test]
+    fn compact_view_storage_apply_detect_rollback_detect_is_isolated() {
+        round_trip(
+            &COMPACT_VIEW_METADATA,
+            unique_target("UseCompactMode"),
+            &ActionParameters::ExplorerCompactView { enabled: true },
+            compact_view_desired,
             boolean_value_is_valid,
             None,
         );

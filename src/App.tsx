@@ -49,6 +49,8 @@ function parametersForAction(actionId: string): Record<string, boolean | number 
   if (actionId === "appearance.transparency") return { enabled: true };
   if (actionId === "taskbar.task_view") return { show: true };
   if (actionId === "taskbar.widgets") return { show: true };
+  if (actionId === "explorer.item_checkboxes") return { show: true };
+  if (actionId === "explorer.compact_view") return { enabled: true };
   if (actionId === "theme.color_mode") return { mode: "dark" };
   return {};
 }

@@ -24,6 +24,10 @@ pub enum ActionId {
     TaskbarTaskView,
     #[serde(rename = "taskbar.widgets")]
     TaskbarWidgets,
+    #[serde(rename = "explorer.item_checkboxes")]
+    ExplorerItemCheckboxes,
+    #[serde(rename = "explorer.compact_view")]
+    ExplorerCompactView,
     #[serde(rename = "theme.color_mode")]
     ThemeColorMode,
     #[serde(rename = "games.process_watch")]
@@ -31,7 +35,7 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::SessionPreventSleep,
         Self::PowerActiveSchemeCheck,
         Self::ExplorerShowExtensions,
@@ -40,6 +44,8 @@ impl ActionId {
         Self::AppearanceTransparency,
         Self::TaskbarTaskView,
         Self::TaskbarWidgets,
+        Self::ExplorerItemCheckboxes,
+        Self::ExplorerCompactView,
         Self::ThemeColorMode,
         Self::GamesProcessWatch,
     ];
@@ -54,6 +60,8 @@ impl ActionId {
             Self::AppearanceTransparency => "appearance.transparency",
             Self::TaskbarTaskView => "taskbar.task_view",
             Self::TaskbarWidgets => "taskbar.widgets",
+            Self::ExplorerItemCheckboxes => "explorer.item_checkboxes",
+            Self::ExplorerCompactView => "explorer.compact_view",
             Self::ThemeColorMode => "theme.color_mode",
             Self::GamesProcessWatch => "games.process_watch",
         }
@@ -90,6 +98,8 @@ impl FromStr for ActionId {
             "appearance.transparency" => Ok(Self::AppearanceTransparency),
             "taskbar.task_view" => Ok(Self::TaskbarTaskView),
             "taskbar.widgets" => Ok(Self::TaskbarWidgets),
+            "explorer.item_checkboxes" => Ok(Self::ExplorerItemCheckboxes),
+            "explorer.compact_view" => Ok(Self::ExplorerCompactView),
             "theme.color_mode" => Ok(Self::ThemeColorMode),
             "games.process_watch" => Ok(Self::GamesProcessWatch),
             _ => Err(ParseActionIdError),

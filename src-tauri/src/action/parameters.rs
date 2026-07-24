@@ -47,6 +47,10 @@ pub enum ActionParameters {
     TaskbarTaskView { show: bool },
     #[serde(rename = "taskbar.widgets")]
     TaskbarWidgets { show: bool },
+    #[serde(rename = "explorer.item_checkboxes")]
+    ExplorerItemCheckboxes { show: bool },
+    #[serde(rename = "explorer.compact_view")]
+    ExplorerCompactView { enabled: bool },
     #[serde(rename = "theme.color_mode")]
     ThemeColorMode { mode: ThemeColorMode },
     #[serde(rename = "games.process_watch")]
@@ -64,6 +68,8 @@ impl ActionParameters {
             Self::AppearanceTransparency { .. } => ActionId::AppearanceTransparency,
             Self::TaskbarTaskView { .. } => ActionId::TaskbarTaskView,
             Self::TaskbarWidgets { .. } => ActionId::TaskbarWidgets,
+            Self::ExplorerItemCheckboxes { .. } => ActionId::ExplorerItemCheckboxes,
+            Self::ExplorerCompactView { .. } => ActionId::ExplorerCompactView,
             Self::ThemeColorMode { .. } => ActionId::ThemeColorMode,
             Self::GamesProcessWatch { .. } => ActionId::GamesProcessWatch,
         }
