@@ -13,6 +13,8 @@ import type {
   ImportResult,
   InstallOutcome,
   SetupAppDto,
+  TempCleanupOutcome,
+  TempCleanupPlan,
   ThemeSchedule,
   ThemeScheduleState,
   PreviewActionsRequest,
@@ -222,6 +224,14 @@ export function themeScheduleGet(): Promise<ThemeScheduleState> {
 
 export function themeScheduleSet(schedule: ThemeSchedule): Promise<ThemeScheduleState> {
   return call<ThemeScheduleState>("theme_schedule_set", { schedule });
+}
+
+export function tempCleanupPlan(): Promise<TempCleanupPlan> {
+  return call<TempCleanupPlan>("storage_temp_cleanup_plan");
+}
+
+export function tempCleanupApply(): Promise<TempCleanupOutcome> {
+  return call<TempCleanupOutcome>("storage_temp_cleanup_apply");
 }
 
 export function configSnapshotExport(): Promise<string> {

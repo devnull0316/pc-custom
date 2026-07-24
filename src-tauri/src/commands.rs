@@ -131,6 +131,27 @@ pub fn config_snapshot_export(state: State<'_, ApplicationState>) -> CoreResult<
     serde_json::to_string_pretty(&snapshot).map_err(|_| CoreError::storage())
 }
 
+/// 削除候補の一覧（read-only）。適用前に必ずこれを見せる。
+#[tauri::command]
+pub fn storage_temp_cleanup_plan(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::windows::TempCleanupPlan> {
+    // 安全コアが使える状態でだけ受け付ける（fail-closed）。
+    let _engine = state.engine()?;
+    crate::windows::plan_user_temp_cleanup(crate::windows::TEMP_CLEANUP_MIN_AGE_DAYS)
+        .map_err(|_| CoreError::invalid_request("一時ファイルの一覧を取得できませんでした。"))
+}
+
+/// 一覧と同じ条件で再走査して削除する。**元に戻せない**。
+#[tauri::command]
+pub fn storage_temp_cleanup_apply(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::windows::TempCleanupOutcome> {
+    let _engine = state.engine()?;
+    crate::windows::delete_user_temp_files(crate::windows::TEMP_CLEANUP_MIN_AGE_DAYS)
+        .map_err(|_| CoreError::invalid_request("一時ファイルを削除できませんでした。"))
+}
+
 #[tauri::command]
 pub fn setup_app_catalog() -> Vec<crate::setup::SetupAppDto> {
     crate::setup::app_catalog()

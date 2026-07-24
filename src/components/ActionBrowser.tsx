@@ -9,6 +9,7 @@ import type {
 } from "../model";
 import { isMutationAllowed, riskLabel } from "../model";
 import { Icon } from "./Icon";
+import { TempCleanupPanel } from "./TempCleanupPanel";
 import { ThemeSchedulePanel } from "./ThemeSchedulePanel";
 
 interface ActionBrowserProps {
@@ -92,6 +93,7 @@ export function ActionBrowser({
         </div>
       </header>
       {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
+      {selectedCategory === "storage" ? <TempCleanupPanel dataMode={dataMode} /> : null}
       <div className="action-workspace">
         <div className="action-master">
           <div aria-label="Actionカテゴリ" className="category-list">

@@ -61,6 +61,8 @@ pub fn run() {
             commands::config_snapshot_export,
             commands::theme_schedule_get,
             commands::theme_schedule_set,
+            commands::storage_temp_cleanup_plan,
+            commands::storage_temp_cleanup_apply,
         ])
         .run(tauri::generate_context!())
         .expect("Totonoe runtime terminated unexpectedly");

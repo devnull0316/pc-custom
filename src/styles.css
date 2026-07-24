@@ -476,3 +476,19 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .theme-schedule__error { margin: 0; font-size: .82rem; display: inline-flex; align-items: center; gap: .35rem;
   color: color-mix(in srgb, var(--text) 72%, transparent); }
 .theme-schedule__message { margin: 0; font-size: .82rem; color: var(--accent); }
+
+/* --- 一時ファイルの削除 --- */
+.temp-cleanup { margin-bottom: 1.1rem; padding: 1rem 1.15rem; border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  display: flex; flex-direction: column; gap: .65rem; }
+.temp-cleanup h2 { margin: 0; font-size: 1rem; font-weight: 600; }
+.temp-cleanup p { margin: 0; max-width: 68ch; }
+.temp-cleanup__summary { font-size: .85rem; font-weight: 600; }
+.temp-cleanup__list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: .25rem; }
+.temp-cleanup__list li { display: flex; align-items: baseline; justify-content: space-between; gap: .8rem;
+  font-size: .82rem; padding: .3rem .5rem; border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 4%, transparent); }
+.temp-cleanup__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.temp-cleanup__message { font-size: .85rem; color: var(--accent); }

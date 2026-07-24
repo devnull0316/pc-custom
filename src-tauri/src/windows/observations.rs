@@ -715,3 +715,259 @@ mod tests {
         )));
     }
 }
+
+// ---------------------------------------------------------------------------
+// 一時ファイルの削除（BRIEF §3「一時ファイルの確認と削除」）
+//
+// 安全契約:
+// - 対象は現在ユーザーの一時フォルダー配下の**ファイルのみ**。ディレクトリは消さない。
+// - reparse point（シンボリックリンク等）は辿らず、対象にもしない。
+// - **一定日数より古いものだけ**。preview→実行の間に増えたファイルは条件上入らない。
+// - 実行時も同じ検証を通してから1件ずつ削除する。
+// - 使用中などで消せないものは理由つきで報告し、処理は止めない。**元に戻せない操作**。
+// - UIへ渡すのはファイル名と大きさだけで、フルパスは出さない。
+// ---------------------------------------------------------------------------
+
+/// 既定の下限日数。これより新しい一時ファイルは削除候補にしない。
+pub const TEMP_CLEANUP_MIN_AGE_DAYS: u64 = 7;
+const MAX_CLEANUP_CANDIDATES: usize = 500;
+const SECONDS_PER_DAY: u64 = 60 * 60 * 24;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TempCleanupCandidate {
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub age_days: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TempCleanupPlan {
+    pub min_age_days: u64,
+    pub candidates: Vec<TempCleanupCandidate>,
+    pub total_bytes: u64,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TempCleanupSkip {
+    pub file_name: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TempCleanupOutcome {
+    pub deleted_count: u64,
+    pub freed_bytes: u64,
+    pub skipped: Vec<TempCleanupSkip>,
+    pub truncated: bool,
+}
+
+/// 秒数を日数へ。端数は切り捨て（若く見積もる＝安全側）。
+pub fn seconds_to_days(seconds: u64) -> u64 {
+    seconds / SECONDS_PER_DAY
+}
+
+#[cfg(windows)]
+fn temp_cleanup_walk<F>(min_age_days: u64, mut visit: F) -> WindowsResult<bool>
+where
+    F: FnMut(&std::path::Path, &str, u64, u64),
+{
+    use std::os::windows::fs::MetadataExt;
+    use std::time::{Duration, Instant, SystemTime};
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    const MAX_SCAN_DURATION: Duration = Duration::from_millis(500);
+
+    let root = user_temp_path()?;
+    if path_has_reparse_component(&root).unwrap_or(true) {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "temp root has a reparse component",
+            None,
+        ));
+    }
+    let started = Instant::now();
+    let now = SystemTime::now();
+    let mut truncated = false;
+    let mut visited = 0usize;
+    let mut directories = 0u64;
+    let mut pending = vec![(root, 0u8)];
+
+    while let Some((directory, depth)) = pending.pop() {
+        if started.elapsed() >= MAX_SCAN_DURATION || visited >= MAX_CLEANUP_CANDIDATES {
+            truncated = true;
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            truncated = true;
+            continue;
+        };
+        for entry in entries.flatten() {
+            if started.elapsed() >= MAX_SCAN_DURATION || visited >= MAX_CLEANUP_CANDIDATES {
+                truncated = true;
+                pending.clear();
+                break;
+            }
+            let path = entry.path();
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                truncated = true;
+                continue;
+            };
+            // reparse point は辿らず、削除対象にもしない。
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+                continue;
+            }
+            if metadata.is_dir() {
+                if depth < MAX_TEMP_DEPTH && directories < MAX_TEMP_DIRECTORIES {
+                    directories = directories.saturating_add(1);
+                    pending.push((path, depth.saturating_add(1)));
+                } else {
+                    truncated = true;
+                }
+                continue;
+            }
+            if !metadata.is_file() {
+                continue;
+            }
+            // 更新時刻が読めない、または未来日付のものは触らない。
+            let age_days = metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .map(|elapsed| seconds_to_days(elapsed.as_secs()));
+            let Some(age_days) = age_days else {
+                continue;
+            };
+            if age_days < min_age_days {
+                continue;
+            }
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            visited = visited.saturating_add(1);
+            visit(&path, file_name, metadata.len(), age_days);
+        }
+    }
+    Ok(truncated)
+}
+
+/// 削除候補の一覧（適用前に必ず提示する）。read-only。
+#[cfg(windows)]
+pub fn plan_user_temp_cleanup(min_age_days: u64) -> WindowsResult<TempCleanupPlan> {
+    let mut candidates = Vec::new();
+    let mut total_bytes = 0u64;
+    let truncated = temp_cleanup_walk(min_age_days, |_path, file_name, size, age_days| {
+        total_bytes = total_bytes.saturating_add(size);
+        candidates.push(TempCleanupCandidate {
+            file_name: file_name.to_owned(),
+            size_bytes: size,
+            age_days,
+        });
+    })?;
+    Ok(TempCleanupPlan {
+        min_age_days,
+        candidates,
+        total_bytes,
+        truncated,
+    })
+}
+
+/// 同じ条件で再走査し、1件ずつ削除する。**元に戻せない**。
+#[cfg(windows)]
+pub fn delete_user_temp_files(min_age_days: u64) -> WindowsResult<TempCleanupOutcome> {
+    let mut deleted_count = 0u64;
+    let mut freed_bytes = 0u64;
+    let mut skipped: Vec<TempCleanupSkip> = Vec::new();
+    let truncated = temp_cleanup_walk(min_age_days, |path, file_name, size, _age| {
+        match std::fs::remove_file(path) {
+            Ok(()) => {
+                deleted_count = deleted_count.saturating_add(1);
+                freed_bytes = freed_bytes.saturating_add(size);
+            }
+            Err(error) => {
+                if skipped.len() < MAX_WARNINGS {
+                    let reason = match error.kind() {
+                        std::io::ErrorKind::PermissionDenied => "使用中か、権限がありません",
+                        std::io::ErrorKind::NotFound => "すでにありません",
+                        _ => "削除できませんでした",
+                    };
+                    skipped.push(TempCleanupSkip {
+                        file_name: file_name.to_owned(),
+                        reason: reason.to_owned(),
+                    });
+                }
+            }
+        }
+    })?;
+    Ok(TempCleanupOutcome {
+        deleted_count,
+        freed_bytes,
+        skipped,
+        truncated,
+    })
+}
+
+#[cfg(not(windows))]
+pub fn plan_user_temp_cleanup(_min_age_days: u64) -> WindowsResult<TempCleanupPlan> {
+    Err(WindowsError::unsupported("plan temp cleanup"))
+}
+
+#[cfg(not(windows))]
+pub fn delete_user_temp_files(_min_age_days: u64) -> WindowsResult<TempCleanupOutcome> {
+    Err(WindowsError::unsupported("delete temp files"))
+}
+
+#[cfg(test)]
+mod temp_cleanup_tests {
+    use super::*;
+
+    #[test]
+    fn age_conversion_floors_to_whole_days() {
+        assert_eq!(seconds_to_days(0), 0);
+        assert_eq!(seconds_to_days(SECONDS_PER_DAY - 1), 0, "1日未満は0日扱い");
+        assert_eq!(seconds_to_days(SECONDS_PER_DAY), 1);
+        assert_eq!(seconds_to_days(SECONDS_PER_DAY * 7 + 3600), 7);
+    }
+
+    #[test]
+    fn default_threshold_keeps_recent_files() {
+        // 既定は7日。作成直後(0日)のファイルは条件上どうやっても候補にならない。
+        assert_eq!(TEMP_CLEANUP_MIN_AGE_DAYS, 7);
+        assert!(seconds_to_days(3600) < TEMP_CLEANUP_MIN_AGE_DAYS);
+        assert!(seconds_to_days(SECONDS_PER_DAY * 6) < TEMP_CLEANUP_MIN_AGE_DAYS);
+        assert!(seconds_to_days(SECONDS_PER_DAY * 8) >= TEMP_CLEANUP_MIN_AGE_DAYS);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn planning_is_read_only_and_never_reports_recent_files() {
+        let plan = plan_user_temp_cleanup(TEMP_CLEANUP_MIN_AGE_DAYS).expect("plan temp cleanup");
+        assert_eq!(plan.min_age_days, TEMP_CLEANUP_MIN_AGE_DAYS);
+        assert!(plan.candidates.len() <= MAX_CLEANUP_CANDIDATES);
+        for candidate in &plan.candidates {
+            assert!(
+                candidate.age_days >= TEMP_CLEANUP_MIN_AGE_DAYS,
+                "下限日数より新しいファイルを候補にしない"
+            );
+            assert!(!candidate.file_name.contains('\\'), "フルパスを渡さない");
+            assert!(!candidate.file_name.contains('/'), "フルパスを渡さない");
+        }
+        // 直前に作った一時ファイルは候補に入らず、計画作成では消えない。
+        let probe = std::env::temp_dir().join("totonoe-cleanup-probe.tmp");
+        std::fs::write(&probe, b"probe").expect("write probe");
+        let after = plan_user_temp_cleanup(TEMP_CLEANUP_MIN_AGE_DAYS).expect("re-plan");
+        assert!(
+            !after
+                .candidates
+                .iter()
+                .any(|candidate| candidate.file_name == "totonoe-cleanup-probe.tmp"),
+            "作成直後のファイルは削除候補にならない"
+        );
+        assert!(probe.exists(), "計画作成では削除しない");
+        std::fs::remove_file(&probe).expect("clean up probe");
+    }
+}

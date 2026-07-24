@@ -13,7 +13,11 @@ mod wmi_process;
 
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
-pub use observations::{read_startup_inventory, read_system_drive_space, read_user_temp_inventory};
+pub use observations::{
+    delete_user_temp_files, plan_user_temp_cleanup, read_startup_inventory,
+    read_system_drive_space, read_user_temp_inventory, TempCleanupOutcome, TempCleanupPlan,
+    TEMP_CLEANUP_MIN_AGE_DAYS,
+};
 pub use power::{active_power_scheme, active_power_scheme_guid, set_active_power_scheme};
 pub use process::{
     process_instance_status, registered_file_identity, snapshot_process_identities,

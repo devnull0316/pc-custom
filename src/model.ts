@@ -265,6 +265,31 @@ export interface ThemeScheduleState {
   lastError: string | null;
 }
 
+export interface TempCleanupCandidate {
+  fileName: string;
+  sizeBytes: number;
+  ageDays: number;
+}
+
+export interface TempCleanupPlan {
+  minAgeDays: number;
+  candidates: readonly TempCleanupCandidate[];
+  totalBytes: number;
+  truncated: boolean;
+}
+
+export interface TempCleanupSkip {
+  fileName: string;
+  reason: string;
+}
+
+export interface TempCleanupOutcome {
+  deletedCount: number;
+  freedBytes: number;
+  skipped: readonly TempCleanupSkip[];
+  truncated: boolean;
+}
+
 export interface SetupAppDto {
   id: string;
   name: string;
