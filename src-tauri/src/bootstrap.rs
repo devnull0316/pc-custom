@@ -17,6 +17,7 @@ use crate::{
 /// fail-closed mode; no command can reach a mutation path without an engine.
 pub struct ApplicationState {
     engine: Option<Arc<TotonoeEngine>>,
+    profile_store: Option<Arc<crate::game_profile::ProfileStore>>,
     initialization_error: Option<CoreError>,
     _instance_guard: Option<crate::windows::AppInstanceGuard>,
 }
@@ -24,13 +25,15 @@ pub struct ApplicationState {
 impl ApplicationState {
     pub fn initialize() -> Self {
         match initialize_engine() {
-            Ok((engine, instance_guard)) => Self {
+            Ok((engine, instance_guard, profile_store)) => Self {
                 engine: Some(Arc::new(engine)),
+                profile_store: Some(profile_store),
                 initialization_error: None,
                 _instance_guard: Some(instance_guard),
             },
             Err(error) => Self {
                 engine: None,
+                profile_store: None,
                 initialization_error: Some(error),
                 _instance_guard: None,
             },
@@ -42,6 +45,16 @@ impl ApplicationState {
             self.initialization_error.clone().unwrap_or_else(|| {
                 CoreError::recovery_required(
                     "安全コアを初期化できないため、変更操作を停止しています。",
+                )
+            })
+        })
+    }
+
+    pub fn profile_store(&self) -> CoreResult<Arc<crate::game_profile::ProfileStore>> {
+        self.profile_store.clone().ok_or_else(|| {
+            self.initialization_error.clone().unwrap_or_else(|| {
+                CoreError::recovery_required(
+                    "安全コアを初期化できないため、プロファイル操作を停止しています。",
                 )
             })
         })
@@ -64,7 +77,13 @@ impl ApplicationState {
     }
 }
 
-fn initialize_engine() -> CoreResult<(TotonoeEngine, crate::windows::AppInstanceGuard)> {
+type EngineBootstrap = (
+    TotonoeEngine,
+    crate::windows::AppInstanceGuard,
+    Arc<crate::game_profile::ProfileStore>,
+);
+
+fn initialize_engine() -> CoreResult<EngineBootstrap> {
     let data_directory = data_directory()?;
     ensure_private_directory(&data_directory)?;
     let instance_guard =
@@ -85,7 +104,10 @@ fn initialize_engine() -> CoreResult<(TotonoeEngine, crate::windows::AppInstance
         Err(_identity_error) => None,
     };
     let engine = TotonoeEngine::new(database, identity)?;
-    Ok((engine, instance_guard))
+    let profile_store = Arc::new(crate::game_profile::ProfileStore::open(
+        data_directory.join("profiles.json"),
+    )?);
+    Ok((engine, instance_guard, profile_store))
 }
 
 fn data_directory() -> CoreResult<PathBuf> {

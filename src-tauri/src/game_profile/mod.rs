@@ -17,6 +17,9 @@ use crate::action::{ActionId, ProcessFileIdentity};
 pub mod observer;
 pub use observer::{ObservedProcess, ProcessMatcher};
 
+pub mod store;
+pub use store::{CreateProfileRequest, ProfileStore, StoredProfile, StoredProfileAction};
+
 // ---------------------------------------------------------------------------
 // 識別子
 // ---------------------------------------------------------------------------

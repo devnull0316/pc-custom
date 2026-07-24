@@ -6,6 +6,7 @@ use crate::{
     action::ActionId,
     bootstrap::ApplicationState,
     error::{CoreError, CoreResult},
+    game_profile::{CreateProfileRequest, StoredProfile},
     journal::{ReconcileResult, TimelineItem},
     presentation::{
         ActionPresentation, BootstrapStatus, CommitPreviewRequest, CommitResult,
@@ -71,4 +72,31 @@ pub fn reconcile_now(
     state: State<'_, ApplicationState>,
 ) -> CoreResult<ReconcileResult> {
     state.engine()?.reconcile_now()
+}
+
+#[tauri::command]
+pub fn profiles_list(state: State<'_, ApplicationState>) -> CoreResult<Vec<StoredProfile>> {
+    Ok(state.profile_store()?.list())
+}
+
+#[tauri::command]
+pub fn profile_create(
+    state: State<'_, ApplicationState>,
+    request: CreateProfileRequest,
+) -> CoreResult<StoredProfile> {
+    state.profile_store()?.create(request)
+}
+
+#[tauri::command]
+pub fn profile_set_enabled(
+    state: State<'_, ApplicationState>,
+    id: String,
+    enabled: bool,
+) -> CoreResult<()> {
+    state.profile_store()?.set_enabled(&id, enabled)
+}
+
+#[tauri::command]
+pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreResult<()> {
+    state.profile_store()?.delete(&id)
 }

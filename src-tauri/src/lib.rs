@@ -45,6 +45,10 @@ pub fn run() {
             commands::list_timeline,
             commands::rollback_item,
             commands::reconcile_now,
+            commands::profiles_list,
+            commands::profile_create,
+            commands::profile_set_enabled,
+            commands::profile_delete,
         ])
         .run(tauri::generate_context!())
         .expect("Totonoe runtime terminated unexpectedly");
