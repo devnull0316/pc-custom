@@ -99,6 +99,20 @@ vite v5.4.11: 44 modules transformed, built in 789ms
 - 既存の実HKCU `HideFileExt` apply→detect→rollback→detectスモークは、Windows 25H2 build 26200で型・値・有無まで正確復元済み。今回の42候補にはこの証跡を流用しない。
 - `git diff --check` はエラーなし（作業環境のLF→CRLF予告のみ）。
 
+## ネイティブアプリ実機起動の検証（CC実測 2026-07-25）
+
+`src-tauri/target/debug/totonoe.exe` を実機で起動し、以下を確認した。
+
+| 確認 | 結果 |
+| --- | --- |
+| プロセス起動・生存 | 起動し、監視下で安定生存。stderr/stdout に panic・エラー出力なし |
+| **ネイティブウィンドウの生成** | `tasklist /FI "WINDOWTITLE eq Totonoe"` が一致。`tasklist /V` の Title 列も `Totonoe` → WebView2ウィンドウが実際に生成されている |
+| 安全コアの初期化 | データディレクトリの SQLite journal（`totonoe.db`）を開き、`-shm` の更新時刻が起動時刻に一致 |
+| **常駐メモリ（実測）** | 約 **45 MB**（46,168 K）で3サンプル安定。候補A(Tauri)採用時の常駐予算として妥当で、Electron標準構成の一般的な水準より小さい |
+| 終了 | 強制終了後もプロセス残存なし、データディレクトリ整合 |
+
+未達: ウィンドウ**内部の描画のピクセル目視**（この環境ではデスクトップのスクリーンショットを取得できない）。ただしウィンドウが読み込むフロントエンドは同一ビルドであり、内容・コントラスト・フォーカス・モーションはブラウザ側で計測検証済み（`DESIGN_LANGUAGE.md` 検証記録）。
+
 ## 未実装・CC確認が必要な項目
 
 1. 42レジストリ候補ごとの第三者setter契約となる一次資料、26100/26200 clean VMでの設定UI→detect→apply→UI確認→rollback→UI確認。承認後にのみstableへ個別昇格する。
@@ -110,7 +124,7 @@ vite v5.4.11: 44 modules transformed, built in 789ms
 7. ~~一時ファイル削除~~ → **CC実装済み**（上記）。事前一覧・使用中判定・reparse再検証・rollback不能表示の契約を満たした。残課題は個別選択（現状は条件に合う全件が対象）と、削除前のプロセス使用中判定をハンドル取得で事前に行うこと。
 8. Windows 11の電源モードslider/overlay。今回実装したのは文書化されたpower scheme切替であり、同一機能とは表現しない。
 9. 既存stable registry Actionの「比較直後から書込み直前」の狭いTOCTOUと、filesystem検証後のread TOCTOU。第三者変更非上書きの再読取はあるが、kernel-level CASではない。
-10. 実GUIで59件の表示、42件の変更不能表示、観測一覧スクロール、電源Action確認画面をWindows 24H2/25H2で目視する。
+10. 実GUIでの**ピクセル目視**（59件の表示、42件の変更不能表示、観測一覧スクロール、電源Action確認画面）。ネイティブウィンドウの生成・コア初期化・常駐メモリは上記のとおり実機検証済みだが、描画の目視だけは残る。
 
 ## 禁止事項
 
