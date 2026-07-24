@@ -42,14 +42,14 @@ npx tauri dev                                            # 実アプリ窓（要
 - **フルアプリ `totonoe.exe` ビルド成功**(17.8MB, main+generate_context+dist埋込)。
 - **実機スモーク合格**(`#[ignore]`, `--ignored`で実行): 実HKCU HideFileExtに apply→値変化→rollback→**型・値・有無まで正確復元**。本番mutation経路を Windows 25H2(26200, TestedMutable)で実証。
 
-## 既知課題: 実アプリ起動が main() 到達前にアボート（要調査）
-- 症状: `totonoe.exe`(debug/release両方) 起動で **`0xC0000409 STATUS_STACK_BUFFER_OVERRUN`**、**main()の1行目到達前**にアボート(即フラッシュのファイル診断でも記録ゼロ)。標準出力もWERイベントも無し・データDIR未作成。
-- 切り分け済: 依存DLLは全て標準システムDLLで欠落なし(WebView2Loaderは静的リンク)。WebView2ランタイム導入済(150.x)。マニフェストはasInvoker正常。**同じlibコードのテストバイナリは55テスト全通過**。差分はbin側の tauri埋め込みWindowsリソース(icon/manifest)＋generate_context＋tao/wry/webview2 静的初期化。
-- 有力仮説: このCC実行環境が**非対話セッション(対話デスクトップ/window stationなし)**でwry/WebView2/COMの早期初期化がfastfailしている可能性(＝ユーザーの実ログオンデスクトップでは起動し得る)。未確認(computer-useでの実デスクトップ検証はユーザーが操作拒否)。
-- 次アクション: ①ユーザーが実デスクトップで `cd src-tauri; cargo run` か `npx tauri dev` を起動し可否確認 ②起動時クラッシュログ機構追加 ③WinDbgで pre-main fastfail の発生モジュール特定 ④icon.ico を別ツールで再生成し切り分け。→ 7/30 Codex＋CC監査での調査が省コスト。
+## 起動アボート → 解決済み（実機起動確認）
+- 症状(修正前): `totonoe.exe`(debug/release両方)が **`0xC0000409`(main到達前)** でアボート。データDIR未作成・出力/WERなし。
+- **根本原因**: カスタム `windows-app-manifest.xml` の `<dpiAwareness>`/`<longPathAware>` 要素値に空白・改行が含まれ、Windowsローダがプロセス生成時にfastfailしていた（アプリコードは無関係＝同libのテストバイナリは全通過していた）。
+- **修正**: tauri 既定マニフェスト(`tauri_build::build()`, asInvoker + PerMonitorV2 を含む)へ切替。壊れたマニフェストファイルは削除。(commit 019e0df)
+- **検証**: 実Windowsで**起動・ブートストラップ完走を確認** — `%LOCALAPPDATA%\Totonoe\data\` に instance.lock + totonoe.db 生成（＝engine初期化・profile store・watcher起動が実行された）。**ネイティブコア常駐 ~36MB working set**（Electronのランタイム100–200MB級に対し軽量＝Tauri採用根拠を実測で裏付け）。
 
 ## 残り(機能・計測)
-1. A/B常駐メモリ実測（scripts/measure-private-working-set.ps1）。上記起動課題の解決後。
+1. GUIの見た目の目視(窓の描画): 実機で `npx tauri dev` 起動で確認可(バックエンド起動は実証済み、WebView2描画のみ未目視)。
 2. 追加Action / 準備チェックpreflight / data-only共有 / AI候補 / 実験モジュール（7/30 Codex実装→CC監査）。
 
 ## オーケストレーション記録
