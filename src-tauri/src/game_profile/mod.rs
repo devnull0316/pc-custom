@@ -14,6 +14,9 @@ use uuid::Uuid;
 
 use crate::action::{ActionId, ProcessFileIdentity};
 
+pub mod observer;
+pub use observer::{ObservedProcess, ProcessMatcher};
+
 // ---------------------------------------------------------------------------
 // 識別子
 // ---------------------------------------------------------------------------
