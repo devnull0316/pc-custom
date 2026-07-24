@@ -23,6 +23,12 @@ pub use store::{CreateProfileRequest, ProfileStore, StoredProfile, StoredProfile
 pub mod runtime;
 pub use runtime::{to_game_profile, to_planned_action, ProfileRuntime};
 
+pub mod engine_sink;
+pub use engine_sink::EngineProfileSink;
+
+pub mod watcher;
+pub use watcher::ProfileWatcher;
+
 // ---------------------------------------------------------------------------
 // 識別子
 // ---------------------------------------------------------------------------

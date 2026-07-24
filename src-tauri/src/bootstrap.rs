@@ -20,22 +20,32 @@ pub struct ApplicationState {
     profile_store: Option<Arc<crate::game_profile::ProfileStore>>,
     initialization_error: Option<CoreError>,
     _instance_guard: Option<crate::windows::AppInstanceGuard>,
+    _profile_watcher: Option<crate::game_profile::ProfileWatcher>,
 }
 
 impl ApplicationState {
     pub fn initialize() -> Self {
         match initialize_engine() {
-            Ok((engine, instance_guard, profile_store)) => Self {
-                engine: Some(Arc::new(engine)),
-                profile_store: Some(profile_store),
-                initialization_error: None,
-                _instance_guard: Some(instance_guard),
-            },
+            Ok((engine, instance_guard, profile_store)) => {
+                let engine = Arc::new(engine);
+                // 有効プロファイルのゲーム起動を検知して準備を適用/復元する背景監視。
+                // 既定ではどのプロファイルも自動適用オフのため、実質待機で始まる。
+                let watcher =
+                    crate::game_profile::ProfileWatcher::spawn(engine.clone(), profile_store.clone());
+                Self {
+                    engine: Some(engine),
+                    profile_store: Some(profile_store),
+                    initialization_error: None,
+                    _instance_guard: Some(instance_guard),
+                    _profile_watcher: Some(watcher),
+                }
+            }
             Err(error) => Self {
                 engine: None,
                 profile_store: None,
                 initialization_error: Some(error),
                 _instance_guard: None,
+                _profile_watcher: None,
             },
         }
     }
