@@ -504,6 +504,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::SetupStartupInventory => ActionParameters::SetupStartupInventory {},
         ActionId::StorageFreeSpaceCheck => ActionParameters::StorageFreeSpaceCheck {},
         ActionId::StorageTempFilesCheck => ActionParameters::StorageTempFilesCheck {},
+        ActionId::AppearanceAccentColorCheck => ActionParameters::AppearanceAccentColorCheck {},
     })
 }
 
@@ -516,6 +517,7 @@ pub fn listing_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::SetupStartupInventory
             | ActionId::StorageFreeSpaceCheck
             | ActionId::StorageTempFilesCheck
+            | ActionId::AppearanceAccentColorCheck
             | ActionId::GamesReadinessCheck
     ) {
         None
@@ -591,6 +593,7 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::GamesControllerGameBar => "games",
         ActionId::DevicesAutoplay | ActionId::SetupStartupInventory => "setup",
         ActionId::StorageFreeSpaceCheck | ActionId::StorageTempFilesCheck => "storage",
+        ActionId::AppearanceAccentColorCheck => "appearance",
         ActionId::NotificationsUsbErrors
         | ActionId::NotificationsWeakCharger
         | ActionId::NotificationsToastBanners => "notifications",
@@ -706,6 +709,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::StorageTempFilesCheck => {
             "削除前にユーザー一時ファイルの規模だけ確認したい人向け"
         }
+        ActionId::AppearanceAccentColorCheck => {
+            "いまWindowsが使っている色を、変更せずに確かめたい人向け"
+        }
     }
 }
 
@@ -773,6 +779,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::SetupStartupInventory => "変更せず、固定された起動元の項目を一覧化",
         ActionId::StorageFreeSpaceCheck => "変更せず、システムドライブ容量を確認",
         ActionId::StorageTempFilesCheck => "削除せず、ユーザー一時ファイルを上限付き集計",
+        ActionId::AppearanceAccentColorCheck => "公開APIで現在の配色を読み取り（変更なし）",
     }
 }
 
@@ -821,6 +828,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         }
         ActionId::StorageTempFilesCheck => {
             "GetTempPath2Wとreparse非追跡・上限付きmetadata走査"
+        }
+        ActionId::AppearanceAccentColorCheck => {
+            "公開APIのDwmGetColorizationColorによる読み取り"
         }
         ActionId::GamesReadinessCheck => {
             "Windows公開APIと登録済み固定HKCU設定値による7項目の読み取り"
@@ -901,6 +911,7 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
                 "ゲーム準備: 確認 {known} / 不明 {unknown} / 未設定 {unconfigured}"
             )
         }
+        ObservedValue::AccentColor { hex, .. } => format!("アクセントカラー {hex}"),
         ObservedValue::NoOsChange => "OS設定の変更なし".to_owned(),
     }
 }
@@ -992,6 +1003,10 @@ fn observed_detail(value: &ObservedValue) -> String {
             temp.skipped_reparse_points, temp.unreadable_entries
         ),
         ObservedValue::GameReadiness(readiness) => game_readiness_detail(readiness),
+        ObservedValue::AccentColor { hex, opaque_blend } => format!(
+            "Windowsが現在使っている色は {hex} です。透明の混ぜ方: {}。この値は読み取るだけで変更しません。",
+            if *opaque_blend { "不透明" } else { "半透明" }
+        ),
         ObservedValue::NoOsChange => "読み取り専用Actionです。".to_owned(),
     }
 }

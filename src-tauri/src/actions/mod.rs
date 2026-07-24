@@ -28,6 +28,6 @@ pub use power_scheme_switch::{PowerSchemeSwitchAction, POWER_SCHEME_SWITCH_ACTIO
 pub use process_watch::{ProcessWatchAction, PROCESS_WATCH_ACTION};
 pub use registry_settings::*;
 pub use system_observations::{
-    SystemObservationAction, FREE_SPACE_CHECK_ACTION, STARTUP_INVENTORY_ACTION,
-    TEMP_FILES_CHECK_ACTION,
+    SystemObservationAction, ACCENT_COLOR_CHECK_ACTION, FREE_SPACE_CHECK_ACTION,
+    STARTUP_INVENTORY_ACTION, TEMP_FILES_CHECK_ACTION,
 };

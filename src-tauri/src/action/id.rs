@@ -126,10 +126,12 @@ pub enum ActionId {
     StorageFreeSpaceCheck,
     #[serde(rename = "storage.temp_files_check")]
     StorageTempFilesCheck,
+    #[serde(rename = "appearance.accent_color_check")]
+    AppearanceAccentColorCheck,
 }
 
 impl ActionId {
-    pub const ALL: [Self; 59] = [
+    pub const ALL: [Self; 60] = [
         Self::SessionPreventSleep,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
@@ -189,6 +191,7 @@ impl ActionId {
         Self::SetupStartupInventory,
         Self::StorageFreeSpaceCheck,
         Self::StorageTempFilesCheck,
+        Self::AppearanceAccentColorCheck,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -252,6 +255,7 @@ impl ActionId {
             Self::SetupStartupInventory => "setup.startup_inventory",
             Self::StorageFreeSpaceCheck => "storage.free_space_check",
             Self::StorageTempFilesCheck => "storage.temp_files_check",
+            Self::AppearanceAccentColorCheck => "appearance.accent_color_check",
         }
     }
 }
@@ -339,6 +343,7 @@ impl FromStr for ActionId {
             "setup.startup_inventory" => Ok(Self::SetupStartupInventory),
             "storage.free_space_check" => Ok(Self::StorageFreeSpaceCheck),
             "storage.temp_files_check" => Ok(Self::StorageTempFilesCheck),
+            "appearance.accent_color_check" => Ok(Self::AppearanceAccentColorCheck),
             _ => Err(ParseActionIdError),
         }
     }

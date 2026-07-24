@@ -179,6 +179,10 @@ pub enum ObservedValue {
     SystemDriveSpace(SystemDriveSpaceObservation),
     TempFiles(TempFilesObservation),
     GameReadiness(GameReadinessObservation),
+    AccentColor {
+        hex: String,
+        opaque_blend: bool,
+    },
     NoOsChange,
 }
 

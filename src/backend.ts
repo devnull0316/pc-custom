@@ -92,6 +92,7 @@ const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "setup.startup_inventory": "setup",
   "storage.free_space_check": "storage",
   "storage.temp_files_check": "storage",
+  "appearance.accent_color_check": "appearance",
   "games.readiness_check": "games",
 };
 

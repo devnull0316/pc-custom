@@ -191,6 +191,63 @@ pub static TEMP_FILES_CHECK_ACTION: SystemObservationAction = SystemObservationA
     method: "GetTempPath2W + reparse point非追跡のbounded metadata走査（読み取り専用）",
 };
 
+/// 現在のアクセントカラーを読み取るだけのAction。公開APIのみで、Windowsを変更しない。
+static ACCENT_COLOR_CHECK_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::AppearanceAccentColorCheck,
+    name: "いまのアクセントカラーを確認する",
+    description: "Windowsが現在使っている色を、公開APIで読み取るだけです。色の変更は行いません。",
+    category: "appearance",
+    tags: &["appearance", "accent", "read-only"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+        WindowsReleaseFamily::Windows11_26H1,
+    ],
+    minimumBuild: 22_631,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Observation,
+    parameter_schema: "{}",
+    resource_keys: &["dwm:colorization-color:observation"],
+    method_class: MethodClass::PublicApi,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/win32/api/dwmapi/nf-dwmapi-dwmgetcolorizationcolor",
+    ],
+    compatibility_key: "appearance.accent_color_check.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: false,
+    windows_update_impact: "低。公開APIでの読み取りのみです。",
+};
+
+fn detect_accent_color() -> WindowsResult<ObservedValue> {
+    let accent = crate::windows::system_accent_color()?;
+    Ok(ObservedValue::AccentColor {
+        hex: format!("#{:02X}{:02X}{:02X}", accent.red, accent.green, accent.blue),
+        opaque_blend: accent.opaque_blend,
+    })
+}
+
+fn expects_accent_color(value: &ObservedValue) -> bool {
+    matches!(value, ObservedValue::AccentColor { .. })
+}
+
+pub static ACCENT_COLOR_CHECK_ACTION: SystemObservationAction = SystemObservationAction {
+    metadata: &ACCENT_COLOR_CHECK_METADATA,
+    backup_source: "appearance.accent_color_check",
+    detect: detect_accent_color,
+    expected: expects_accent_color,
+    result: "いまWindowsが使っている色を表示します（変更しません）。",
+    method: "公開APIのDwmGetColorizationColor",
+};
+
+
 impl Action for SystemObservationAction {
     fn metadata(&self) -> &'static ActionMetadata {
         self.metadata
@@ -448,5 +505,26 @@ mod tests {
             ActionParameters::StorageTempFilesCheck {},
             is_temp_files,
         );
+    }
+}
+
+#[cfg(all(test, windows))]
+mod accent_color_tests {
+    use super::*;
+
+    #[test]
+    fn accent_color_reads_a_valid_hex_on_this_machine() {
+        // 実機の公開APIから読み取れること。値は環境依存なので形式だけ検証する。
+        let observed = detect_accent_color().expect("read accent color via DwmGetColorizationColor");
+        let ObservedValue::AccentColor { hex, .. } = &observed else {
+            panic!("accent color observation expected");
+        };
+        assert_eq!(hex.len(), 7, "#RRGGBB 形式");
+        assert!(hex.starts_with('#'));
+        assert!(
+            hex[1..].chars().all(|c| c.is_ascii_hexdigit()),
+            "16進数のみ: {hex}"
+        );
+        assert!(expects_accent_color(&observed));
     }
 }

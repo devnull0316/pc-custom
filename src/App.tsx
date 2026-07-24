@@ -102,6 +102,7 @@ function parametersForAction(actionId: string): Record<string, boolean | number 
   if (actionId === "setup.startup_inventory") return {};
   if (actionId === "storage.free_space_check") return {};
   if (actionId === "storage.temp_files_check") return {};
+  if (actionId === "appearance.accent_color_check") return {};
   return {};
 }
 

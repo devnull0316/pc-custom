@@ -205,6 +205,8 @@ pub enum ActionParameters {
     StorageFreeSpaceCheck {},
     #[serde(rename = "storage.temp_files_check")]
     StorageTempFilesCheck {},
+    #[serde(rename = "appearance.accent_color_check")]
+    AppearanceAccentColorCheck {},
 }
 
 impl ActionParameters {
@@ -277,6 +279,7 @@ impl ActionParameters {
             Self::SetupStartupInventory { .. } => ActionId::SetupStartupInventory,
             Self::StorageFreeSpaceCheck { .. } => ActionId::StorageFreeSpaceCheck,
             Self::StorageTempFilesCheck { .. } => ActionId::StorageTempFilesCheck,
+            Self::AppearanceAccentColorCheck { .. } => ActionId::AppearanceAccentColorCheck,
         }
     }
 }
