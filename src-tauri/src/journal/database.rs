@@ -29,7 +29,7 @@ impl JournalDatabase {
         Self::initialize(connection, false)
     }
 
-    fn initialize(mut connection: Connection, require_wal: bool) -> CoreResult<Self> {
+    fn initialize(connection: Connection, require_wal: bool) -> CoreResult<Self> {
         connection
             .busy_timeout(Duration::from_secs(5))
             .map_err(|_| CoreError::storage())?;

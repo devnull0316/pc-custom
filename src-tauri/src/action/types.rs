@@ -77,8 +77,8 @@ impl ActionErrorCode {
     }
 }
 
-#[serde(deny_unknown_fields)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActionError {
     pub code: ActionErrorCode,
     pub stage: ActionStage,

@@ -19,8 +19,6 @@ pub fn run() {
         .setup(|app| {
             #[cfg(windows)]
             {
-                use tauri::window::WindowExtWindows;
-
                 let window = app.get_webview_window("main").ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::NotFound,
@@ -28,7 +26,12 @@ pub fn run() {
                     )
                 })?;
                 let dark = matches!(window.theme(), Ok(tauri::Theme::Dark));
-                crate::windows::apply_mica_backdrop(window.hwnd()?, dark)?;
+                // tauri は内部で新しい windows クレートを使うため HWND 型が本crate(0.58)と異なる。
+                // 生ポインタを取り出して 0.58 の HWND へ包み直す（表現差を吸収するため *mut へキャスト）。
+                let raw = window.hwnd()?;
+                // `windows` はローカルモジュール(crate::windows)と衝突するため外部crateは `::windows`。
+                let hwnd = ::windows::Win32::Foundation::HWND(raw.0 as *mut core::ffi::c_void);
+                crate::windows::apply_mica_backdrop(hwnd, dark)?;
             }
             Ok(())
         })

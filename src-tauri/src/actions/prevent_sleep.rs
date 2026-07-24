@@ -312,7 +312,7 @@ mod tests {
                 return;
             }
             match sleep_lease_manager().and_then(|manager| manager.release(self.owner_id)) {
-                Ok(()) => {}
+                Ok(_) => {}
                 Err(error) => {
                     eprintln!("emergency sleep-lease cleanup failed: {error}");
                 }

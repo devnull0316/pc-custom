@@ -5,18 +5,18 @@ pub fn active_power_scheme_guid() -> WindowsResult<String> {
     use windows::{
         core::GUID,
         Win32::{
-            Foundation::HLOCAL,
-            System::{Memory::LocalFree, Power::PowerGetActiveScheme},
+            Foundation::{LocalFree, HLOCAL},
+            System::Power::PowerGetActiveScheme,
         },
     };
 
     let mut pointer: *mut GUID = std::ptr::null_mut();
     let status = unsafe { PowerGetActiveScheme(None, &mut pointer) };
-    if status != 0 || pointer.is_null() {
+    if status.0 != 0 || pointer.is_null() {
         return Err(WindowsError::new(
             WindowsErrorKind::ApiFailure,
             "PowerGetActiveScheme",
-            Some(i64::from(status)),
+            Some(i64::from(status.0)),
         ));
     }
     let guid = unsafe { *pointer };

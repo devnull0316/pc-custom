@@ -57,8 +57,9 @@ fn file_identity_from_path(path: &std::path::Path) -> WindowsResult<ProcessFileI
 pub fn registered_file_identity(path: &str) -> WindowsResult<(String, ProcessFileIdentity)> {
     use std::{os::windows::fs::MetadataExt, path::Path};
     use windows::Win32::Storage::FileSystem::{
-        GetDriveTypeW, DRIVE_FIXED, FILE_ATTRIBUTE_REPARSE_POINT,
+        GetDriveTypeW, FILE_ATTRIBUTE_REPARSE_POINT,
     };
+    use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 
     let candidate = Path::new(path);
     if !candidate.is_absolute()
@@ -234,17 +235,17 @@ fn identity_for_process(process_id: u32, corroborated_by_wmi: bool) -> WindowsRe
     use std::os::windows::fs::MetadataExt;
     use windows::Win32::{
         Foundation::FILETIME,
-        Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT,
+        Storage::FileSystem::{FILE_ATTRIBUTE_REPARSE_POINT, SYNCHRONIZE},
         System::Threading::{
-            GetProcessTimes, OpenProcess, QueryFullProcessImageNameW,
-            PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, SYNCHRONIZE,
+            GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_ACCESS_RIGHTS,
+            PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
         },
     };
 
     let process = OwnedHandle(
         unsafe {
             OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_ACCESS_RIGHTS(SYNCHRONIZE.0),
                 false,
                 process_id,
             )

@@ -1,6 +1,6 @@
 use super::contract::{
-    ElevatedRequestEnvelope, FileIdentity, PeerEvidence, PeerExpectation,
-    TypedActionParameters, TypedParameter, TypedParameterValue, ValidatedElevatedRequest, ValidatedPeer,
+    ElevatedRequestEnvelope, PeerEvidence, PeerExpectation,
+    TypedActionParameters, TypedParameterValue, ValidatedElevatedRequest, ValidatedPeer,
     IPC_PROTOCOL_VERSION, MAX_ACTION_ID_BYTES, MAX_CHOICE_BYTES, MAX_CLOCK_SKEW_MS,
     MAX_ENVELOPE_BYTES, MAX_PARAMETER_COUNT, MAX_PARAMETER_KEY_BYTES,
     MAX_PARAMETER_SCHEMA_BYTES, MAX_REQUEST_LIFETIME_MS, MAX_SID_BYTES, NONCE_BYTES,

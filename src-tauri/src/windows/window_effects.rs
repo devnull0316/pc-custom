@@ -20,7 +20,7 @@ pub fn apply_mica_backdrop(
         Foundation::BOOL,
         Graphics::Dwm::{
             DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            DWMWA_USE_IMMERSIVE_DARK_MODE, DWM_SYSTEMBACKDROP_TYPE,
         },
     };
 
@@ -46,7 +46,7 @@ pub fn apply_mica_backdrop(
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_SYSTEMBACKDROP_TYPE,
-            (&backdrop as *const _).cast(),
+            (&backdrop as *const DWM_SYSTEMBACKDROP_TYPE).cast(),
             std::mem::size_of_val(&backdrop) as u32,
         )
     }
