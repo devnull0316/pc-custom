@@ -20,6 +20,9 @@ pub use observer::{ObservedProcess, ProcessMatcher};
 pub mod store;
 pub use store::{CreateProfileRequest, ProfileStore, StoredProfile, StoredProfileAction};
 
+pub mod runtime;
+pub use runtime::{to_game_profile, to_planned_action, ProfileRuntime};
+
 // ---------------------------------------------------------------------------
 // 識別子
 // ---------------------------------------------------------------------------

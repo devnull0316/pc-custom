@@ -3,11 +3,12 @@
 ## 到達点（検証済み）
 - **設計**: docs/ に10文書 + DESIGN_LANGUAGE。CC監査 `CC_AUDIT_TASK1.md` 合格。技術構成=Tauri2+Rust（採点 A88.5/B76.5）。
 - **基盤(Task2)＋ゲームプロファイル核(Task3)**: **実Windowsで `cargo test --lib` = 48 passed / 0 failed**。
-- **ゲームプロファイル核(Task3, CC実装)**: `game_profile/` に OS/DB非依存の状態機械。
-  - `ProfileSupervisor`: 起動→適用 / 終了→「最後の所有者になったresourceだけ」逆順復元
-  - resource_key lease 共有(同一desired)＋競合停止(反対desired)、instance-key多重適用防止、AbortProfile/SkipConflicting方針
-  - `ProcessMatcher`: canonical path＋file identity両一致でのみ検知（名前追従なし・identity不明は非適用）、PID再利用対応
-  - 注入シーム `ProfileActionSink`/`ObservedProcess`。受入試験§11の核心を15テストで検証。
+- **ゲームプロファイル(Task3, CC実装 — 端から端まで)**:
+  - 核 `game_profile/`: `ProfileSupervisor`(起動→適用/終了→最後の所有者のresourceだけ逆順復元, lease共有/競合停止/多重適用防止, AbortProfile/SkipConflicting)、`ProcessMatcher`(path＋identity両一致検知, identity不明は非適用, PID再利用対応)。注入シーム`ProfileActionSink`/`ObservedProcess`。
+  - 永続化 `ProfileStore`: JSON原子的保存(安全journalと分離)、`registered_file_identity`で実行ファイル検証(ローカル固定ボリューム/非reparse/本人性)、未知Action ID拒否、既定は自動適用オフ。
+  - Tauriコマンド: profiles_list/create/set_enabled/delete、ApplicationStateへ配線。
+  - **UI**(`ProfilesView`): 作成フォーム/一覧/有効化トグル/削除、結果志向・誇張なし・a11y、ブラウザペインで描画確認・console 0。
+  - テスト: 受入試験§11の核心＋matcher＋store＝**51 passed**。
   - レジストリ正確復元（欠如↔欠如・raw無損失・第三者非上書き・kill-point再開）
   - トランザクション逆順rollback / 適用途中killのreconcile / 未知ビルドfail-closed
   - IPC攻撃spike（昇格Action全拒否・nonce replay/deadline・過大payload・PID再利用/署名不一致fail-closed）
