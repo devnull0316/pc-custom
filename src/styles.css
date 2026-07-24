@@ -436,3 +436,22 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .config-io__preview li { display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
 .config-io__preview--blocked { color: color-mix(in srgb, var(--text) 62%, transparent); }
 .config-io__message { margin: 0; font-size: .85rem; color: var(--accent); }
+
+/* --- 新しいPCをセットアップ --- */
+.setup-view { display: flex; flex-direction: column; gap: 1.25rem; }
+.setup-group { display: flex; flex-direction: column; gap: .6rem; }
+.setup-group h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.setup-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .7rem; }
+.setup-card { display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  padding: .8rem .95rem; border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); }
+.setup-card__body { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+.setup-card__body strong { font-size: .95rem; }
+.setup-card__body small { color: color-mix(in srgb, var(--text) 60%, transparent); font-size: .8rem; }
+.setup-card__result { display: inline-flex; align-items: center; gap: .3rem; font-size: .75rem; margin-top: .2rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-card__result--ok { color: var(--accent); }
+.setup-card__result--fail { color: color-mix(in srgb, var(--text) 62%, transparent); }
+.setup-card .secondary-button { flex-shrink: 0; }
+.setup-view__message { margin: 0; font-size: .85rem; color: var(--accent); }

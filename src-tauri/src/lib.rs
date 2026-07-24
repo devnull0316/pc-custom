@@ -10,6 +10,7 @@ pub mod game_profile;
 pub mod ipc;
 pub mod journal;
 pub mod presentation;
+pub mod setup;
 pub mod windows;
 
 use tauri::Manager;
@@ -53,6 +54,8 @@ pub fn run() {
             commands::config_export,
             commands::config_import_preview,
             commands::config_import_apply,
+            commands::setup_app_catalog,
+            commands::setup_app_install,
         ])
         .run(tauri::generate_context!())
         .expect("Totonoe runtime terminated unexpectedly");

@@ -11,6 +11,8 @@ import type {
   DetectionResponse,
   ImportPreviewItem,
   ImportResult,
+  InstallOutcome,
+  SetupAppDto,
   PreviewActionsRequest,
   PreviewResponse,
   ReconcileResult,
@@ -210,6 +212,14 @@ export function importPreview(json: string): Promise<readonly ImportPreviewItem[
 
 export function importApply(json: string): Promise<ImportResult> {
   return call<ImportResult>("config_import_apply", { json });
+}
+
+export function setupCatalog(): Promise<readonly SetupAppDto[]> {
+  return call<readonly SetupAppDto[]>("setup_app_catalog");
+}
+
+export function setupInstall(appId: string): Promise<InstallOutcome> {
+  return call<InstallOutcome>("setup_app_install", { appId });
 }
 
 export function publicErrorMessage(error: unknown): string {

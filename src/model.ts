@@ -1,6 +1,6 @@
 export type DataMode = "loading" | "live" | "catalog";
 
-export type ViewId = "home" | "actions" | "timeline" | "profiles";
+export type ViewId = "home" | "actions" | "timeline" | "profiles" | "setup";
 
 export type CategoryId =
   | "session"
@@ -252,6 +252,22 @@ export interface ImportSkip {
 export interface ImportResult {
   imported: readonly string[];
   skipped: readonly ImportSkip[];
+}
+
+export interface SetupAppDto {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  requiresAdmin: boolean;
+}
+
+export interface InstallOutcome {
+  appId: string;
+  appName: string;
+  succeeded: boolean;
+  exitCode: number | null;
+  summary: string;
 }
 
 export function isMutationAllowed(

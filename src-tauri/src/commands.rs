@@ -102,6 +102,16 @@ pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreRes
 }
 
 #[tauri::command]
+pub fn setup_app_catalog() -> Vec<crate::setup::SetupAppDto> {
+    crate::setup::app_catalog()
+}
+
+#[tauri::command]
+pub fn setup_app_install(app_id: String) -> CoreResult<crate::setup::InstallOutcome> {
+    crate::setup::install(&app_id)
+}
+
+#[tauri::command]
 pub fn config_export(state: State<'_, ApplicationState>) -> CoreResult<String> {
     state.profile_store()?.export_json()
 }

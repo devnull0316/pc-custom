@@ -13,6 +13,7 @@ const NAV_ITEMS: readonly { id: ViewId; label: string; icon: IconName }[] = [
   { id: "home", label: "ホーム", icon: "home" },
   { id: "actions", label: "Action", icon: "action" },
   { id: "profiles", label: "ゲームプロファイル", icon: "game" },
+  { id: "setup", label: "PCセットアップ", icon: "plus" },
   { id: "timeline", label: "タイムライン", icon: "timeline" },
 ];
 
