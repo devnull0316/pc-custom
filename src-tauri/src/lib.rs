@@ -15,8 +15,9 @@ pub mod windows;
 use tauri::Manager;
 
 pub fn run() {
+    let state = bootstrap::ApplicationState::initialize();
     tauri::Builder::default()
-        .manage(bootstrap::ApplicationState::initialize())
+        .manage(state)
         .setup(|app| {
             #[cfg(windows)]
             {

@@ -42,10 +42,15 @@ npx tauri dev                                            # 実アプリ窓（要
 - **フルアプリ `totonoe.exe` ビルド成功**(17.8MB, main+generate_context+dist埋込)。
 - **実機スモーク合格**(`#[ignore]`, `--ignored`で実行): 実HKCU HideFileExtに apply→値変化→rollback→**型・値・有無まで正確復元**。本番mutation経路を Windows 25H2(26200, TestedMutable)で実証。
 
-## 残り
-1. **インタラクティブGUI起動の目視**: このツール環境はデスクトップ/WebView2窓が無くGUI起動検証不可(exe即exit)。ユーザーが実デスクトップで `src-tauri/target/debug/totonoe.exe` か `npx tauri dev` を起動して確認。
-2. A/B常駐メモリ実測（scripts/measure-private-working-set.ps1）。
-3. 追加Action / 準備チェックpreflight / data-only共有 / AI候補 / 実験モジュール（7/30 Codex復帰後にcodex実装→CC監査 が省コスト）。
+## 既知課題: 実アプリ起動が main() 到達前にアボート（要調査）
+- 症状: `totonoe.exe`(debug/release両方) 起動で **`0xC0000409 STATUS_STACK_BUFFER_OVERRUN`**、**main()の1行目到達前**にアボート(即フラッシュのファイル診断でも記録ゼロ)。標準出力もWERイベントも無し・データDIR未作成。
+- 切り分け済: 依存DLLは全て標準システムDLLで欠落なし(WebView2Loaderは静的リンク)。WebView2ランタイム導入済(150.x)。マニフェストはasInvoker正常。**同じlibコードのテストバイナリは55テスト全通過**。差分はbin側の tauri埋め込みWindowsリソース(icon/manifest)＋generate_context＋tao/wry/webview2 静的初期化。
+- 有力仮説: このCC実行環境が**非対話セッション(対話デスクトップ/window stationなし)**でwry/WebView2/COMの早期初期化がfastfailしている可能性(＝ユーザーの実ログオンデスクトップでは起動し得る)。未確認(computer-useでの実デスクトップ検証はユーザーが操作拒否)。
+- 次アクション: ①ユーザーが実デスクトップで `cd src-tauri; cargo run` か `npx tauri dev` を起動し可否確認 ②起動時クラッシュログ機構追加 ③WinDbgで pre-main fastfail の発生モジュール特定 ④icon.ico を別ツールで再生成し切り分け。→ 7/30 Codex＋CC監査での調査が省コスト。
+
+## 残り(機能・計測)
+1. A/B常駐メモリ実測（scripts/measure-private-working-set.ps1）。上記起動課題の解決後。
+2. 追加Action / 準備チェックpreflight / data-only共有 / AI候補 / 実験モジュール（7/30 Codex実装→CC監査）。
 
 ## オーケストレーション記録
 Codex(実装) × CC(設計統括/監査/実ビルド検証) ループ。ドライバ: `../claude-codex-orchestrator/scripts/codex-worker.sh "<task>" sol <workdir>`（SANDBOX=workspace-write, EFFORT=ultra, 通信オフ=コード生成のみ）。
