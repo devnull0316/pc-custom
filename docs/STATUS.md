@@ -35,14 +35,17 @@ cd .. && npm run dev                                     # UI（preview: totonoe
 npx tauri dev                                            # 実アプリ窓（要 cargo build 成功）
 ```
 
-## 次にやること（優先順）
-残るのは**2つの薄いI/Oアダプタ＋起動配線**のみ（論理は`ProfileRuntime`まで完成・テスト済み）:
-1. 実`ProfileActionSink`(engine背面): action集合を適用しper-item復元参照を返す。engineに per-item id を返すapply経路を1つ追加(現状commit_previewはtransaction_idのみ)＋既存rollback_item流用。**実HKCUを触るため実機縦切り検証必須**。
-2. 実`ObservedProcess`供給: windows/process.rs `snapshot_process_identities`＋wmi_process をポーラ(例1〜2秒間隔+補正)で`ProfileRuntime.tick`へ。背景スレッド。
-3. `ProfileRuntime`をApplicationStateへ配線し、プロファイル有効化で起動。
-4. `cargo build` binリンク→`tauri dev`実起動→全画面の実操作。
-5. theme.color_mode を実HKCUで apply→目視→rollback の実機縦切り。A/B常駐メモリ実測。
-6. 7/30 Codex復帰後: 追加Action/準備チェックpreflight/data-only共有/AI候補/実験モジュール → CC監査。
+## 実配線 完了（Task3ライブ）
+- 実`EngineProfileSink`: 既存engine公開経路(preview→commit→list_timeline→rollback_item)だけで実適用/復元。engine無改修。per-item参照でlease共有下も正しく復元。
+- 実`ObservedProcess`供給: `snapshot_process_identities`をポーラ(3秒)で`ProfileRuntime.tick`へ。有効プロファイルが無い間はスナップショットも省く省コスト。
+- `ProfileWatcher`背景スレッド → ApplicationStateへ配線(起動時spawn/Drop join)。クラッシュは次回reconcileが引き取る。
+- **フルアプリ `totonoe.exe` ビルド成功**(17.8MB, main+generate_context+dist埋込)。
+- **実機スモーク合格**(`#[ignore]`, `--ignored`で実行): 実HKCU HideFileExtに apply→値変化→rollback→**型・値・有無まで正確復元**。本番mutation経路を Windows 25H2(26200, TestedMutable)で実証。
+
+## 残り
+1. **インタラクティブGUI起動の目視**: このツール環境はデスクトップ/WebView2窓が無くGUI起動検証不可(exe即exit)。ユーザーが実デスクトップで `src-tauri/target/debug/totonoe.exe` か `npx tauri dev` を起動して確認。
+2. A/B常駐メモリ実測（scripts/measure-private-working-set.ps1）。
+3. 追加Action / 準備チェックpreflight / data-only共有 / AI候補 / 実験モジュール（7/30 Codex復帰後にcodex実装→CC監査 が省コスト）。
 
 ## オーケストレーション記録
 Codex(実装) × CC(設計統括/監査/実ビルド検証) ループ。ドライバ: `../claude-codex-orchestrator/scripts/codex-worker.sh "<task>" sol <workdir>`（SANDBOX=workspace-write, EFFORT=ultra, 通信オフ=コード生成のみ）。
