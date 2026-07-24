@@ -282,6 +282,11 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         }
         ActionId::ExplorerShowHidden => ActionParameters::ExplorerShowHidden { show: true },
         ActionId::ExplorerClockSeconds => ActionParameters::ExplorerClockSeconds { show: true },
+        ActionId::AppearanceTransparency => {
+            ActionParameters::AppearanceTransparency { enabled: true }
+        }
+        ActionId::TaskbarTaskView => ActionParameters::TaskbarTaskView { show: true },
+        ActionId::TaskbarWidgets => ActionParameters::TaskbarWidgets { show: true },
         ActionId::ThemeColorMode => ActionParameters::ThemeColorMode {
             mode: ThemeColorMode::Dark,
         },
@@ -313,7 +318,10 @@ fn category_for(action_id: ActionId) -> &'static str {
         ActionId::ExplorerShowExtensions
         | ActionId::ExplorerShowHidden
         | ActionId::ExplorerClockSeconds => "explorer",
-        ActionId::ThemeColorMode => "appearance",
+        ActionId::ThemeColorMode
+        | ActionId::AppearanceTransparency
+        | ActionId::TaskbarTaskView
+        | ActionId::TaskbarWidgets => "appearance",
         ActionId::GamesProcessWatch => "games",
     }
 }
@@ -326,6 +334,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::ExplorerShowExtensions => "ファイルの種類を見分け、誤操作を減らしたい人向け",
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
         ActionId::ExplorerClockSeconds => "タスクバーの時計で秒まで確認したい人向け",
+        ActionId::AppearanceTransparency => "透明効果のオン・オフを切り替えたい人向け",
+        ActionId::TaskbarTaskView => "タスクビューボタンの表示を切り替えたい人向け",
+        ActionId::TaskbarWidgets => "ウィジェットボタンの表示を切り替えたい人向け",
         ActionId::ThemeColorMode => "Windowsとアプリの明暗を揃えたい人向け",
         ActionId::GamesProcessWatch => "登録したゲームの起動と終了だけを安全に検知したい人向け",
     }
@@ -338,6 +349,9 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::ExplorerShowExtensions => "拡張子を表示",
         ActionId::ExplorerShowHidden => "隠しファイルを表示",
         ActionId::ExplorerClockSeconds => "タスクバーの時計に秒を表示",
+        ActionId::AppearanceTransparency => "選択した透明効果の状態",
+        ActionId::TaskbarTaskView => "選択したタスクビューボタンの表示",
+        ActionId::TaskbarWidgets => "選択したウィジェットボタンの表示",
         ActionId::ThemeColorMode => "選択したライト／ダーク表示",
         ActionId::GamesProcessWatch => "本人性を確認できたプロセスだけ監視",
     }

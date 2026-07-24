@@ -31,6 +31,9 @@ const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "explorer.show_extensions": "explorer",
   "explorer.show_hidden": "explorer",
   "explorer.clock_seconds": "explorer",
+  "appearance.transparency": "appearance",
+  "taskbar.task_view": "appearance",
+  "taskbar.widgets": "appearance",
   "theme.color_mode": "appearance",
   "games.process_watch": "games",
 };

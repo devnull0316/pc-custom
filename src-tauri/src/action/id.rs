@@ -18,6 +18,12 @@ pub enum ActionId {
     ExplorerShowHidden,
     #[serde(rename = "explorer.clock_seconds")]
     ExplorerClockSeconds,
+    #[serde(rename = "appearance.transparency")]
+    AppearanceTransparency,
+    #[serde(rename = "taskbar.task_view")]
+    TaskbarTaskView,
+    #[serde(rename = "taskbar.widgets")]
+    TaskbarWidgets,
     #[serde(rename = "theme.color_mode")]
     ThemeColorMode,
     #[serde(rename = "games.process_watch")]
@@ -25,12 +31,15 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::SessionPreventSleep,
         Self::PowerActiveSchemeCheck,
         Self::ExplorerShowExtensions,
         Self::ExplorerShowHidden,
         Self::ExplorerClockSeconds,
+        Self::AppearanceTransparency,
+        Self::TaskbarTaskView,
+        Self::TaskbarWidgets,
         Self::ThemeColorMode,
         Self::GamesProcessWatch,
     ];
@@ -42,6 +51,9 @@ impl ActionId {
             Self::ExplorerShowExtensions => "explorer.show_extensions",
             Self::ExplorerShowHidden => "explorer.show_hidden",
             Self::ExplorerClockSeconds => "explorer.clock_seconds",
+            Self::AppearanceTransparency => "appearance.transparency",
+            Self::TaskbarTaskView => "taskbar.task_view",
+            Self::TaskbarWidgets => "taskbar.widgets",
             Self::ThemeColorMode => "theme.color_mode",
             Self::GamesProcessWatch => "games.process_watch",
         }
@@ -75,6 +87,9 @@ impl FromStr for ActionId {
             "explorer.show_extensions" => Ok(Self::ExplorerShowExtensions),
             "explorer.show_hidden" => Ok(Self::ExplorerShowHidden),
             "explorer.clock_seconds" => Ok(Self::ExplorerClockSeconds),
+            "appearance.transparency" => Ok(Self::AppearanceTransparency),
+            "taskbar.task_view" => Ok(Self::TaskbarTaskView),
+            "taskbar.widgets" => Ok(Self::TaskbarWidgets),
             "theme.color_mode" => Ok(Self::ThemeColorMode),
             "games.process_watch" => Ok(Self::GamesProcessWatch),
             _ => Err(ParseActionIdError),

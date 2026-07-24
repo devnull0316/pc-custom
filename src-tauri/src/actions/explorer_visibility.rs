@@ -27,13 +27,27 @@ const HIDDEN_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "Hidden");
 const CLOCK_SECONDS_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "ShowSecondsInSystemClock");
+const PERSONALIZE_SUBKEY: &str =
+    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+const TRANSPARENCY_TARGET: RegistryTarget =
+    RegistryTarget::current_user_64(PERSONALIZE_SUBKEY, "EnableTransparency");
+const TASK_VIEW_TARGET: RegistryTarget =
+    RegistryTarget::current_user_64(ADVANCED_SUBKEY, "ShowTaskViewButton");
+const WIDGETS_TARGET: RegistryTarget =
+    RegistryTarget::current_user_64(ADVANCED_SUBKEY, "TaskbarDa");
 
 pub struct ShowExtensionsAction;
 pub struct ShowHiddenAction;
 pub struct ClockSecondsAction;
+pub struct TransparencyAction;
+pub struct TaskViewAction;
+pub struct WidgetsAction;
 pub static SHOW_EXTENSIONS_ACTION: ShowExtensionsAction = ShowExtensionsAction;
 pub static SHOW_HIDDEN_ACTION: ShowHiddenAction = ShowHiddenAction;
 pub static CLOCK_SECONDS_ACTION: ClockSecondsAction = ClockSecondsAction;
+pub static TRANSPARENCY_ACTION: TransparencyAction = TransparencyAction;
+pub static TASK_VIEW_ACTION: TaskViewAction = TaskViewAction;
+pub static WIDGETS_ACTION: WidgetsAction = WidgetsAction;
 
 static EXTENSIONS_METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::ExplorerShowExtensions,
@@ -148,6 +162,136 @@ fn clock_seconds_desired(parameters: &ActionParameters) -> ActionResult<u32> {
 }
 
 fn clock_seconds_value_is_valid(value: u32) -> bool {
+    value <= 1
+}
+
+static TRANSPARENCY_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::AppearanceTransparency,
+    name: "透明効果を切り替える",
+    description: "スタートメニューやタスクバーの透明効果のオン・オフを、HKCUの文書化された設定で変更します。",
+    category: "appearance",
+    tags: &["appearance", "transparency", "personalize"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+    ],
+    minimumBuild: 26_100,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Persistent,
+    parameter_schema: r#"{"enabled":"boolean"}"#,
+    resource_keys: &[
+        "registry:hkcu:64:software/microsoft/windows/currentversion/themes/personalize:enabletransparency",
+    ],
+    method_class: MethodClass::DocumentedRegistry,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11",
+    ],
+    compatibility_key: "appearance.transparency.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: true,
+    windows_update_impact: "中。Windows更新後に値と反映の実機スモークを再実施します。",
+};
+
+static TASK_VIEW_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::TaskbarTaskView,
+    name: "タスクビューボタンを表示・非表示",
+    description: "タスクバーのタスクビューボタンの表示を、HKCUの文書化された設定で変更します。",
+    category: "appearance",
+    tags: &["taskbar", "taskview", "explorer"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+    ],
+    minimumBuild: 26_100,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Persistent,
+    parameter_schema: r#"{"show":"boolean"}"#,
+    resource_keys: &[
+        "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:showtaskviewbutton",
+    ],
+    method_class: MethodClass::DocumentedRegistry,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11",
+    ],
+    compatibility_key: "taskbar.task_view.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: true,
+    windows_update_impact: "中〜高。タスクバー系はWindows更新で挙動が変わり得るため、更新後に実機スモークを再実施します。",
+};
+
+static WIDGETS_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::TaskbarWidgets,
+    name: "ウィジェットボタンを表示・非表示",
+    description: "タスクバーのウィジェットボタンの表示を、HKCUの文書化された設定で変更します。",
+    category: "appearance",
+    tags: &["taskbar", "widgets", "explorer"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+    ],
+    minimumBuild: 26_100,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Caution,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Persistent,
+    parameter_schema: r#"{"show":"boolean"}"#,
+    resource_keys: &[
+        "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:taskbarda",
+    ],
+    method_class: MethodClass::DocumentedRegistry,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11",
+    ],
+    compatibility_key: "taskbar.widgets.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: true,
+    windows_update_impact: "中〜高。ウィジェット系はWindows更新でキーや挙動が変わり得るため、更新後に実機スモークを再実施します。",
+};
+
+fn transparency_desired(parameters: &ActionParameters) -> ActionResult<u32> {
+    match parameters {
+        ActionParameters::AppearanceTransparency { enabled } => Ok(u32::from(*enabled)),
+        _ => Err(wrong_parameters()),
+    }
+}
+
+fn task_view_desired(parameters: &ActionParameters) -> ActionResult<u32> {
+    match parameters {
+        ActionParameters::TaskbarTaskView { show } => Ok(u32::from(*show)),
+        _ => Err(wrong_parameters()),
+    }
+}
+
+fn widgets_desired(parameters: &ActionParameters) -> ActionResult<u32> {
+    match parameters {
+        ActionParameters::TaskbarWidgets { show } => Ok(u32::from(*show)),
+        _ => Err(wrong_parameters()),
+    }
+}
+
+fn boolean_value_is_valid(value: u32) -> bool {
     value <= 1
 }
 
@@ -537,6 +681,33 @@ impl_explorer_action!(
     "タスクバーの時計に秒を表示する状態へ変更します。"
 );
 
+impl_explorer_action!(
+    TransparencyAction,
+    TRANSPARENCY_METADATA,
+    TRANSPARENCY_TARGET,
+    transparency_desired,
+    boolean_value_is_valid,
+    "透明効果を選択した状態へ変更します。"
+);
+
+impl_explorer_action!(
+    TaskViewAction,
+    TASK_VIEW_METADATA,
+    TASK_VIEW_TARGET,
+    task_view_desired,
+    boolean_value_is_valid,
+    "タスクビューボタンの表示を選択した状態へ変更します。"
+);
+
+impl_explorer_action!(
+    WidgetsAction,
+    WIDGETS_METADATA,
+    WIDGETS_TARGET,
+    widgets_desired,
+    boolean_value_is_valid,
+    "ウィジェットボタンの表示を選択した状態へ変更します。"
+);
+
 #[cfg(all(test, windows))]
 mod tests {
     use uuid::Uuid;
@@ -676,6 +847,42 @@ mod tests {
             &ActionParameters::ExplorerClockSeconds { show: true },
             clock_seconds_desired,
             clock_seconds_value_is_valid,
+            None,
+        );
+    }
+
+    #[test]
+    fn transparency_storage_apply_detect_rollback_detect_is_isolated() {
+        round_trip(
+            &TRANSPARENCY_METADATA,
+            unique_target("EnableTransparency"),
+            &ActionParameters::AppearanceTransparency { enabled: false },
+            transparency_desired,
+            boolean_value_is_valid,
+            Some(1),
+        );
+    }
+
+    #[test]
+    fn task_view_storage_apply_detect_rollback_detect_is_isolated() {
+        round_trip(
+            &TASK_VIEW_METADATA,
+            unique_target("ShowTaskViewButton"),
+            &ActionParameters::TaskbarTaskView { show: false },
+            task_view_desired,
+            boolean_value_is_valid,
+            Some(1),
+        );
+    }
+
+    #[test]
+    fn widgets_storage_apply_detect_rollback_detect_is_isolated() {
+        round_trip(
+            &WIDGETS_METADATA,
+            unique_target("TaskbarDa"),
+            &ActionParameters::TaskbarWidgets { show: true },
+            widgets_desired,
+            boolean_value_is_valid,
             None,
         );
     }

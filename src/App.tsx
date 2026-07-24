@@ -46,6 +46,9 @@ function parametersForAction(actionId: string): Record<string, boolean | number 
   if (actionId === "explorer.show_extensions") return { show: true };
   if (actionId === "explorer.show_hidden") return { show: true };
   if (actionId === "explorer.clock_seconds") return { show: true };
+  if (actionId === "appearance.transparency") return { enabled: true };
+  if (actionId === "taskbar.task_view") return { show: true };
+  if (actionId === "taskbar.widgets") return { show: true };
   if (actionId === "theme.color_mode") return { mode: "dark" };
   return {};
 }

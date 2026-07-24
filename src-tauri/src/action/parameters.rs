@@ -41,6 +41,12 @@ pub enum ActionParameters {
     ExplorerShowHidden { show: bool },
     #[serde(rename = "explorer.clock_seconds")]
     ExplorerClockSeconds { show: bool },
+    #[serde(rename = "appearance.transparency")]
+    AppearanceTransparency { enabled: bool },
+    #[serde(rename = "taskbar.task_view")]
+    TaskbarTaskView { show: bool },
+    #[serde(rename = "taskbar.widgets")]
+    TaskbarWidgets { show: bool },
     #[serde(rename = "theme.color_mode")]
     ThemeColorMode { mode: ThemeColorMode },
     #[serde(rename = "games.process_watch")]
@@ -55,6 +61,9 @@ impl ActionParameters {
             Self::ExplorerShowExtensions { .. } => ActionId::ExplorerShowExtensions,
             Self::ExplorerShowHidden { .. } => ActionId::ExplorerShowHidden,
             Self::ExplorerClockSeconds { .. } => ActionId::ExplorerClockSeconds,
+            Self::AppearanceTransparency { .. } => ActionId::AppearanceTransparency,
+            Self::TaskbarTaskView { .. } => ActionId::TaskbarTaskView,
+            Self::TaskbarWidgets { .. } => ActionId::TaskbarWidgets,
             Self::ThemeColorMode { .. } => ActionId::ThemeColorMode,
             Self::GamesProcessWatch { .. } => ActionId::GamesProcessWatch,
         }
