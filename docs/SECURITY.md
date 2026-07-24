@@ -63,6 +63,8 @@ Rust、Tauri、署名の採用だけで安全とはみなさない。coreはOS A
 
 ## 5. 権限分離
 
+既定editionはper-user・`asInvoker`・helperなし・admin Actionなしである。Task 2ではelevated transportを起動せず、production allowlistをdeny-allに固定する。
+
 ### standard core
 
 - `asInvoker`で実行する。
@@ -71,6 +73,8 @@ Rust、Tauri、署名の採用だけで安全とはみなさない。coreはOS A
 - admin不要ActionでUACを出さない。
 
 ### elevated helper
+
+以下は次Taskで実装するmachine-scope opt-in helperの拘束条件である。Task 2はwire contract、strict validator、peer evidence validator、attack spike unit testまでを完成させ、helper executable自体は作らない。
 
 - 必要なmachine-scope Actionの時だけ正式なWindows UAC経路で起動する。
 - protected install directoryの固定絶対pathだけを使用し、起動前後に署名とfile identityを確認する。
@@ -83,21 +87,21 @@ Rust、Tauri、署名の採用だけで安全とはみなさない。coreはOS A
 
 ## 6. IPC 認証・完全性
 
-helper serverのlocal named pipeを採用し、次をすべて満たす。
+次Taskのhelper serverはlocal named pipeを採用し、次をすべて満たす。Task 2のper-user版はpipeを作らず、同じschemaをdeny-all validatorで検査するだけである。
 
-- 128bit以上のrandom endpoint、one-time nonce、単一client、短いdeadline
-- first-instance、remote client拒否、既定ACL禁止
-- 要求元user/logon SIDと必要最小principalだけのDACL、mandatory integrity label。exact SDDL/MILは同一admin/別adminのTask 2試験で確定
+- 128bit以上のrandom endpoint、256bit one-time nonce、request ID、transaction ID、単一client、30秒以下のdeadline
+- first-instance、remote client拒否、message mode、最大instance数1、既定ACL禁止
+- 要求元logon SIDへread/write、Administrators/SYSTEMへfull controlを与える明示DACLと、Medium mandatory label + no-write-up。exact ACL/MILは同一admin/別adminの次Task実機試験で確定
 - coreはserver PID、helperはclient PIDを公開APIで取得
 - PID、creation time、session、token user/elevation、canonical image path、file identity、publisher/signature hashの相互照合
-- fixed protocol version、max payload、max collection length、unknown field拒否
-- request UUIDとmessage counterによる重複/replay拒否
+- fixed protocol version、envelope 64KiB以下、parameter 32件以下、strict serde unknown/duplicate field拒否
+- request UUIDと単調なmessage counter、issued/deadline、nonce定数時間比較による重複/replay拒否
 - helperがAction IDからresource/handlerを再解決し、wire上のpathやcommandを実行しない
 - stageごとのtyped resultと限定error code。秘密・nonceを返さない
 
 Windowsのnamed pipe既定descriptorはEveryone/anonymousにもreadを許すため利用しない。[Named Pipe Security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)。
 
-Task 2ではUACの別管理者資格情報、Fast User Switching、RDP/multi-session、PID再利用、endpoint squatting、client先着DoS、WDAC/AppLockerで侵入試験する。
+Task 2ではoversize、unknown/duplicate field、不正nonce、replay、counter逆転、期限切れ、Action ID/version/schema不一致、PID creation time再利用、session/token/image/file identity/publisher不一致をunit attack spikeでfail-closed確認する。UACの別管理者資格情報、Fast User Switching、RDP/multi-session、endpoint squatting、client先着DoS、WDAC/AppLockerを含む実transport侵入試験はhelper実体と同じ次Taskで行う。
 
 helperのprotected journalはAction/version/resource、lossless backup、applied fingerprint、codec、integrity metadataを所有する。core側user DBにはopaque backup IDと非機密summaryだけを置き、rollbackもopaque IDで要求する。record欠落・改ざん・version不一致ではuser DBの値を代用せず`RECOVERY_REQUIRED`にする。
 
@@ -203,6 +207,7 @@ Defender/Firewall無効化、Windows Update完全停止、pagefile無効化、HP
 - rendererから未許可command、追加field、巨大payload、stale previewを送る
 - 偽core/helper、同名exe、署名違い、PID再利用、別sessionからIPC接続
 - IPC replay、順序逆転、先着接続、timeout、途中切断
+- 64KiB超過、unknown/duplicate field、nonce/action version/transaction mismatch、期限切れ、deny-all allowlist迂回
 - path traversal、UNC、reparse、hardlink、file差替え、argument edge case
 - profile parserのduplicate key、deep nesting、zip/size bomb相当、未知Action
 - updater/helper差替え、署名不一致、version downgrade、active transaction中update

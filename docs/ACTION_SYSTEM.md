@@ -45,9 +45,15 @@ BRIEF 必須フィールドをそのまま持つ。
 | `persistent` | theme、power user mode | 保存した変更前状態へ戻す |
 | `session` | sleep prevention、app launch | lease解除、Totonoeが作ったsession資源だけを通常終了 |
 | `observation` | startup inventory、readiness check | OS変更なし。観測sessionを閉じるno-op |
-| `guided` | 公開setterがない時計秒表示、DND案内 | 設定画面を開くだけ。自動適用済みとは記録しない |
+| `guided` | 公開setterがないDND、build揮発性が高いtaskbar項目の案内 | 設定画面を開くだけ。自動適用済みとは記録しない |
 
 guided/observation も統一UIのため Action interface を実装するが、変更transactionの成功数や「復元可能な変更」に数えない。
+
+### CC Task 1監査で確定したstable HKCU setter
+
+`Explorer\Advanced`の`HideFileExt`、`Hidden`、`ShowSecondsInSystemClock`と、`Themes\Personalize`の`AppsUseLightTheme`、`SystemUsesLightTheme`、`EnableTransparency`は、CC監査P3により**安全・自動化可（対象buildの実機smokeと非破壊broadcastを条件）**へ格上げする。Task 2では`explorer.show_extensions`、`explorer.show_hidden`、`theme.color_mode`を前倒し実装する。clock secondsとtransparencyもguided固定ではなく同じstable分類だが、今回の縦切り対象外である。
+
+taskbar検索、Widgets、Game Mode、DND/Focusはこの格上げに含めない。buildごとの意味が揮発しやすいもの、cleanな公開setterが無いものはdetect/guidedを維持する。
 
 ## 3. 処理インターフェース
 
@@ -173,6 +179,8 @@ backupには必ず次を保存する。
 lossless backup は `RegQueryValueExW` 相当のraw readを使う。文字列として正規化して保存しない。最小権限はread時とwrite時で分け、全権限を要求しない。
 
 rollback時は現在値が実際の適用値fingerprintと一致するか先に確認する。一致しなければユーザー、GPO、他アプリによる外部変更なので自動上書きしない。元valueが無かった場合はvalueを削除し、元keyまで無かった場合でも、Totonoeが作成し現在空であると証明できる時だけkeyを削除する。
+
+Explorer/theme系setterの書込後は、まず`SHChangeNotify(SHCNE_ASSOCCHANGED, ...)`や対象別のbounded `WM_SETTINGCHANGE`で非破壊に反映を通知する。今回のstable ActionはExplorerを強制終了・再起動しない。通知で即時反映できなくてもregistry検証成功とUI反映を混同せず、「設定済み・再読込待ち」として結果を残す。
 
 一次資料: [Registry functions](https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-functions)、[RegQueryValueExW](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regqueryvalueexw)、[Registry access rights](https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-key-security-and-access-rights)。
 

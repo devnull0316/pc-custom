@@ -1,0 +1,223 @@
+import { useState } from "react";
+
+import { CATEGORIES } from "../catalog";
+import type {
+  ActionPresentation,
+  BootstrapStatus,
+  CategoryId,
+  DataMode,
+} from "../model";
+import { isMutationAllowed, riskLabel } from "../model";
+import { Icon } from "./Icon";
+
+interface ActionBrowserProps {
+  actions: readonly ActionPresentation[];
+  selectedCategory: CategoryId;
+  selectedActionId: string | null;
+  dataMode: DataMode;
+  bootstrap: BootstrapStatus | null;
+  detectionPendingId: string | null;
+  previewPendingId: string | null;
+  draftActionIds: ReadonlySet<string>;
+  onSelectCategory: (category: CategoryId) => void;
+  onSelectAction: (actionId: string) => void;
+  onDetect: (actionId: string) => void;
+  onPreview: (action: ActionPresentation) => void;
+  onAddToDraft: (action: ActionPresentation) => void;
+}
+
+function updateImpactLabel(impact: ActionPresentation["updateImpact"]): string {
+  if (impact === "low") return "Update影響: 低い";
+  if (impact === "review") return "Update後: 再検証";
+  return "Update影響: 高い";
+}
+
+function availabilityLabel(action: ActionPresentation): string {
+  if (action.availability === "mutable") return "適用可能";
+  if (action.availability === "read_only") return "読み取り専用";
+  if (action.availability === "detect_only") return "検出のみ";
+  return "この環境では停止";
+}
+
+function blockReason(
+  dataMode: DataMode,
+  bootstrap: BootstrapStatus | null,
+  action: ActionPresentation,
+): string {
+  if (dataMode !== "live") return "安全コアへ接続できていないため変更できません。";
+  if (bootstrap?.mode === "recovery_required") return "未復元項目があるため、新しい変更より復旧を優先します。";
+  if (bootstrap?.mode !== "ready") return bootstrap?.message ?? "Windows互換性を確認できません。";
+  if (action.availability !== "mutable") return "このActionはOSを変更せず、状態だけを確認します。";
+  return "";
+}
+
+export function ActionBrowser({
+  actions,
+  selectedCategory,
+  selectedActionId,
+  dataMode,
+  bootstrap,
+  detectionPendingId,
+  previewPendingId,
+  draftActionIds,
+  onSelectCategory,
+  onSelectAction,
+  onDetect,
+  onPreview,
+  onAddToDraft,
+}: ActionBrowserProps) {
+  const categoryActions = actions.filter((action) => action.category === selectedCategory);
+  const selected = actions.find((action) => action.id === selectedActionId) ?? categoryActions[0];
+
+  return (
+    <div className="view action-view">
+      <header className="view-heading">
+        <div>
+          <p className="eyebrow">登録済みAction</p>
+          <h1>何が変わるかを先に確認</h1>
+          <p>左で結果を選び、右で現在の状態、適用後、戻し方まで確認できます。</p>
+        </div>
+      </header>
+      <div className="action-workspace">
+        <div className="action-master">
+          <div aria-label="Actionカテゴリ" className="category-list">
+            {CATEGORIES.map((category) => {
+              const count = actions.filter((action) => action.category === category.id).length;
+              return (
+                <button
+                  aria-pressed={selectedCategory === category.id}
+                  className="category-button"
+                  key={category.id}
+                  onClick={() => onSelectCategory(category.id)}
+                  type="button"
+                >
+                  <span><Icon name={category.icon} /></span>
+                  <span className="category-button__copy">
+                    <strong>{category.label}</strong>
+                    <small>{category.description}</small>
+                  </span>
+                  <span className="category-count">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div aria-label="Action一覧" className="action-list">
+            <p className="list-label">このカテゴリ</p>
+            {categoryActions.length === 0 ? (
+              <div className="inline-empty"><Icon name="action" /><p><strong>Actionはありません</strong>このカテゴリには登録済みActionがありません。</p></div>
+            ) : categoryActions.map((action) => (
+              <button
+                aria-current={selected?.id === action.id ? "true" : undefined}
+                className="action-row"
+                key={action.id}
+                onClick={() => onSelectAction(action.id)}
+                type="button"
+              >
+                <span className={`risk-rail risk-rail--${action.riskLevel}`} />
+                <span className="action-row__copy">
+                  <strong>{action.name}</strong>
+                  <small>{action.currentState?.label ?? "現在の状態を確認"}</small>
+                </span>
+                <span className="action-row__kind">{availabilityLabel(action)}</span>
+                <Icon name="chevron" size={16} />
+              </button>
+            ))}
+          </div>
+        </div>
+        <section aria-live="polite" className="action-detail" key={selected?.id ?? "empty"}>
+          {selected === undefined ? (
+            <div className="detail-empty"><Icon name="action" size={26} /><h2>Actionを選んでください</h2><p>現在の状態と適用後の差分をここに表示します。</p></div>
+          ) : (
+            <ActionDetail
+              action={selected}
+              bootstrap={bootstrap}
+              dataMode={dataMode}
+              detecting={detectionPendingId === selected.id}
+              inDraft={draftActionIds.has(selected.id)}
+              previewing={previewPendingId === selected.id}
+              onAddToDraft={() => onAddToDraft(selected)}
+              onDetect={() => onDetect(selected.id)}
+              onPreview={() => onPreview(selected)}
+            />
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+interface ActionDetailProps {
+  action: ActionPresentation;
+  bootstrap: BootstrapStatus | null;
+  dataMode: DataMode;
+  detecting: boolean;
+  inDraft: boolean;
+  previewing: boolean;
+  onAddToDraft: () => void;
+  onDetect: () => void;
+  onPreview: () => void;
+}
+
+function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, previewing, onAddToDraft, onDetect, onPreview }: ActionDetailProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const current = action.currentState;
+  const readOnly = action.availability === "read_only" || action.availability === "detect_only";
+  const needsBinding = action.id === "games.process_watch";
+  const mutationAllowed = isMutationAllowed(dataMode, bootstrap, action);
+  const reason = blockReason(dataMode, bootstrap, action);
+
+  return (
+    <div className="action-detail__inner">
+      <div className="detail-title-row">
+        <div>
+          <div className="detail-kicker"><span className={`risk-label risk-label--${action.riskLevel}`}>{riskLabel(action.riskLevel)}</span><code>{action.id}</code></div>
+          <h2>{action.name}</h2>
+          <p>{action.description}</p>
+        </div>
+        <span className="detail-version">v{action.actionVersion}</span>
+      </div>
+      <p className="audience-line"><Icon name="info" size={16} />{action.audience}</p>
+      <div aria-label="現在と適用後の状態" className="state-comparison">
+        <div className={`state-panel state-panel--${current?.kind ?? "unknown"}`}>
+          <span>現在</span>
+          {detecting ? <strong className="state-loading"><Icon className="spin" name="spinner" />確認中</strong> : <strong>{current?.label ?? "未検出"}</strong>}
+          <small>{current?.detail ?? (dataMode === "catalog" ? "安全コア未接続のため現在値は表示していません。" : "状態を確認してください。")}</small>
+        </div>
+        <span className="state-arrow"><Icon name="arrow" /></span>
+        <div className="state-panel state-panel--desired">
+          <span>{action.kind === "observation" ? "確認する内容" : "適用後"}</span>
+          <strong>{action.desiredState}</strong>
+          <small>{action.methodSummary}</small>
+        </div>
+      </div>
+      <div aria-label="Action属性" className="attribute-chips">
+        <span className={`attribute-chip attribute-chip--${action.riskLevel}`}><Icon name={action.riskLevel === "safe" ? "check" : "warning"} size={14} />危険度: {riskLabel(action.riskLevel)}</span>
+        <span className="attribute-chip">管理者: {action.requiresAdmin ? "必要" : "不要"}</span>
+        <span className="attribute-chip">再起動: {action.requiresRestart ? "OS再起動" : action.requiresExplorerRestart ? "Explorer再読込" : "不要"}</span>
+        <span className="attribute-chip">{updateImpactLabel(action.updateImpact)}</span>
+        <span className="attribute-chip">復元: {action.reversible ? "元に戻せる" : "変更なし"}</span>
+      </div>
+      {detailsOpen ? (
+        <div className="detail-disclosure" id={`details-${action.id}`}>
+          <div><span className="detail-disclosure__label">変更方法</span><p>{action.methodSummary}</p></div>
+          <ul>{action.detailPoints.map((point) => <li key={point}>{point}</li>)}</ul>
+          <dl className="compatibility-grid">
+            <div><dt>最小build</dt><dd>{action.minimumBuild}</dd></div>
+            <div><dt>試験上限</dt><dd>{action.maximumTestedBuild ?? "実機確認待ち"}</dd></div>
+            <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : "観測"}</dd></div>
+          </dl>
+        </div>
+      ) : null}
+      {reason.length > 0 && !readOnly ? <p className="blocked-reason"><Icon name="info" size={15} />{reason}</p> : null}
+      <div className="detail-actions">
+        <button aria-controls={`details-${action.id}`} aria-expanded={detailsOpen} className="secondary-button" onClick={() => setDetailsOpen((open) => !open)} type="button"><Icon name="info" />{detailsOpen ? "詳細を閉じる" : "詳細を見る"}</button>
+        {readOnly ? (
+          <button className="primary-button" disabled={dataMode !== "live" || detecting || needsBinding} onClick={onDetect} type="button">{detecting ? <Icon className="spin" name="spinner" /> : <Icon name={needsBinding ? "info" : "search"} />}{needsBinding ? "実行ファイル登録後に確認" : "状態を確認"}</button>
+        ) : (
+          <button className="primary-button" disabled={!mutationAllowed || previewing} onClick={onPreview} type="button">{previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}{previewing ? "プレビュー作成中" : "適用プレビュー"}</button>
+        )}
+        <button className="secondary-button" disabled={inDraft} onClick={onAddToDraft} type="button"><Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : "プロファイルへ追加"}</button>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Totonoe",
+  "version": "0.1.0",
+  "identifier": "jp.totonoe.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Totonoe",
+        "width": 1220,
+        "height": 780,
+        "minWidth": 940,
+        "minHeight": 640,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "visible": true
+      }
+    ],
+    "security": {
+      "capabilities": ["main-window"],
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Utility",
+    "shortDescription": "Windows を安全に整え、変更を元へ戻す",
+    "longDescription": "Totonoe は、利用場面に合わせた Windows の設定変更を事前確認・記録し、項目ごとに元へ戻せる per-user アプリです。",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": false
+      }
+    }
+  }
+}
+

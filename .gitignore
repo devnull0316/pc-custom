@@ -1,0 +1,13 @@
+/dist/
+/node_modules/
+/src-tauri/target/
+/.vite/
+*.log
+*.pdb
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.DS_Store
+Thumbs.db

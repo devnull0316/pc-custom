@@ -43,7 +43,9 @@
 
 ## 4. Task 2 — 安全基盤
 
-Task 2はUI catalogを大量実装するフェーズではない。1つのread-only Actionと1つの可逆なstandard-user Actionを通して、architectureの最小縦切りを証明する。
+Task 2は「安全基盤＋縦切り」として実装へ移行した。CC承認と今回指示により、read-only/session sliceに加えてstable HKCU setterと主要UIを前倒しし、architectureを実コードで証明する。
+
+今回の確定scopeは、Tauri 2/React/TypeScript/Rust基盤、Action registry、OsIdentity、SQLite journal/recovery/timeline、registry lossless backup、`session.prevent_sleep`、`power.active_scheme_check`、`explorer.show_extensions`、`explorer.show_hidden`、`theme.color_mode`、`games.process_watch`、ホーム/Action/preview/timeline/Ctrl+K UI、deny-all昇格IPC契約、A/B計測fixtureである。helper実体とadmin Actionは含めない。
 
 ### 2.0 CC判断とADR
 
@@ -56,7 +58,7 @@ Task 2はUI catalogを大量実装するフェーズではない。1つのread-o
 - ADR-005: elevated helperのinstall scope、protected backup store、IPC threat model
 - ADR-006: dynamic pluginを禁止し、data-only profileとfirst-party moduleを分ける方針
 
-A/B最終gateでは、同じwatcher workload、同じUI idle/closed条件、同じWindows機でworking set/private bytes/CPU/wakeups/start timeを計測する。Aが要件を満たさない、またはB native watcher構成が明確な総合優位を示す場合だけ再採点する。
+A/B最終gateでは、同じwatcher workload、同じUI idle/closed条件、同じWindows機でworking set/private bytes/CPU/wakeups/start timeを計測する。`scripts/measure-private-working-set.ps1`と`scripts/MEMORY_AB.md`に従い各状態10 run以上を記録し、Aが要件を満たさない、またはB native watcher構成が明確な総合優位を示す場合だけ再採点する。
 
 ### 2.1 repository/build基盤
 
@@ -86,11 +88,11 @@ A/B最終gateでは、同じwatcher workload、同じUI idle/closed条件、同�
 - original/applied/third/unknown reconciliation
 - timeline query、1件rollback、指定時点rollback、失敗item再試行
 
-最初のmutable slice候補は`session.prevent_sleep`である。public API、session-only、persistent registryを使わず、process crashでOSがrequestを解放するため、transaction UIとleaseを低riskで検証できる。persistent registry Actionはこの基盤が合格した後に追加する。
+最初のmutable sliceは`session.prevent_sleep`とする。これが合格した後、CC監査P3でstableと確定した`explorer.show_extensions`、`explorer.show_hidden`、`theme.color_mode`を同じTask 2内で追加し、lossless registry backup、非破壊broadcast、正確な欠如状態復元まで通す。
 
 ### 2.4 standard/elevated境界spike
 
-MVP初期Actionの多くはstandard userで成立させ、helperなしでも製品縦切りを完成させる。そのうえで将来のadmin Action用に次をisolated spikeする。
+既定editionはper-user・helperなし・admin Actionなし・`asInvoker`で製品縦切りを完成させる。Task 2では将来のadmin Action用にprotocol型、deny-all allowlist、strict decoder、peer evidence validator、攻撃spike試験だけを実装し、次Taskのhelper実体が満たす条件を次のとおり固定する。
 
 - machine-scope protected installとhelper署名/identity
 - one-shot named pipeのDACL/MIL、local-only、endpoint squatting対策
@@ -100,7 +102,7 @@ MVP初期Actionの多くはstandard userで成立させ、helperなしでも製�
 - core/helper crash、helper commit後core ID保存前の孤児record、user DB消失、request replay、PID reuse、path replacement、DB tamper
 - named pipeが境界を満たさない場合だけ`ncalrpc`比較
 
-spike合格前はadmin Actionを出荷catalogへ登録しない。helperへraw registry path、command、local backup valueを送らない。
+今回のcontract試験が合格してもhelperが存在することにはならない。helper実体は次Taskでmachine-scope opt-inとして実装・実機攻撃試験し、合格前はadmin Actionを出荷catalogへ登録しない。helperへraw registry path、command、local backup valueを送らない。
 
 ### 2.5 Task 2 test
 
@@ -108,7 +110,7 @@ spike合格前はadmin Actionを出荷catalogへ登録しない。helperへraw r
 - DB commit直前/直後、OS apply直前/直後、verify中、rollback中のprocess kill
 - disk full、DB locked/corrupt、access denied、API timeout、external third state
 - unknown build、unsupported edition、policy-managed、feature missing
-- property-based parameter検証、fuzz IPC decoder、malformed profile拒否
+- property-based parameter検証、64KiB上限・unknown/duplicate field・nonce/replay/counter/deadline・peer identity不一致を含むIPC attack spike、malformed profile拒否
 - resident coreを24時間動作させ、handle/memory/wakeup leakを計測
 
 ### Task 2完了条件
@@ -117,7 +119,7 @@ spike合格前はadmin Actionを出荷catalogへ登録しない。helperへraw r
 2. 再起動後に未完了transactionを検出して安全にreconcileできる。
 3. unknown buildでmutationがfail closedする。
 4. UIを閉じてWebViewを破棄した常駐値が予算内で、A/B判断が計測で確定する。
-5. elevated spikeの結論が文書化される。未合格ならadmin ActionなしでTask 3へ進める。
+5. deny-all IPC契約と攻撃spike結果が文書化される。helper実体は次Taskへ引き継ぎ、admin ActionなしでTask 3へ進められる。
 
 ## 5. Task 3 — ゲームプロファイル
 
@@ -151,13 +153,10 @@ spike合格前はadmin Actionを出荷catalogへ登録しない。helperへraw r
 
 ## 6. Task 4 — Stable MVP Action catalog
 
-Task 2/3の基盤へ、`MVP_SCOPE.md`の14 Actionをriskと公開契約の順に追加する。14件すべてを自動変更可能にすることは完了条件ではない。read-only/guidedを含む初期catalogとして、evidenceのあるmodeだけを公開する。
+Task 2/3の基盤へ、`MVP_SCOPE.md`の残りのActionをriskと公開契約の順に追加する。`session.prevent_sleep`、`games.process_watch`、`power.active_scheme_check`、`explorer.show_extensions`、`explorer.show_hidden`、`theme.color_mode`はTask 2へ前倒し済みとして扱う。14件すべてを自動変更可能にすることは完了条件ではない。
 
 ### Wave 1: 公開API・read-only中心
 
-- `session.prevent_sleep`
-- `games.process_watch`
-- `power.active_scheme_check`
 - `startup.inventory`
 - `games.readiness_check`
 - `apps.launch_set`（端末上のopaque app ID、MVPは引数なし、known host/launcher拒否、共有/AIからpath指定不可、既定では終了させない）
@@ -168,15 +167,12 @@ Task 2/3の基盤へ、`MVP_SCOPE.md`の14 Actionをriskと公開契約の順に
 
 ### Wave 3: registry状態資料を使う条件付きAction
 
-- `explorer.show_extensions`
-- `explorer.show_hidden`
 - `taskbar.widgets_visibility`
 - `taskbar.clock_seconds`
-- `theme.color_mode`
 - `theme.transparency`
 - `gaming.game_mode`
 
-Wave 3はMicrosoft資料が状態sourceを示しても、安定したthird-party write契約を意味しない。Actionごとに24H2/25H2/26H1、policy、contrast theme、Explorer反映、外部変更、rollbackを検証し、合格しないものはguided/detect-onlyのままにする。時計秒表示とGame Modeは初期既定で自動無効とする。
+clock secondsとtransparencyはCC監査P3でstable HKCU setterへ格上げ済みだが、対象buildの実機smokeと非破壊broadcastを出荷条件にする。WidgetsとGame Modeは格上げ対象外であり、build別のwrite契約が確定しない限りguided/detect-onlyを維持する。
 
 ### Task 4完了条件
 

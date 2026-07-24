@@ -1,0 +1,307 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import {
+  commitPreview,
+  detectAction,
+  loadCoreSnapshot,
+  previewActions,
+  publicErrorCode,
+  publicErrorMessage,
+  reconcileNow,
+  rollbackItem,
+} from "./backend";
+import { STATIC_ACTIONS } from "./catalog";
+import { ActionBrowser } from "./components/ActionBrowser";
+import { CommandPalette, type PaletteCommand } from "./components/CommandPalette";
+import { Dialog } from "./components/Dialog";
+import { HomeView } from "./components/HomeView";
+import { Icon } from "./components/Icon";
+import { Sidebar } from "./components/Sidebar";
+import { TimelineView } from "./components/TimelineView";
+import type {
+  ActionPresentation,
+  BootstrapStatus,
+  CategoryId,
+  DataMode,
+  PreviewResponse,
+  ProfileDraftItem,
+  TimelineItem,
+  ViewId,
+} from "./model";
+
+interface UiError {
+  message: string;
+  code: string;
+}
+
+function parametersForAction(actionId: string): Record<string, boolean | number | string> {
+  if (actionId === "session.prevent_sleep") return { keepDisplayOn: false };
+  if (actionId === "explorer.show_extensions") return { show: true };
+  if (actionId === "explorer.show_hidden") return { show: true };
+  if (actionId === "theme.color_mode") return { mode: "dark" };
+  return {};
+}
+
+export function App() {
+  const [view, setView] = useState<ViewId>("home");
+  const [dataMode, setDataMode] = useState<DataMode>("loading");
+  const [bootstrap, setBootstrap] = useState<BootstrapStatus | null>(null);
+  const [actions, setActions] = useState<readonly ActionPresentation[]>(STATIC_ACTIONS);
+  const [timeline, setTimeline] = useState<readonly TimelineItem[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<CategoryId>("session");
+  const [selectedActionId, setSelectedActionId] = useState<string | null>(STATIC_ACTIONS[0]?.id ?? null);
+  const [detectionPendingId, setDetectionPendingId] = useState<string | null>(null);
+  const [previewPendingId, setPreviewPendingId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [previewConfirmed, setPreviewConfirmed] = useState(false);
+  const [commitPending, setCommitPending] = useState(false);
+  const [rollbackTarget, setRollbackTarget] = useState<TimelineItem | null>(null);
+  const [rollbackPendingId, setRollbackPendingId] = useState<string | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [profileDraft, setProfileDraft] = useState<readonly ProfileDraftItem[]>([]);
+  const [uiError, setUiError] = useState<UiError | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const initialLoadStarted = useRef(false);
+
+  const refreshSnapshot = useCallback(async (showLoading: boolean) => {
+    if (showLoading) setDataMode("loading");
+    try {
+      const snapshot = await loadCoreSnapshot();
+      setBootstrap(snapshot.bootstrap);
+      setActions(snapshot.actions);
+      setTimeline(snapshot.timeline);
+      setDataMode("live");
+    } catch (error: unknown) {
+      setActions(STATIC_ACTIONS);
+      setTimeline([]);
+      setBootstrap({
+        mode: "read_only",
+        osLabel: "安全コア未接続",
+        build: null,
+        message: "静的カタログのみ表示しています。OSへの変更操作は停止しています。",
+        recoveryCount: 0,
+      });
+      setDataMode("catalog");
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (initialLoadStarted.current) return;
+    initialLoadStarted.current = true;
+    void refreshSnapshot(true);
+  }, [refreshSnapshot]);
+
+  useEffect(() => {
+    function handleShortcut(event: globalThis.KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase("en-US") === "k") {
+        event.preventDefault();
+        setCommandOpen(true);
+      }
+    }
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  const handleDetect = useCallback(async (actionId: string) => {
+    if (dataMode !== "live") return;
+    if (actionId === "games.process_watch") return;
+    setDetectionPendingId(actionId);
+    setUiError(null);
+    try {
+      const response = await detectAction(actionId);
+      setActions((current) => current.map((action) => action.id === response.actionId ? { ...action, currentState: response.state } : action));
+    } catch (error: unknown) {
+      const message = publicErrorMessage(error);
+      setActions((current) => current.map((action) => action.id === actionId ? { ...action, currentState: { kind: "error", label: "確認できません", detail: message } } : action));
+      setUiError({ message, code: publicErrorCode(error) });
+    } finally {
+      setDetectionPendingId((current) => current === actionId ? null : current);
+    }
+  }, [dataMode]);
+
+  const openAction = useCallback((action: ActionPresentation) => {
+    setSelectedCategory(action.category);
+    setSelectedActionId(action.id);
+    setView("actions");
+    void handleDetect(action.id);
+  }, [handleDetect]);
+
+  const openCategory = useCallback((category: CategoryId) => {
+    const first = actions.find((action) => action.category === category);
+    setSelectedCategory(category);
+    setSelectedActionId(first?.id ?? null);
+    setView("actions");
+    if (first !== undefined) void handleDetect(first.id);
+  }, [actions, handleDetect]);
+
+  const navigate = useCallback((target: ViewId) => {
+    setView(target);
+    if (target === "actions" && selectedActionId !== null) void handleDetect(selectedActionId);
+  }, [handleDetect, selectedActionId]);
+
+  const paletteCommands = useMemo<readonly PaletteCommand[]>(() => {
+    const navigation: PaletteCommand[] = [
+      { id: "nav-home", label: "ホームを開く", description: "結果タイルへ移動", icon: "home", execute: () => setView("home") },
+      { id: "nav-actions", label: "Actionを探す", description: "カテゴリと詳細を表示", icon: "action", execute: () => navigate("actions") },
+      { id: "nav-timeline", label: "変更を元へ戻す", description: "タイムラインへ移動", icon: "timeline", execute: () => setView("timeline") },
+    ];
+    const actionCommands: PaletteCommand[] = actions.map((action): PaletteCommand => ({
+      id: `action-${action.id}`,
+      label: action.name,
+      description: action.description,
+      icon: action.category === "games" ? "game" : action.category === "appearance" ? "appearance" : action.category === "explorer" ? "explorer" : action.category === "power" ? "power" : "focus",
+      execute: () => openAction(action),
+    }));
+    return navigation.concat(actionCommands);
+  }, [actions, navigate, openAction]);
+
+  async function requestPreview(action: ActionPresentation) {
+    if (dataMode !== "live") return;
+    setPreviewPendingId(action.id);
+    setUiError(null);
+    try {
+      const result = await previewActions({ actions: [{ actionId: action.id, parameters: parametersForAction(action.id) }] });
+      setPreview(result);
+      setPreviewConfirmed(false);
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setPreviewPendingId(null);
+    }
+  }
+
+  async function confirmPreview() {
+    if (preview === null || !previewConfirmed) return;
+    setCommitPending(true);
+    setUiError(null);
+    try {
+      const result = await commitPreview({ previewToken: preview.previewToken });
+      if (result.status === "succeeded") {
+        setNotice(result.message);
+      } else {
+        setUiError({ message: result.message, code: result.status.toLocaleUpperCase("en-US") });
+      }
+      setPreview(null);
+      setPreviewConfirmed(false);
+      await refreshSnapshot(false);
+      setView("timeline");
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setCommitPending(false);
+    }
+  }
+
+  async function confirmRollback() {
+    if (rollbackTarget === null) return;
+    const itemId = rollbackTarget.itemId;
+    setRollbackPendingId(itemId);
+    setUiError(null);
+    try {
+      const result = await rollbackItem({ itemId });
+      if (result.status === "recovery_required") {
+        setUiError({ message: result.message, code: "RECOVERY_REQUIRED" });
+      } else {
+        setNotice(result.message);
+      }
+      setRollbackTarget(null);
+      await refreshSnapshot(false);
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setRollbackPendingId(null);
+    }
+  }
+
+  async function runReconcile() {
+    if (dataMode !== "live") return;
+    setRecoveryBusy(true);
+    setUiError(null);
+    try {
+      const result = await reconcileNow();
+      if (result.status === "recovery_required") {
+        setUiError({ message: result.message, code: "RECOVERY_REQUIRED" });
+      } else {
+        setNotice(result.message);
+      }
+      await refreshSnapshot(false);
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
+
+  function addToDraft(action: ActionPresentation) {
+    setProfileDraft((current) => current.some((item) => item.actionId === action.id) ? current : [...current, { actionId: action.id, title: action.name }]);
+    setNotice("プロファイル下書きへ追加しました。保存や自動適用はまだ行っていません。");
+  }
+
+  const draftIds = useMemo(() => new Set(profileDraft.map((item) => item.actionId)), [profileDraft]);
+
+  return (
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">本文へ移動</a>
+      <Sidebar activeView={view} dataMode={dataMode} onNavigate={navigate} onOpenDraft={() => setDraftOpen(true)} profileCount={profileDraft.length} />
+      <div className="app-surface">
+        <header className="topbar">
+          <span className="topbar-context">標準ユーザー</span>
+          <button aria-label="コマンドパレットを開く" className="command-trigger" onClick={() => setCommandOpen(true)} type="button"><Icon name="search" /><span>結果を検索</span><kbd>Ctrl K</kbd></button>
+        </header>
+        {uiError === null ? null : (
+          <div className="error-banner" role="alert"><Icon name="warning" /><div><strong>{dataMode === "catalog" ? "閲覧モードで開いています" : "処理を完了できませんでした"}</strong><span>{uiError.message}</span><code>{uiError.code}</code></div><button aria-label="エラーを閉じる" onClick={() => setUiError(null)} type="button"><Icon name="close" /></button></div>
+        )}
+        <main aria-busy={dataMode === "loading"} id="main-content">
+          {view === "home" ? (
+            <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
+          ) : view === "actions" ? (
+            <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
+          ) : (
+            <TimelineView bootstrap={bootstrap} dataMode={dataMode} items={timeline} onOpenActions={() => navigate("actions")} onRequestRollback={setRollbackTarget} onRetryRecovery={() => void runReconcile()} recoveryBusy={recoveryBusy} rollbackPendingId={rollbackPendingId} />
+          )}
+        </main>
+      </div>
+
+      {commandOpen ? <CommandPalette commands={paletteCommands} onClose={() => setCommandOpen(false)} /> : null}
+      {preview === null ? null : (
+        <Dialog
+          description="現在値を再確認した結果です。内容が変わっていた場合、確認済みpreviewはcommit時に拒否されます。"
+          footer={<><button className="secondary-button" disabled={commitPending} onClick={() => setPreview(null)} type="button">キャンセル</button><button className="primary-button" disabled={!previewConfirmed || commitPending} onClick={() => void confirmPreview()} type="button">{commitPending ? <Icon className="spin" name="spinner" /> : <Icon name="check" />}確認して適用</button></>}
+          onClose={() => { if (!commitPending) setPreview(null); }}
+          title="適用プレビュー"
+          width="wide"
+        >
+          <div className="preview-list">
+            {preview.changes.map((change) => <article className="preview-change" key={change.actionId}><header><span className={`risk-label risk-label--${change.riskLevel}`}>{change.riskLevel === "safe" ? "安全" : change.riskLevel === "caution" ? "注意" : "実験的"}</span><h3>{change.title}</h3></header><div><span><small>現在</small><strong>{change.before}</strong></span><Icon name="arrow" /><span><small>適用後</small><strong>{change.after}</strong></span></div><p>{change.method}</p><small>対象: {change.resourceLabel} ／ {change.reversible ? "元に戻せます" : "変更はありません"}</small></article>)}
+          </div>
+          {preview.warnings.length === 0 ? null : <div className="preview-warnings"><strong><Icon name="warning" />確認事項</strong><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
+          <label className="confirmation-check"><input checked={previewConfirmed} onChange={(event) => setPreviewConfirmed(event.target.checked)} type="checkbox" /><span>変更前の状態が保存され、失敗時は逆順で復元されることを確認しました。</span></label>
+        </Dialog>
+      )}
+      {rollbackTarget === null ? null : (
+        <Dialog
+          description="現在の状態がTotonoeの適用値と一致する場合だけ、保存済みの変更前状態へ戻します。"
+          footer={<><button className="secondary-button" disabled={rollbackPendingId !== null} onClick={() => setRollbackTarget(null)} type="button">キャンセル</button><button className="danger-button" disabled={rollbackPendingId !== null} onClick={() => void confirmRollback()} type="button">{rollbackPendingId !== null ? <Icon className="spin" name="spinner" /> : <Icon name="undo" />}この変更だけ戻す</button></>}
+          onClose={() => { if (rollbackPendingId === null) setRollbackTarget(null); }}
+          title="変更を元へ戻しますか"
+        >
+          <div className="rollback-summary"><strong>{rollbackTarget.title}</strong><div><span><small>現在</small>{rollbackTarget.after}</span><Icon name="arrow" /><span><small>復元後</small>{rollbackTarget.before}</span></div><p>外部変更を検出した場合は上書きせず、復旧が必要な項目として停止します。</p></div>
+        </Dialog>
+      )}
+      {draftOpen ? (
+        <Dialog
+          description="この下書きは現在の画面内だけに保持されます。OS変更や自動適用は行いません。"
+          footer={<button className="primary-button" onClick={() => setDraftOpen(false)} type="button">閉じる</button>}
+          onClose={() => setDraftOpen(false)}
+          title="プロファイル下書き"
+        >
+          {profileDraft.length === 0 ? <div className="dialog-empty"><Icon name="plus" /><strong>Actionはまだありません</strong><span>Action詳細から「プロファイルへ追加」を選んでください。</span></div> : <ul className="draft-list">{profileDraft.map((item) => <li key={item.actionId}><span><strong>{item.title}</strong><code>{item.actionId}</code></span><button aria-label={`${item.title}を下書きから削除`} onClick={() => setProfileDraft((current) => current.filter((candidate) => candidate.actionId !== item.actionId))} type="button"><Icon name="close" /></button></li>)}</ul>}
+        </Dialog>
+      ) : null}
+      {notice === null ? null : <div aria-live="polite" className="notice-toast"><Icon name="check" /><span>{notice}</span><button aria-label="通知を閉じる" onClick={() => setNotice(null)} type="button"><Icon name="close" size={15} /></button></div>}
+    </div>
+  );
+}

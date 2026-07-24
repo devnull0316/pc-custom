@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "application-commands"
+description = "Allows the main window to call Totonoe typed catalog, preview, transaction, recovery, and timeline commands."
+commands.allow = [
+  "get_bootstrap_status",
+  "list_actions",
+  "detect_action",
+  "preview_actions",
+  "commit_preview",
+  "list_timeline",
+  "rollback_item",
+  "reconcile_now"
+]
+
