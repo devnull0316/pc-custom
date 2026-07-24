@@ -16,6 +16,8 @@ pub enum ActionId {
     ExplorerShowExtensions,
     #[serde(rename = "explorer.show_hidden")]
     ExplorerShowHidden,
+    #[serde(rename = "explorer.clock_seconds")]
+    ExplorerClockSeconds,
     #[serde(rename = "theme.color_mode")]
     ThemeColorMode,
     #[serde(rename = "games.process_watch")]
@@ -23,11 +25,12 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::SessionPreventSleep,
         Self::PowerActiveSchemeCheck,
         Self::ExplorerShowExtensions,
         Self::ExplorerShowHidden,
+        Self::ExplorerClockSeconds,
         Self::ThemeColorMode,
         Self::GamesProcessWatch,
     ];
@@ -38,6 +41,7 @@ impl ActionId {
             Self::PowerActiveSchemeCheck => "power.active_scheme_check",
             Self::ExplorerShowExtensions => "explorer.show_extensions",
             Self::ExplorerShowHidden => "explorer.show_hidden",
+            Self::ExplorerClockSeconds => "explorer.clock_seconds",
             Self::ThemeColorMode => "theme.color_mode",
             Self::GamesProcessWatch => "games.process_watch",
         }
@@ -70,6 +74,7 @@ impl FromStr for ActionId {
             "power.active_scheme_check" => Ok(Self::PowerActiveSchemeCheck),
             "explorer.show_extensions" => Ok(Self::ExplorerShowExtensions),
             "explorer.show_hidden" => Ok(Self::ExplorerShowHidden),
+            "explorer.clock_seconds" => Ok(Self::ExplorerClockSeconds),
             "theme.color_mode" => Ok(Self::ThemeColorMode),
             "games.process_watch" => Ok(Self::GamesProcessWatch),
             _ => Err(ParseActionIdError),

@@ -25,11 +25,15 @@ const EXTENSIONS_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "HideFileExt");
 const HIDDEN_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "Hidden");
+const CLOCK_SECONDS_TARGET: RegistryTarget =
+    RegistryTarget::current_user_64(ADVANCED_SUBKEY, "ShowSecondsInSystemClock");
 
 pub struct ShowExtensionsAction;
 pub struct ShowHiddenAction;
+pub struct ClockSecondsAction;
 pub static SHOW_EXTENSIONS_ACTION: ShowExtensionsAction = ShowExtensionsAction;
 pub static SHOW_HIDDEN_ACTION: ShowHiddenAction = ShowHiddenAction;
+pub static CLOCK_SECONDS_ACTION: ClockSecondsAction = ClockSecondsAction;
 
 static EXTENSIONS_METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::ExplorerShowExtensions,
@@ -100,6 +104,52 @@ static HIDDEN_METADATA: ActionMetadata = ActionMetadata {
     auto_apply_eligible: true,
     windows_update_impact: "中。Windows更新後に値と非破壊通知の実機スモークを再実施します。",
 };
+
+static CLOCK_SECONDS_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::ExplorerClockSeconds,
+    name: "タスクバーの時計に秒を表示する",
+    description: "HKCUの文書化されたExplorer設定を変更し、Explorerを終了せず通知します。",
+    category: "explorer",
+    tags: &["taskbar", "clock", "explorer"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+    ],
+    minimumBuild: 26_100,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Persistent,
+    parameter_schema: r#"{"show":"boolean"}"#,
+    resource_keys: &[
+        "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:showsecondsinsystemclock",
+    ],
+    method_class: MethodClass::DocumentedRegistry,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11",
+    ],
+    compatibility_key: "explorer.clock_seconds.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: true,
+    windows_update_impact: "中。Windows更新後に値と非破壊通知の実機スモークを再実施します。",
+};
+
+fn clock_seconds_desired(parameters: &ActionParameters) -> ActionResult<u32> {
+    match parameters {
+        ActionParameters::ExplorerClockSeconds { show } => Ok(u32::from(*show)),
+        _ => Err(wrong_parameters()),
+    }
+}
+
+fn clock_seconds_value_is_valid(value: u32) -> bool {
+    value <= 1
+}
 
 fn extensions_desired(parameters: &ActionParameters) -> ActionResult<u32> {
     match parameters {
@@ -478,6 +528,15 @@ impl_explorer_action!(
     "通常の隠しファイル表示を選択した状態へ変更します。"
 );
 
+impl_explorer_action!(
+    ClockSecondsAction,
+    CLOCK_SECONDS_METADATA,
+    CLOCK_SECONDS_TARGET,
+    clock_seconds_desired,
+    clock_seconds_value_is_valid,
+    "タスクバーの時計に秒を表示する状態へ変更します。"
+);
+
 #[cfg(all(test, windows))]
 mod tests {
     use uuid::Uuid;
@@ -606,6 +665,18 @@ mod tests {
             hidden_desired,
             hidden_value_is_valid,
             Some(2),
+        );
+    }
+
+    #[test]
+    fn clock_seconds_storage_apply_detect_rollback_detect_is_isolated() {
+        round_trip(
+            &CLOCK_SECONDS_METADATA,
+            unique_target("ShowSecondsInSystemClock"),
+            &ActionParameters::ExplorerClockSeconds { show: true },
+            clock_seconds_desired,
+            clock_seconds_value_is_valid,
+            None,
         );
     }
 }

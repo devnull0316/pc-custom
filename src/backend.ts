@@ -30,6 +30,7 @@ const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "power.active_scheme_check": "power",
   "explorer.show_extensions": "explorer",
   "explorer.show_hidden": "explorer",
+  "explorer.clock_seconds": "explorer",
   "theme.color_mode": "appearance",
   "games.process_watch": "games",
 };

@@ -281,6 +281,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
             ActionParameters::ExplorerShowExtensions { show: true }
         }
         ActionId::ExplorerShowHidden => ActionParameters::ExplorerShowHidden { show: true },
+        ActionId::ExplorerClockSeconds => ActionParameters::ExplorerClockSeconds { show: true },
         ActionId::ThemeColorMode => ActionParameters::ThemeColorMode {
             mode: ThemeColorMode::Dark,
         },
@@ -309,7 +310,9 @@ fn category_for(action_id: ActionId) -> &'static str {
     match action_id {
         ActionId::SessionPreventSleep => "session",
         ActionId::PowerActiveSchemeCheck => "power",
-        ActionId::ExplorerShowExtensions | ActionId::ExplorerShowHidden => "explorer",
+        ActionId::ExplorerShowExtensions
+        | ActionId::ExplorerShowHidden
+        | ActionId::ExplorerClockSeconds => "explorer",
         ActionId::ThemeColorMode => "appearance",
         ActionId::GamesProcessWatch => "games",
     }
@@ -322,6 +325,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::PowerActiveSchemeCheck => "現在の電源構成を変更せず確認したい人向け",
         ActionId::ExplorerShowExtensions => "ファイルの種類を見分け、誤操作を減らしたい人向け",
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
+        ActionId::ExplorerClockSeconds => "タスクバーの時計で秒まで確認したい人向け",
         ActionId::ThemeColorMode => "Windowsとアプリの明暗を揃えたい人向け",
         ActionId::GamesProcessWatch => "登録したゲームの起動と終了だけを安全に検知したい人向け",
     }
@@ -333,6 +337,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::PowerActiveSchemeCheck => "変更せず、現在の電源設定を確認",
         ActionId::ExplorerShowExtensions => "拡張子を表示",
         ActionId::ExplorerShowHidden => "隠しファイルを表示",
+        ActionId::ExplorerClockSeconds => "タスクバーの時計に秒を表示",
         ActionId::ThemeColorMode => "選択したライト／ダーク表示",
         ActionId::GamesProcessWatch => "本人性を確認できたプロセスだけ監視",
     }

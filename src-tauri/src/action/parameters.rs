@@ -39,6 +39,8 @@ pub enum ActionParameters {
     ExplorerShowExtensions { show: bool },
     #[serde(rename = "explorer.show_hidden")]
     ExplorerShowHidden { show: bool },
+    #[serde(rename = "explorer.clock_seconds")]
+    ExplorerClockSeconds { show: bool },
     #[serde(rename = "theme.color_mode")]
     ThemeColorMode { mode: ThemeColorMode },
     #[serde(rename = "games.process_watch")]
@@ -52,6 +54,7 @@ impl ActionParameters {
             Self::PowerActiveSchemeCheck { .. } => ActionId::PowerActiveSchemeCheck,
             Self::ExplorerShowExtensions { .. } => ActionId::ExplorerShowExtensions,
             Self::ExplorerShowHidden { .. } => ActionId::ExplorerShowHidden,
+            Self::ExplorerClockSeconds { .. } => ActionId::ExplorerClockSeconds,
             Self::ThemeColorMode { .. } => ActionId::ThemeColorMode,
             Self::GamesProcessWatch { .. } => ActionId::GamesProcessWatch,
         }
