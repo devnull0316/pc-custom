@@ -9,6 +9,8 @@ import type {
   CoreErrorShape,
   CreateProfileRequest,
   DetectionResponse,
+  ImportPreviewItem,
+  ImportResult,
   PreviewActionsRequest,
   PreviewResponse,
   ReconcileResult,
@@ -196,6 +198,18 @@ export function setProfileEnabled(id: string, enabled: boolean): Promise<void> {
 
 export function deleteProfile(id: string): Promise<void> {
   return call<void>("profile_delete", { id });
+}
+
+export function exportConfig(): Promise<string> {
+  return call<string>("config_export");
+}
+
+export function importPreview(json: string): Promise<readonly ImportPreviewItem[]> {
+  return call<readonly ImportPreviewItem[]>("config_import_preview", { json });
+}
+
+export function importApply(json: string): Promise<ImportResult> {
+  return call<ImportResult>("config_import_apply", { json });
 }
 
 export function publicErrorMessage(error: unknown): string {

@@ -18,7 +18,10 @@ pub mod observer;
 pub use observer::{ObservedProcess, ProcessMatcher};
 
 pub mod store;
-pub use store::{CreateProfileRequest, ProfileStore, StoredProfile, StoredProfileAction};
+pub use store::{
+    CreateProfileRequest, ImportPreviewItem, ImportResult, ImportSkip, ProfileStore,
+    StoredProfile, StoredProfileAction,
+};
 
 pub mod runtime;
 pub use runtime::{to_game_profile, to_planned_action, ProfileRuntime};

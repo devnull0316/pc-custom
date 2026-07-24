@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 
+import { exportConfig, importApply, importPreview, publicErrorMessage } from "../backend";
 import type {
   ActionPresentation,
   CreateProfileRequest,
   DataMode,
+  ImportPreviewItem,
   StoredProfile,
 } from "../model";
 import { Icon } from "./Icon";
@@ -17,6 +19,7 @@ interface ProfilesViewProps {
   onSetEnabled: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onOpenActions: () => void;
+  onChanged?: () => void;
 }
 
 export function ProfilesView({
@@ -28,10 +31,60 @@ export function ProfilesView({
   onSetEnabled,
   onDelete,
   onOpenActions,
+  onChanged,
 }: ProfilesViewProps) {
   const [name, setName] = useState("");
   const [exePath, setExePath] = useState("");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [exportedJson, setExportedJson] = useState<string | null>(null);
+  const [importText, setImportText] = useState("");
+  const [previewItems, setPreviewItems] = useState<readonly ImportPreviewItem[] | null>(null);
+  const [ioBusy, setIoBusy] = useState(false);
+  const [ioMessage, setIoMessage] = useState<string | null>(null);
+
+  async function doExport() {
+    setIoBusy(true);
+    setIoMessage(null);
+    try {
+      setExportedJson(await exportConfig());
+    } catch (error: unknown) {
+      setIoMessage(publicErrorMessage(error));
+    } finally {
+      setIoBusy(false);
+    }
+  }
+
+  async function doPreview() {
+    setIoBusy(true);
+    setIoMessage(null);
+    try {
+      setPreviewItems(await importPreview(importText));
+    } catch (error: unknown) {
+      setPreviewItems(null);
+      setIoMessage(publicErrorMessage(error));
+    } finally {
+      setIoBusy(false);
+    }
+  }
+
+  async function doApply() {
+    setIoBusy(true);
+    setIoMessage(null);
+    try {
+      const result = await importApply(importText);
+      setIoMessage(
+        `取り込み ${result.imported.length}件` +
+          (result.skipped.length > 0 ? ` / スキップ ${result.skipped.length}件` : ""),
+      );
+      setPreviewItems(null);
+      setImportText("");
+      onChanged?.();
+    } catch (error: unknown) {
+      setIoMessage(publicErrorMessage(error));
+    } finally {
+      setIoBusy(false);
+    }
+  }
 
   const live = dataMode === "live";
   // core metadataが明示的に許可したActionだけを自動適用候補へ出す。
@@ -206,6 +259,68 @@ export function ProfilesView({
             </ul>
           )}
         </div>
+      </div>
+
+      <div className="config-io">
+        <h2>設定のバックアップ・移行</h2>
+        <p className="muted small">
+          登録したプロファイル定義だけをJSONとして書き出し・取り込みます。任意コードやスクリプトは含みません。
+          別PCへ移すときは、その端末で実行ファイルを再確認してから取り込みます。
+        </p>
+        <div className="config-io__row">
+          <button className="secondary-button" disabled={!live || ioBusy} onClick={() => void doExport()} type="button">
+            <Icon name="arrow" />エクスポート
+          </button>
+          {exportedJson === null ? null : (
+            <textarea
+              aria-label="エクスポートしたバックアップJSON"
+              className="config-io__text"
+              readOnly
+              rows={4}
+              value={exportedJson}
+            />
+          )}
+        </div>
+        <div className="config-io__row">
+          <textarea
+            aria-label="取り込むバックアップJSON"
+            className="config-io__text"
+            disabled={!live || ioBusy}
+            onChange={(event) => setImportText(event.target.value)}
+            placeholder="ここにバックアップJSONを貼り付けて『内容を確認』"
+            rows={4}
+            value={importText}
+          />
+          <div className="config-io__actions">
+            <button
+              className="secondary-button"
+              disabled={!live || ioBusy || importText.trim().length === 0}
+              onClick={() => void doPreview()}
+              type="button"
+            >
+              内容を確認
+            </button>
+            <button
+              className="primary-button"
+              disabled={!live || ioBusy || previewItems === null}
+              onClick={() => void doApply()}
+              type="button"
+            >
+              {ioBusy ? <Icon className="spin" name="spinner" /> : <Icon name="check" />}取り込む
+            </button>
+          </div>
+        </div>
+        {previewItems === null ? null : (
+          <ul className="config-io__preview">
+            {previewItems.map((item) => (
+              <li key={`${item.name}-${item.executablePath}`} className={item.resolvable ? "" : "config-io__preview--blocked"}>
+                <Icon name={item.resolvable ? "check" : "warning"} size={15} />
+                <span><strong>{item.name}</strong> — {item.note}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {ioMessage === null ? null : <p className="config-io__message" role="status">{ioMessage}</p>}
       </div>
     </section>
   );

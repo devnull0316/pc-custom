@@ -68,6 +68,31 @@ pub struct CreateProfileRequest {
     pub actions: Vec<StoredProfileAction>,
 }
 
+/// インポート前プレビュー: この機で実行ファイルが解決できるか等を提示する。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewItem {
+    pub name: String,
+    pub executable_path: String,
+    pub action_count: usize,
+    pub resolvable: bool,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSkip {
+    pub name: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub imported: Vec<String>,
+    pub skipped: Vec<ImportSkip>,
+}
+
 #[derive(Debug)]
 pub struct ProfileStore {
     path: PathBuf,
@@ -191,6 +216,77 @@ impl ProfileStore {
         Self::persist(&self.path, &next)?;
         *guard = next;
         Ok(())
+    }
+
+    /// 現在のプロファイル定義を data-only の JSON バックアップとして書き出す。
+    /// 任意コード・スクリプト・レジファイルは含まない(StoredProfile のデータのみ)。
+    pub fn export_json(&self) -> CoreResult<String> {
+        let file = ProfilesFile {
+            version: PROFILES_FILE_VERSION,
+            profiles: self.profiles.lock().clone(),
+        };
+        serde_json::to_string_pretty(&file).map_err(|_| CoreError::storage())
+    }
+
+    fn parse_import(json: &str) -> CoreResult<Vec<StoredProfile>> {
+        let parsed: ProfilesFile = serde_json::from_str(json).map_err(|_| {
+            CoreError::invalid_request("バックアップJSONを読めません。形式を確認してください。")
+        })?;
+        if parsed.version != PROFILES_FILE_VERSION {
+            return Err(CoreError::invalid_request(
+                "バックアップの版が対応外です。",
+            ));
+        }
+        if parsed.profiles.len() > MAX_PROFILES {
+            return Err(CoreError::invalid_request(
+                "バックアップのプロファイル数が多すぎます。",
+            ));
+        }
+        Ok(parsed.profiles)
+    }
+
+    /// インポート適用前に「この機で何が起きるか」を提示する(BRIEF: 実際に行う変更を一覧表示)。
+    pub fn import_preview(&self, json: &str) -> CoreResult<Vec<ImportPreviewItem>> {
+        let profiles = Self::parse_import(json)?;
+        let mut items = Vec::with_capacity(profiles.len());
+        for profile in profiles {
+            // この機で実行ファイルが解決できるか(cross-PCは identity が変わる)。read-only。
+            let (resolvable, note) = match resolve_binding(&profile.executable_path) {
+                Ok(_) => (true, format!("{}件の準備を取り込みます", profile.actions.len())),
+                Err(error) => (false, error.user_message),
+            };
+            items.push(ImportPreviewItem {
+                name: profile.name,
+                executable_path: profile.executable_path,
+                action_count: profile.actions.len(),
+                resolvable,
+                note,
+            });
+        }
+        Ok(items)
+    }
+
+    /// バックアップから取り込む。各プロファイルはこの機で実行ファイルを再検証してから追加する。
+    /// 解決できないものはスキップし理由を返す(黙って壊さない)。
+    pub fn import_apply(&self, json: &str) -> CoreResult<ImportResult> {
+        let profiles = Self::parse_import(json)?;
+        let mut imported = Vec::new();
+        let mut skipped = Vec::new();
+        for profile in profiles {
+            match self.create(CreateProfileRequest {
+                name: profile.name.clone(),
+                executable_path: profile.executable_path.clone(),
+                conflict_policy: Some(profile.conflict_policy.clone()),
+                actions: profile.actions.clone(),
+            }) {
+                Ok(created) => imported.push(created.name),
+                Err(error) => skipped.push(ImportSkip {
+                    name: profile.name,
+                    reason: error.user_message,
+                }),
+            }
+        }
+        Ok(ImportResult { imported, skipped })
     }
 
     pub fn delete(&self, id: &str) -> CoreResult<()> {
@@ -548,6 +644,50 @@ mod tests {
             actions: vec![],
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn export_then_import_revalidates_and_round_trips() {
+        let (store, _dir) = temp_store();
+        store
+            .create(CreateProfileRequest {
+                name: "ゲームA".to_owned(),
+                executable_path: notepad(),
+                conflict_policy: None,
+                actions: vec![],
+            })
+            .expect("create source profile");
+        let json = store.export_json().expect("export");
+        assert!(json.contains("ゲームA"));
+
+        // 別ストアへインポート → この機で再検証されて取り込まれる。
+        let (other, _dir2) = temp_store();
+        let preview = other.import_preview(&json).expect("preview");
+        assert_eq!(preview.len(), 1);
+        assert!(preview[0].resolvable, "存在するexeは解決可能");
+        let result = other.import_apply(&json).expect("apply");
+        assert_eq!(result.imported.len(), 1);
+        assert!(result.skipped.is_empty());
+        assert_eq!(other.list().len(), 1);
+        // 取り込み後も既定は自動適用オフ。
+        assert!(!other.list()[0].automation_enabled);
+    }
+
+    #[test]
+    fn import_skips_profiles_whose_executable_is_missing_here() {
+        // 別PC由来で、この機に実行ファイルが無いプロファイルはスキップ理由つきで返す。
+        let json = format!(
+            r#"{{"version":{PROFILES_FILE_VERSION},"profiles":[{{"id":"00000000-0000-0000-0000-000000000001","name":"どこにもないゲーム","executablePath":"C:\\nope\\ghost.exe","volumeSerialNumber":1,"fileIdHex":"{}","conflictPolicy":"abort_profile","automationEnabled":true,"actions":[]}}]}}"#,
+            "0".repeat(32)
+        );
+        let (store, _dir) = temp_store();
+        let preview = store.import_preview(&json).expect("preview");
+        assert_eq!(preview.len(), 1);
+        assert!(!preview[0].resolvable);
+        let result = store.import_apply(&json).expect("apply");
+        assert!(result.imported.is_empty());
+        assert_eq!(result.skipped.len(), 1);
+        assert!(store.list().is_empty());
     }
 
     #[test]

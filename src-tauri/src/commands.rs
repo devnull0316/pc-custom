@@ -100,3 +100,24 @@ pub fn profile_set_enabled(
 pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreResult<()> {
     state.profile_store()?.delete(&id)
 }
+
+#[tauri::command]
+pub fn config_export(state: State<'_, ApplicationState>) -> CoreResult<String> {
+    state.profile_store()?.export_json()
+}
+
+#[tauri::command]
+pub fn config_import_preview(
+    state: State<'_, ApplicationState>,
+    json: String,
+) -> CoreResult<Vec<crate::game_profile::ImportPreviewItem>> {
+    state.profile_store()?.import_preview(&json)
+}
+
+#[tauri::command]
+pub fn config_import_apply(
+    state: State<'_, ApplicationState>,
+    json: String,
+) -> CoreResult<crate::game_profile::ImportResult> {
+    state.profile_store()?.import_apply(&json)
+}

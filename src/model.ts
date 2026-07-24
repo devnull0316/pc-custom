@@ -236,6 +236,24 @@ export interface CreateProfileRequest {
   actions: readonly StoredProfileAction[];
 }
 
+export interface ImportPreviewItem {
+  name: string;
+  executablePath: string;
+  actionCount: number;
+  resolvable: boolean;
+  note: string;
+}
+
+export interface ImportSkip {
+  name: string;
+  reason: string;
+}
+
+export interface ImportResult {
+  imported: readonly string[];
+  skipped: readonly ImportSkip[];
+}
+
 export function isMutationAllowed(
   mode: DataMode,
   bootstrap: BootstrapStatus | null,

@@ -418,3 +418,21 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   color: color-mix(in srgb, var(--text) 62%, transparent); }
 .profile-card__controls { display: flex; align-items: center; gap: .5rem; }
 .profile-card__controls .secondary-button { flex: 1; }
+
+/* --- 設定バックアップ・移行 --- */
+.config-io { margin-top: 1.5rem; padding: 1.15rem; border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  display: flex; flex-direction: column; gap: .8rem; }
+.config-io h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.config-io__row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-start; }
+.config-io__text { flex: 1; min-width: 260px; font: inherit; font-size: .82rem; color: var(--text);
+  padding: .55rem .7rem; border-radius: 8px; resize: vertical;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
+.config-io__text:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.config-io__actions { display: flex; flex-direction: column; gap: .4rem; }
+.config-io__preview { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+.config-io__preview li { display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
+.config-io__preview--blocked { color: color-mix(in srgb, var(--text) 62%, transparent); }
+.config-io__message { margin: 0; font-size: .85rem; color: var(--accent); }
