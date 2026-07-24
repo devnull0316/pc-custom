@@ -6,6 +6,7 @@ mod commands;
 pub mod compatibility;
 pub mod engine;
 pub mod error;
+pub mod game_profile;
 pub mod ipc;
 pub mod journal;
 pub mod presentation;
