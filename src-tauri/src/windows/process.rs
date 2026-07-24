@@ -22,6 +22,107 @@ pub struct ProcessSnapshotReport {
     pub wmi_failure_code: Option<i64>,
 }
 
+/// PID 再利用を creation time で区別した、既知 process instance の現在状態。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessInstanceStatus {
+    Running,
+    Exited,
+}
+
+/// 不完全な全体列挙から Exited を推測せず、既知 instance そのものを確認する。
+/// OpenProcess/GetProcessTimes/zero-time wait の全てを確認できない場合は Err(不明)を返す。
+#[cfg(windows)]
+pub fn process_instance_status(
+    process_id: u32,
+    expected_creation_time_100ns: u64,
+) -> WindowsResult<ProcessInstanceStatus> {
+    use windows::Win32::{
+        Foundation::{
+            GetLastError, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, WAIT_FAILED,
+            WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
+        Storage::FileSystem::SYNCHRONIZE,
+        System::Threading::{
+            GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_ACCESS_RIGHTS,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+        },
+    };
+
+    let process = match unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_ACCESS_RIGHTS(SYNCHRONIZE.0),
+            false,
+            process_id,
+        )
+    } {
+        Ok(handle) => OwnedHandle(handle),
+        Err(error)
+            if error.code() == windows::core::HRESULT::from_win32(ERROR_INVALID_PARAMETER.0) =>
+        {
+            return Ok(ProcessInstanceStatus::Exited);
+        }
+        Err(error) => {
+            return Err(WindowsError::new(
+                if error.code() == windows::core::HRESULT::from_win32(ERROR_ACCESS_DENIED.0) {
+                    WindowsErrorKind::AccessDenied
+                } else {
+                    WindowsErrorKind::ApiFailure
+                },
+                "OpenProcess for tracked instance",
+                Some(i64::from(error.code().0)),
+            ));
+        }
+    };
+
+    match unsafe { WaitForSingleObject(process.0, 0) } {
+        WAIT_OBJECT_0 => return Ok(ProcessInstanceStatus::Exited),
+        WAIT_TIMEOUT => {}
+        WAIT_FAILED => {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ApiFailure,
+                "WaitForSingleObject for tracked instance",
+                Some(i64::from(unsafe { GetLastError() }.0)),
+            ));
+        }
+        _ => {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "WaitForSingleObject unexpected status",
+                None,
+            ));
+        }
+    }
+
+    let mut creation = FILETIME::default();
+    let mut exit = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    unsafe { GetProcessTimes(process.0, &mut creation, &mut exit, &mut kernel, &mut user) }
+        .map_err(|error| {
+            WindowsError::new(
+                WindowsErrorKind::ApiFailure,
+                "GetProcessTimes for tracked instance",
+                Some(i64::from(error.code().0)),
+            )
+        })?;
+    let actual_creation_time_100ns =
+        (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
+    if actual_creation_time_100ns == expected_creation_time_100ns {
+        Ok(ProcessInstanceStatus::Running)
+    } else {
+        // PID は再利用されており、元の instance は終了済み。
+        Ok(ProcessInstanceStatus::Exited)
+    }
+}
+
+#[cfg(not(windows))]
+pub fn process_instance_status(
+    _process_id: u32,
+    _expected_creation_time_100ns: u64,
+) -> WindowsResult<ProcessInstanceStatus> {
+    Err(WindowsError::unsupported("check tracked process instance"))
+}
+
 #[cfg(windows)]
 fn file_identity_from_path(path: &std::path::Path) -> WindowsResult<ProcessFileIdentity> {
     use std::os::windows::io::AsRawHandle;
@@ -33,18 +134,17 @@ fn file_identity_from_path(path: &std::path::Path) -> WindowsResult<ProcessFileI
     let file = std::fs::File::open(path)
         .map_err(|error| WindowsError::io("open file for identity", &error))?;
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
-    unsafe {
-        GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut information)
-    }
-    .map_err(|error| {
-        WindowsError::new(
-            WindowsErrorKind::ApiFailure,
-            "GetFileInformationByHandle",
-            Some(i64::from(error.code().0)),
-        )
-    })?;
-    let file_index = (u64::from(information.nFileIndexHigh) << 32)
-        | u64::from(information.nFileIndexLow);
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut information) }.map_err(
+        |error| {
+            WindowsError::new(
+                WindowsErrorKind::ApiFailure,
+                "GetFileInformationByHandle",
+                Some(i64::from(error.code().0)),
+            )
+        },
+    )?;
+    let file_index =
+        (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow);
     let mut file_id = [0u8; 16];
     file_id[..8].copy_from_slice(&file_index.to_le_bytes());
     Ok(ProcessFileIdentity {
@@ -56,9 +156,7 @@ fn file_identity_from_path(path: &std::path::Path) -> WindowsResult<ProcessFileI
 #[cfg(windows)]
 pub fn registered_file_identity(path: &str) -> WindowsResult<(String, ProcessFileIdentity)> {
     use std::{os::windows::fs::MetadataExt, path::Path};
-    use windows::Win32::Storage::FileSystem::{
-        GetDriveTypeW, FILE_ATTRIBUTE_REPARSE_POINT,
-    };
+    use windows::Win32::Storage::FileSystem::{GetDriveTypeW, FILE_ATTRIBUTE_REPARSE_POINT};
     use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 
     let candidate = Path::new(path);
@@ -121,7 +219,9 @@ pub fn registered_file_identity(path: &str) -> WindowsResult<(String, ProcessFil
 
 #[cfg(not(windows))]
 pub fn registered_file_identity(_path: &str) -> WindowsResult<(String, ProcessFileIdentity)> {
-    Err(WindowsError::unsupported("validate process binding identity"))
+    Err(WindowsError::unsupported(
+        "validate process binding identity",
+    ))
 }
 
 #[cfg(windows)]
@@ -163,11 +263,7 @@ pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
     );
     let (wmi_ids, wmi_failure_operation, wmi_failure_code) = match wmi_process_ids() {
         Ok(ids) => (ids, None, None),
-        Err(error) => (
-            Default::default(),
-            Some(error.operation),
-            error.os_code,
-        ),
+        Err(error) => (Default::default(), Some(error.operation), error.os_code),
     };
     let wmi_available = wmi_failure_operation.is_none();
 
@@ -203,7 +299,9 @@ pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
                         .iter()
                         .position(|value| *value == 0)
                         .unwrap_or(entry.szExeFile.len());
-                    report.inaccessible_executable_names.push(String::from_utf16_lossy(&entry.szExeFile[..end]));
+                    report
+                        .inaccessible_executable_names
+                        .push(String::from_utf16_lossy(&entry.szExeFile[..end]));
                     report.inaccessible_or_vanished += 1;
                     if report.first_identity_error_code.is_none() {
                         report.first_identity_error_code = error.os_code;
@@ -213,9 +311,7 @@ pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
         }
         match unsafe { Process32NextW(snapshot.0, &mut entry) } {
             Ok(()) => {}
-            Err(error)
-                if error.code() == HRESULT::from_win32(ERROR_NO_MORE_FILES.0) =>
-            {
+            Err(error) if error.code() == HRESULT::from_win32(ERROR_NO_MORE_FILES.0) => {
                 break;
             }
             Err(error) => {
@@ -231,7 +327,10 @@ pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
 }
 
 #[cfg(windows)]
-fn identity_for_process(process_id: u32, corroborated_by_wmi: bool) -> WindowsResult<ProcessIdentity> {
+fn identity_for_process(
+    process_id: u32,
+    corroborated_by_wmi: bool,
+) -> WindowsResult<ProcessIdentity> {
     use std::os::windows::fs::MetadataExt;
     use windows::Win32::{
         Foundation::FILETIME,
@@ -253,7 +352,10 @@ fn identity_for_process(process_id: u32, corroborated_by_wmi: bool) -> WindowsRe
         .map_err(|error| {
             WindowsError::new(
                 if error.code()
-                    == windows::core::HRESULT::from_win32(windows::Win32::Foundation::ERROR_ACCESS_DENIED.0) {
+                    == windows::core::HRESULT::from_win32(
+                        windows::Win32::Foundation::ERROR_ACCESS_DENIED.0,
+                    )
+                {
                     WindowsErrorKind::AccessDenied
                 } else {
                     WindowsErrorKind::ApiFailure
@@ -293,8 +395,12 @@ fn identity_for_process(process_id: u32, corroborated_by_wmi: bool) -> WindowsRe
                     )
                 })?;
             }
-            Err(error) if error.code()
-                == windows::core::HRESULT::from_win32(windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER.0) => {
+            Err(error)
+                if error.code()
+                    == windows::core::HRESULT::from_win32(
+                        windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER.0,
+                    ) =>
+            {
                 capacity *= 2;
             }
             Err(error) => {
@@ -311,22 +417,14 @@ fn identity_for_process(process_id: u32, corroborated_by_wmi: bool) -> WindowsRe
     let mut exit = FILETIME::default();
     let mut kernel = FILETIME::default();
     let mut user = FILETIME::default();
-    unsafe {
-        GetProcessTimes(
-            process.0,
-            &mut creation,
-            &mut exit,
-            &mut kernel,
-            &mut user,
-        )
-    }
-    .map_err(|error| {
-        WindowsError::new(
-            WindowsErrorKind::ApiFailure,
-            "GetProcessTimes",
-            Some(i64::from(error.code().0)),
-        )
-    })?;
+    unsafe { GetProcessTimes(process.0, &mut creation, &mut exit, &mut kernel, &mut user) }
+        .map_err(|error| {
+            WindowsError::new(
+                WindowsErrorKind::ApiFailure,
+                "GetProcessTimes",
+                Some(i64::from(error.code().0)),
+            )
+        })?;
     let creation_time_100ns =
         (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
 
@@ -342,15 +440,13 @@ fn identity_for_process(process_id: u32, corroborated_by_wmi: bool) -> WindowsRe
         ));
     }
     let file_identity = file_identity_from_path(&canonical)?;
-    let canonical_path = canonical
-        .to_str()
-        .ok_or_else(|| {
-            WindowsError::new(
-                WindowsErrorKind::InvalidData,
-                "validate process image Unicode path",
-                None,
-            )
-        })?;
+    let canonical_path = canonical.to_str().ok_or_else(|| {
+        WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate process image Unicode path",
+            None,
+        )
+    })?;
     let canonical_path = canonical_path
         .strip_prefix(r"\\?\")
         .unwrap_or(canonical_path)
@@ -368,4 +464,25 @@ fn identity_for_process(process_id: u32, corroborated_by_wmi: bool) -> WindowsRe
 #[cfg(not(windows))]
 pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
     Err(WindowsError::unsupported("snapshot process identities"))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tracked_instance_check_uses_real_handle_and_creation_time() {
+        let process_id = std::process::id();
+        let identity = identity_for_process(process_id, false).expect("current process identity");
+        assert_eq!(
+            process_instance_status(process_id, identity.creation_time_100ns)
+                .expect("current process status"),
+            ProcessInstanceStatus::Running
+        );
+        assert_eq!(
+            process_instance_status(process_id, identity.creation_time_100ns.wrapping_add(1))
+                .expect("mismatched creation time status"),
+            ProcessInstanceStatus::Exited
+        );
+    }
 }

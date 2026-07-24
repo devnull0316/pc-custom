@@ -59,6 +59,46 @@ impl ProcessMatcher {
         self.seen.remove(&profile_id);
     }
 
+    /// 登録解除前に、現在一致中として保持している全instanceの終了イベントを返す。
+    ///
+    /// この呼び出し自体は状態を捨てない。呼び側は終了イベントをsupervisorへ渡して
+    /// 既適用resourceのrollbackを完了してから[`Self::unregister`]を呼ぶ。
+    pub fn exit_events_before_unregister(&self, profile_id: GameProfileId) -> Vec<ObservedEvent> {
+        self.seen
+            .get(&profile_id)
+            .into_iter()
+            .flat_map(|instances| instances.iter().copied())
+            .map(|instance| ObservedEvent::Exited {
+                profile: profile_id,
+                instance,
+            })
+            .collect()
+    }
+
+    /// 全体 snapshot から消えた、終了確認が必要な既知 instance。
+    pub fn missing_instances(&self, snapshot: &[ObservedProcess]) -> BTreeSet<InstanceKey> {
+        let mut missing = BTreeSet::new();
+        for (profile_id, binding) in &self.bindings {
+            let current: BTreeSet<InstanceKey> = snapshot
+                .iter()
+                .filter(|process| Self::is_match(binding, process))
+                .map(|process| process.instance)
+                .collect();
+            if let Some(previous) = self.seen.get(profile_id) {
+                missing.extend(previous.difference(&current).copied());
+            }
+        }
+        missing
+    }
+
+    /// 全体列挙そのものが失敗した場合に個別確認する全既知 instance。
+    pub fn tracked_instances(&self) -> BTreeSet<InstanceKey> {
+        self.seen
+            .values()
+            .flat_map(|instances| instances.iter().copied())
+            .collect()
+    }
+
     fn is_match(binding: &MatchBinding, process: &ObservedProcess) -> bool {
         if process.canonical_path.to_ascii_lowercase() != binding.canonical_path_lower {
             return false;
@@ -73,6 +113,27 @@ impl ProcessMatcher {
     /// 1 スナップショットを受け取り、前回との差分イベントを返す。
     /// Launched を先に、Exited を後に返す(適用より先に消えることはない前提)。
     pub fn observe(&mut self, snapshot: &[ObservedProcess]) -> Vec<ObservedEvent> {
+        self.observe_with_confirmed_exits(snapshot, None)
+    }
+
+    /// 不完全なスナップショットを処理する。
+    ///
+    /// 本人性を確認できた新規 instance の Launched は通知する一方、列挙漏れを終了と
+    /// 誤認しないよう、個別の handle/creation-time 確認で終了が確定した instance だけ
+    /// Exited にし、それ以外の既知 instance は保持する。
+    pub fn observe_incomplete(
+        &mut self,
+        snapshot: &[ObservedProcess],
+        confirmed_exits: &BTreeSet<InstanceKey>,
+    ) -> Vec<ObservedEvent> {
+        self.observe_with_confirmed_exits(snapshot, Some(confirmed_exits))
+    }
+
+    fn observe_with_confirmed_exits(
+        &mut self,
+        snapshot: &[ObservedProcess],
+        confirmed_exits: Option<&BTreeSet<InstanceKey>>,
+    ) -> Vec<ObservedEvent> {
         let mut events = Vec::new();
         for (profile_id, binding) in &self.bindings {
             let current: BTreeSet<InstanceKey> = snapshot
@@ -90,13 +151,23 @@ impl ProcessMatcher {
                     instance: *instance,
                 });
             }
+            let mut next = if confirmed_exits.is_some() {
+                let mut retained = previous.clone();
+                retained.extend(current.iter().copied());
+                retained
+            } else {
+                current.clone()
+            };
             for instance in previous.difference(&current) {
-                events.push(ObservedEvent::Exited {
-                    profile: *profile_id,
-                    instance: *instance,
-                });
+                if confirmed_exits.map_or(true, |confirmed| confirmed.contains(instance)) {
+                    events.push(ObservedEvent::Exited {
+                        profile: *profile_id,
+                        instance: *instance,
+                    });
+                    next.remove(instance);
+                }
             }
-            *previous = current;
+            *previous = next;
         }
         events
     }
@@ -155,14 +226,26 @@ mod tests {
         m.register(p, &binding(path, identity(7)));
 
         let events = m.observe(&[proc(100, path, Some(identity(7)))]);
-        assert_eq!(events, vec![ObservedEvent::Launched { profile: p, instance: pid(100) }]);
+        assert_eq!(
+            events,
+            vec![ObservedEvent::Launched {
+                profile: p,
+                instance: pid(100)
+            }]
+        );
 
         // 同じスナップショットが続く間はイベントを出さない。
         assert!(m.observe(&[proc(100, path, Some(identity(7)))]).is_empty());
 
         // 消えたら Exited。
         let events = m.observe(&[]);
-        assert_eq!(events, vec![ObservedEvent::Exited { profile: p, instance: pid(100) }]);
+        assert_eq!(
+            events,
+            vec![ObservedEvent::Exited {
+                profile: p,
+                instance: pid(100)
+            }]
+        );
     }
 
     #[test]
@@ -195,12 +278,18 @@ mod tests {
 
         // 同じ PID 100 だが creation time が違う別 instance に置き換わった。
         let reused = ObservedProcess {
-            instance: InstanceKey { process_id: 100, creation_time_100ns: 999_999 },
+            instance: InstanceKey {
+                process_id: 100,
+                creation_time_100ns: 999_999,
+            },
             canonical_path: path.to_owned(),
             file_identity: Some(identity(7)),
         };
         let events = m.observe(&[reused.clone()]);
-        assert!(events.contains(&ObservedEvent::Exited { profile: p, instance: pid(100) }));
+        assert!(events.contains(&ObservedEvent::Exited {
+            profile: p,
+            instance: pid(100)
+        }));
         assert!(events.contains(&ObservedEvent::Launched {
             profile: p,
             instance: reused.instance,
@@ -229,6 +318,87 @@ mod tests {
         assert_eq!(events.len(), 2);
         // 片方だけ終了 → その instance だけ Exited。
         let events = m.observe(&[proc(200, path, Some(identity(7)))]);
-        assert_eq!(events, vec![ObservedEvent::Exited { profile: p, instance: pid(100) }]);
+        assert_eq!(
+            events,
+            vec![ObservedEvent::Exited {
+                profile: p,
+                instance: pid(100)
+            }]
+        );
+    }
+
+    #[test]
+    fn incomplete_snapshot_never_emits_exit_and_retains_seen_instances() {
+        let mut m = ProcessMatcher::new();
+        let p = GameProfileId(Uuid::from_u128(1));
+        let path = r"C:\Games\Example\game.exe";
+        m.register(p, &binding(path, identity(7)));
+
+        assert_eq!(
+            m.observe(&[proc(100, path, Some(identity(7)))]),
+            vec![ObservedEvent::Launched {
+                profile: p,
+                instance: pid(100),
+            }]
+        );
+        assert!(m.observe_incomplete(&[], &BTreeSet::new()).is_empty());
+        assert!(m.observe_incomplete(&[], &BTreeSet::new()).is_empty());
+        assert_eq!(
+            m.observe(&[]),
+            vec![ObservedEvent::Exited {
+                profile: p,
+                instance: pid(100),
+            }]
+        );
+    }
+
+    #[test]
+    fn incomplete_snapshot_can_add_verified_launch_without_forgetting_prior_seen() {
+        let mut m = ProcessMatcher::new();
+        let p = GameProfileId(Uuid::from_u128(1));
+        let path = r"C:\Games\Example\game.exe";
+        m.register(p, &binding(path, identity(7)));
+        m.observe(&[proc(100, path, Some(identity(7)))]);
+
+        assert_eq!(
+            m.observe_incomplete(&[proc(200, path, Some(identity(7)))], &BTreeSet::new()),
+            vec![ObservedEvent::Launched {
+                profile: p,
+                instance: pid(200),
+            }]
+        );
+
+        let events = m.observe(&[]);
+        assert_eq!(events.len(), 2);
+        assert!(events.contains(&ObservedEvent::Exited {
+            profile: p,
+            instance: pid(100),
+        }));
+        assert!(events.contains(&ObservedEvent::Exited {
+            profile: p,
+            instance: pid(200),
+        }));
+    }
+
+    #[test]
+    fn incomplete_snapshot_emits_only_individually_confirmed_exit() {
+        let mut m = ProcessMatcher::new();
+        let p = GameProfileId(Uuid::from_u128(1));
+        let path = r"C:\Games\Example\game.exe";
+        m.register(p, &binding(path, identity(7)));
+        m.observe(&[
+            proc(100, path, Some(identity(7))),
+            proc(200, path, Some(identity(7))),
+        ]);
+
+        let confirmed = BTreeSet::from([pid(100)]);
+        assert_eq!(
+            m.observe_incomplete(&[], &confirmed),
+            vec![ObservedEvent::Exited {
+                profile: p,
+                instance: pid(100),
+            }]
+        );
+        assert_eq!(m.tracked_instances(), BTreeSet::from([pid(200)]));
     }
 }

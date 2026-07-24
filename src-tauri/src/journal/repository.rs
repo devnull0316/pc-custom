@@ -590,6 +590,7 @@ impl JournalDatabase {
     }
 }
 
+
 fn insert_backup(
     database: &rusqlite::Transaction<'_>,
     backup: &BackupEnvelope,
@@ -741,6 +742,7 @@ fn primitive_name(payload: &BackupPayload) -> &'static str {
         BackupPayload::SleepLease(_) => "sleep_lease",
         BackupPayload::Observation(_) => "observation",
         BackupPayload::ProcessWatch(_) => "process_watch",
+        BackupPayload::PowerScheme(_) => "power_scheme",
     }
 }
 
@@ -814,4 +816,3 @@ fn format_timestamp(unix_ms: i64) -> String {
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
         .to_rfc3339()
 }
-

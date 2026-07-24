@@ -21,6 +21,7 @@ pub enum TransactionState {
     RecoveryRequired,
 }
 
+
 impl TransactionState {
     pub const fn as_db(self) -> &'static str {
         match self {
@@ -183,4 +184,3 @@ pub struct ReconcileResult {
     pub remaining_count: u32,
     pub message: String,
 }
-

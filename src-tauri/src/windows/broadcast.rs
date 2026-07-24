@@ -10,17 +10,10 @@ pub struct BroadcastReport {
 /// Non-destructive Explorer notification. It never terminates or restarts Explorer.
 #[cfg(windows)]
 pub fn notify_explorer_settings_changed() -> BroadcastReport {
-    use windows::Win32::UI::Shell::{
-        SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST,
-    };
+    use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
 
     unsafe {
-        SHChangeNotify(
-            SHCNE_ASSOCCHANGED,
-            SHCNF_IDLIST,
-            None,
-            None,
-        );
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
     }
     BroadcastReport {
         shell_change_notified: true,
@@ -42,8 +35,7 @@ pub fn notify_explorer_settings_changed() -> BroadcastReport {
 #[cfg(windows)]
 pub fn notify_theme_changed() -> BroadcastReport {
     use windows::Win32::UI::WindowsAndMessaging::{
-        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, SMTO_BLOCK,
-        WM_SETTINGCHANGE,
+        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, SMTO_BLOCK, WM_SETTINGCHANGE,
     };
 
     let section: Vec<u16> = "ImmersiveColorSet\0".encode_utf16().collect();

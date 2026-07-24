@@ -48,7 +48,8 @@ impl ProfileActionSink for FakeSink {
         actions: &[PlannedAction],
     ) -> Result<Vec<AppliedAction>, ProfileError> {
         let mut log = self.log.borrow_mut();
-        log.applied.push(actions.iter().map(|a| a.action_id).collect());
+        log.applied
+            .push(actions.iter().map(|a| a.action_id).collect());
         let mut out = Vec::with_capacity(actions.len());
         for action in actions {
             log.counter += 1;
@@ -95,11 +96,7 @@ fn action(id: ActionId, key: &str, desired: &str, optional: bool) -> PlannedActi
     }
 }
 
-fn profile(
-    seed: u128,
-    actions: Vec<PlannedAction>,
-    policy: ConflictPolicy,
-) -> GameProfile {
+fn profile(seed: u128, actions: Vec<PlannedAction>, policy: ConflictPolicy) -> GameProfile {
     GameProfile {
         id: GameProfileId(Uuid::from_u128(seed)),
         name: format!("Profile {seed}"),
@@ -138,13 +135,21 @@ fn single_profile_applies_on_launch_and_restores_on_exit() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     sup.register_profile(p.clone());
 
     let out = sup.handle(launched(&p, 100)).unwrap();
-    assert!(matches!(out, EventOutcome::Launch(LaunchOutcome::Applied { .. })));
+    assert!(matches!(
+        out,
+        EventOutcome::Launch(LaunchOutcome::Applied { .. })
+    ));
     assert!(sup.is_active(p.id));
     assert_eq!(sink.total_applied(), 1);
 
@@ -166,7 +171,12 @@ fn duplicate_start_event_does_not_double_apply() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     sup.register_profile(p.clone());
@@ -191,7 +201,12 @@ fn two_instances_apply_once_and_restore_once() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     sup.register_profile(p.clone());
@@ -228,12 +243,22 @@ fn two_profiles_same_desired_share_lease_until_last_exit() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p1 = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     let p2 = profile(
         2,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     sup.register_profile(p1.clone());
@@ -245,7 +270,9 @@ fn two_profiles_same_desired_share_lease_until_last_exit() {
     ));
     // P2 は同一 desired → 相乗り(適用なし)。
     match sup.handle(launched(&p2, 200)).unwrap() {
-        EventOutcome::Launch(LaunchOutcome::Applied { applied, joined, .. }) => {
+        EventOutcome::Launch(LaunchOutcome::Applied {
+            applied, joined, ..
+        }) => {
             assert!(applied.is_empty());
             assert_eq!(joined, vec!["theme.color_mode".to_owned()]);
         }
@@ -278,12 +305,22 @@ fn opposite_desired_second_profile_is_conflict_stopped() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p1 = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     let p2 = profile(
         2,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "light", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "light",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     sup.register_profile(p1.clone());
@@ -305,7 +342,9 @@ fn opposite_desired_second_profile_is_conflict_stopped() {
 
     // P2 終了 → 復元対象なし。P1 は影響を受けない。
     match sup.handle(exited(&p2, 200)).unwrap() {
-        EventOutcome::Exit(ExitOutcome::Restored { rolled_back }) => assert!(rolled_back.is_empty()),
+        EventOutcome::Exit(ExitOutcome::Restored { rolled_back }) => {
+            assert!(rolled_back.is_empty())
+        }
         other => panic!("expected empty Restored, got {other:?}"),
     }
     assert_eq!(sink.rolled_back().len(), 0);
@@ -324,7 +363,12 @@ fn skip_policy_applies_nonconflicting_and_skips_conflicting() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p1 = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     let p2 = profile(
@@ -360,13 +404,23 @@ fn optional_conflicting_action_is_skipped_under_abort_policy() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p1 = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     // optional=true の競合 Action は AbortProfile でも skip される。
     let p2 = profile(
         2,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "light", true)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "light",
+            true,
+        )],
         ConflictPolicy::AbortProfile,
     );
     sup.register_profile(p1.clone());
@@ -374,7 +428,9 @@ fn optional_conflicting_action_is_skipped_under_abort_policy() {
 
     sup.handle(launched(&p1, 100)).unwrap();
     match sup.handle(launched(&p2, 200)).unwrap() {
-        EventOutcome::Launch(LaunchOutcome::Applied { applied, joined, .. }) => {
+        EventOutcome::Launch(LaunchOutcome::Applied {
+            applied, joined, ..
+        }) => {
             assert!(applied.is_empty());
             assert!(joined.is_empty());
         }
@@ -388,7 +444,12 @@ fn disabled_or_unregistered_profile_is_ignored() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let mut p = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     p.automation_enabled = false;
@@ -408,14 +469,22 @@ fn rollback_failure_is_reported_not_swallowed() {
     let mut sup = ProfileSupervisor::new(sink.clone());
     let p = profile(
         1,
-        vec![action(ActionId::ThemeColorMode, "theme.color_mode", "dark", false)],
+        vec![action(
+            ActionId::ThemeColorMode,
+            "theme.color_mode",
+            "dark",
+            false,
+        )],
         ConflictPolicy::AbortProfile,
     );
     sup.register_profile(p.clone());
 
     sup.handle(launched(&p, 100)).unwrap();
     match sup.handle(exited(&p, 100)).unwrap() {
-        EventOutcome::Exit(ExitOutcome::PartiallyFailed { rolled_back, failed }) => {
+        EventOutcome::Exit(ExitOutcome::PartiallyFailed {
+            rolled_back,
+            failed,
+        }) => {
             assert!(rolled_back.is_empty());
             assert_eq!(failed.len(), 1);
         }

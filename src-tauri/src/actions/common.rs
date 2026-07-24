@@ -3,7 +3,7 @@ use crate::{
         ActionContext, ActionError, ActionErrorCode, ActionMetadata, ActionParameters,
         ActionResult, ActionStage, DetectedState, StateEvidence, ValidationReport,
     },
-    backup::{BackupEnvelope, Fingerprint},
+    backup::{BackupEnvelope, Fingerprint, RegistryBackup},
     compatibility::CompatibilityCatalog,
     windows::{WindowsError, WindowsErrorKind},
 };
@@ -88,6 +88,23 @@ pub fn validate_backup_for_apply(
             ActionStage::Apply,
             false,
             "action.backup.already_applied",
+        ));
+    }
+    Ok(())
+}
+
+/// New registry mutations require the containing key to have existed when the
+/// backup was prepared. Windows has no atomic "delete this key only if it is
+/// still empty" primitive, so creating a missing key cannot satisfy both exact
+/// rollback and the rule that concurrent third-party values are never erased.
+pub fn ensure_registry_key_preexisted(
+    backup: &RegistryBackup,
+    stage: ActionStage,
+) -> ActionResult<()> {
+    if !backup.original.key_existed {
+        return Err(ActionError::recovery_required(
+            stage,
+            "action.registry.backup_key_was_absent",
         ));
     }
     Ok(())

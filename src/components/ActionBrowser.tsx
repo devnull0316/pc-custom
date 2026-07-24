@@ -32,7 +32,19 @@ function updateImpactLabel(impact: ActionPresentation["updateImpact"]): string {
   return "Update影響: 高い";
 }
 
+function methodClassLabel(methodClass: ActionPresentation["methodClass"]): string {
+  if (methodClass === "public_api") return "Windows公開API";
+  if (methodClass === "microsoft_cli") return "Microsoft公式CLI";
+  if (methodClass === "winget") return "WinGet";
+  if (methodClass === "official_module") return "Microsoft公式モジュール";
+  if (methodClass === "documented_registry") return "文書化registry";
+  if (methodClass === "limited_external") return "検証済み限定連携";
+  if (methodClass === "unverified_storage") return "未立証storage（読取のみ）";
+  return "分類情報なし";
+}
+
 function availabilityLabel(action: ActionPresentation): string {
+  if (action.kind === "guided") return "設計候補・読取のみ";
   if (action.availability === "mutable") return "適用可能";
   if (action.availability === "read_only") return "読み取り専用";
   if (action.availability === "detect_only") return "検出のみ";
@@ -165,6 +177,9 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
   const needsBinding = action.id === "games.process_watch";
   const mutationAllowed = isMutationAllowed(dataMode, bootstrap, action);
   const reason = blockReason(dataMode, bootstrap, action);
+  const profileEligible = action.autoApplyEligible === true
+    && (action.kind === "persistent" || action.kind === "session");
+  const observationLike = action.kind === "observation" || action.kind === "guided";
 
   return (
     <div className="action-detail__inner">
@@ -182,10 +197,18 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           <span>現在</span>
           {detecting ? <strong className="state-loading"><Icon className="spin" name="spinner" />確認中</strong> : <strong>{current?.label ?? "未検出"}</strong>}
           <small>{current?.detail ?? (dataMode === "catalog" ? "安全コア未接続のため現在値は表示していません。" : "状態を確認してください。")}</small>
+          {current?.items === undefined || current.items.length === 0 ? null : (
+            <div aria-label="検出した項目" className="state-item-list">
+              <span>検出した項目</span>
+              <ul>
+                {current.items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+              </ul>
+            </div>
+          )}
         </div>
         <span className="state-arrow"><Icon name="arrow" /></span>
         <div className="state-panel state-panel--desired">
-          <span>{action.kind === "observation" ? "確認する内容" : "適用後"}</span>
+          <span>{action.kind === "guided" ? "設計状態" : action.kind === "observation" ? "確認する内容" : "適用後"}</span>
           <strong>{action.desiredState}</strong>
           <small>{action.methodSummary}</small>
         </div>
@@ -199,12 +222,13 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
       </div>
       {detailsOpen ? (
         <div className="detail-disclosure" id={`details-${action.id}`}>
-          <div><span className="detail-disclosure__label">変更方法</span><p>{action.methodSummary}</p></div>
+          <div><span className="detail-disclosure__label">{observationLike ? "確認方法" : "変更方法"}</span><p>{action.methodSummary}</p></div>
           <ul>{action.detailPoints.map((point) => <li key={point}>{point}</li>)}</ul>
           <dl className="compatibility-grid">
             <div><dt>最小build</dt><dd>{action.minimumBuild}</dd></div>
             <div><dt>試験上限</dt><dd>{action.maximumTestedBuild ?? "実機確認待ち"}</dd></div>
-            <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : "観測"}</dd></div>
+            <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : action.kind === "guided" ? "設計候補（変更不可）" : "観測"}</dd></div>
+            <div><dt>根拠分類</dt><dd>{methodClassLabel(action.methodClass)}</dd></div>
           </dl>
         </div>
       ) : null}
@@ -216,7 +240,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         ) : (
           <button className="primary-button" disabled={!mutationAllowed || previewing} onClick={onPreview} type="button">{previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}{previewing ? "プレビュー作成中" : "適用プレビュー"}</button>
         )}
-        <button className="secondary-button" disabled={inDraft} onClick={onAddToDraft} type="button"><Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : "プロファイルへ追加"}</button>
+        <button className="secondary-button" disabled={inDraft || !profileEligible} onClick={onAddToDraft} type="button"><Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : profileEligible ? "プロファイルへ追加" : "自動適用の対象外"}</button>
       </div>
     </div>
   );

@@ -2,22 +2,30 @@
 
 mod broadcast;
 mod execution_state;
+mod observations;
 mod power;
 mod process;
+mod readiness;
 mod registry;
-mod window_effects;
 mod transaction_lock;
+mod window_effects;
 mod wmi_process;
 
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
-pub use power::active_power_scheme_guid;
+pub use observations::{read_startup_inventory, read_system_drive_space, read_user_temp_inventory};
+pub use power::{active_power_scheme, active_power_scheme_guid, set_active_power_scheme};
 pub use process::{
-    registered_file_identity, snapshot_process_identities, ProcessIdentity, ProcessSnapshotReport,
+    process_instance_status, registered_file_identity, snapshot_process_identities,
+    ProcessIdentity, ProcessInstanceStatus, ProcessSnapshotReport,
 };
+pub use readiness::{
+    read_active_advanced_color, read_default_render_audio_endpoint, read_primary_refresh_rate,
+};
+#[cfg(test)]
+pub use registry::delete_key_if_empty;
 pub use registry::{
-    delete_key_if_empty, delete_value, read_value_state, write_raw_value,
-    RawRegistryValue, RawRegistryValueState,
+    delete_value, read_value_state, write_raw_value, RawRegistryValue, RawRegistryValueState,
 };
 pub use transaction_lock::{
     acquire_app_instance_lock, acquire_core_mutation_lock, AppInstanceGuard, CoreMutationGuard,

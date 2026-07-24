@@ -162,7 +162,9 @@ pub enum LaunchOutcome {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExitOutcome {
     /// 最後の owner が抜けた resource を復元した。
-    Restored { rolled_back: Vec<AppliedAction> },
+    Restored {
+        rolled_back: Vec<AppliedAction>,
+    },
     /// 別 instance が残るため復元しない。
     StillActive,
     /// 復元中に失敗した項目がある(残りは復旧要)。
@@ -237,6 +239,15 @@ impl<S: ProfileActionSink> ProfileSupervisor<S> {
         self.profiles.insert(profile.id, profile);
     }
 
+    /// runtimeが全instanceの終了処理を終えた後に、定義を監視対象から外す。
+    /// active中の誤解除は拒否し、復元参照を孤立させない。
+    pub fn unregister_profile(&mut self, profile: GameProfileId) -> bool {
+        if self.is_active(profile) {
+            return false;
+        }
+        self.profiles.remove(&profile).is_some()
+    }
+
     pub fn is_active(&self, profile: GameProfileId) -> bool {
         self.active_instances
             .get(&profile)
@@ -280,7 +291,11 @@ impl<S: ProfileActionSink> ProfileSupervisor<S> {
         }
 
         // ここから初回起動: セッションを開始し、lease を評価して適用する。
-        let profile = self.profiles.get(&profile_id).expect("profile present").clone();
+        let profile = self
+            .profiles
+            .get(&profile_id)
+            .expect("profile present")
+            .clone();
         let session = ProfileSessionId(Uuid::new_v4());
 
         // 各 Action の判断を先に決める(借用衝突を避けるため lease は読み取りのみ)。
@@ -295,7 +310,12 @@ impl<S: ProfileActionSink> ProfileSupervisor<S> {
             .iter()
             .zip(&decisions)
             .filter(|(_, decision)| **decision == ActionDecision::Conflict)
-            .flat_map(|(action, _)| action.intents.iter().map(|intent| intent.resource_key.clone()))
+            .flat_map(|(action, _)| {
+                action
+                    .intents
+                    .iter()
+                    .map(|intent| intent.resource_key.clone())
+            })
             .collect();
         if !conflicts.is_empty() {
             // 中止でも instance は記録済み。空セッションを登録し、終了時に active_instances を掃除する。

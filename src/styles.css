@@ -204,6 +204,10 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .state-panel > span { color: var(--text-tertiary); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .state-panel strong { font-size: 13px; line-height: 1.4; }
 .state-panel small { color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+.state-item-list { min-width: 0; max-height: 220px; overflow: auto; padding-top: 4px; border-top: 1px solid var(--border); }
+.state-item-list > span { color: var(--text-tertiary); font-size: 10px; font-weight: 600; }
+.state-item-list ul { margin: 6px 0 0; padding-left: 17px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.state-item-list li + li { margin-top: 3px; }
 .state-panel--desired { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
 .state-panel--error { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .state-arrow { display: grid; place-items: center; color: var(--text-tertiary); }

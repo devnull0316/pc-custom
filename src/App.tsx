@@ -52,6 +52,55 @@ function parametersForAction(actionId: string): Record<string, boolean | number 
   if (actionId === "explorer.item_checkboxes") return { show: true };
   if (actionId === "explorer.compact_view") return { enabled: true };
   if (actionId === "theme.color_mode") return { mode: "dark" };
+  if (actionId === "power.active_scheme_check") return {};
+  if (actionId === "power.active_scheme_switch") return { scheme: "balanced" };
+  if (actionId === "games.process_watch") return {};
+  if (actionId === "games.readiness_check") return {};
+  if (actionId === "taskbar.search_mode") return { mode: "search_box" };
+  if (actionId === "taskbar.alignment") return { alignment: "left" };
+  if (actionId === "start.layout") return { layout: "more_pins" };
+  if (actionId === "start.recommendations") return { enabled: false };
+  if (actionId === "explorer.launch_target") return { target: "this_pc" };
+  if (actionId === "explorer.recent_files") return { show: true };
+  if (actionId === "taskbar.button_grouping") return { mode: "when_full" };
+  if (actionId === "taskbar.flashing") return { enabled: true };
+  if (actionId === "taskbar.share_window") return { enabled: true };
+  if (actionId === "taskbar.show_desktop") return { enabled: true };
+  if (actionId === "search.recent_on_hover") return { enabled: false };
+  if (actionId === "taskbar.multi_monitor") return { enabled: true };
+  if (actionId === "taskbar.multi_monitor_mode") return { mode: "window_monitor" };
+  if (actionId === "taskbar.secondary_button_grouping") return { mode: "when_full" };
+  if (actionId === "start.show_all_pins") return { enabled: true };
+  if (actionId === "start.recent_apps") return { show: true };
+  if (actionId === "appearance.accent_start_taskbar") return { enabled: true };
+  if (actionId === "appearance.accent_title_bars") return { enabled: true };
+  if (actionId === "appearance.auto_accent") return { enabled: true };
+  if (actionId === "games.game_mode") return { enabled: true };
+  if (actionId === "games.controller_game_bar") return { enabled: false };
+  if (actionId === "devices.autoplay") return { enabled: true };
+  if (actionId === "notifications.usb_errors") return { enabled: true };
+  if (actionId === "notifications.weak_charger") return { enabled: true };
+  if (actionId === "input.autocorrect") return { enabled: true };
+  if (actionId === "input.double_space_period") return { enabled: true };
+  if (actionId === "input.auto_shift") return { enabled: true };
+  if (actionId === "input.voice_typing_key") return { enabled: true };
+  if (actionId === "input.multilingual_suggestions") return { enabled: true };
+  if (actionId === "explorer.status_bar") return { show: true };
+  if (actionId === "explorer.info_tips") return { show: true };
+  if (actionId === "explorer.hide_empty_drives") return { hide: true };
+  if (actionId === "explorer.nav_expand_current") return { enabled: true };
+  if (actionId === "explorer.nav_show_all") return { enabled: true };
+  if (actionId === "explorer.separate_process") return { enabled: true };
+  if (actionId === "explorer.icons_only") return { enabled: false };
+  if (actionId === "explorer.drive_letters") return { show: true };
+  if (actionId === "explorer.preview_handlers") return { enabled: true };
+  if (actionId === "explorer.sharing_wizard") return { enabled: true };
+  if (actionId === "explorer.always_show_menus") return { enabled: true };
+  if (actionId === "appearance.taskbar_animations") return { enabled: true };
+  if (actionId === "notifications.toast_banners") return { enabled: true };
+  if (actionId === "setup.startup_inventory") return {};
+  if (actionId === "storage.free_space_check") return {};
+  if (actionId === "storage.temp_files_check") return {};
   return {};
 }
 
@@ -304,6 +353,10 @@ export function App() {
   }
 
   function addToDraft(action: ActionPresentation) {
+    if (action.autoApplyEligible !== true) {
+      setNotice("このActionは明示操作専用のため、ゲームプロファイルへ追加できません。");
+      return;
+    }
     setProfileDraft((current) => current.some((item) => item.actionId === action.id) ? current : [...current, { actionId: action.id, title: action.name }]);
     setNotice("プロファイル下書きへ追加しました。保存や自動適用はまだ行っていません。");
   }

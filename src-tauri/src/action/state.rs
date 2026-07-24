@@ -40,18 +40,145 @@ pub struct ObservedProcess {
     pub corroborated_by_wmi: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupEntrySource {
+    CurrentUserRun,
+    LocalMachineRun64,
+    LocalMachineRun32,
+    UserStartupFolder,
+    CommonStartupFolder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupEntryStatus {
+    RegistryCommand,
+    RegistryExpandableCommand,
+    StartupFile,
+    ReparsePointNotFollowed,
+    MalformedRegistryValue,
+    UnsupportedRegistryType,
+    RegistryValueTooLarge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartupInventoryEntry {
+    pub name: String,
+    pub source: StartupEntrySource,
+    pub status: StartupEntryStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationWarning {
+    pub source: String,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartupInventoryObservation {
+    pub entries: Vec<StartupInventoryEntry>,
+    pub warnings: Vec<ObservationWarning>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemDriveSpaceObservation {
+    pub volume: String,
+    pub available_bytes: u64,
+    pub total_bytes: u64,
+    pub total_free_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TempFilesObservation {
+    pub file_count: u64,
+    pub directory_count: u64,
+    pub total_bytes: u64,
+    pub skipped_reparse_points: u64,
+    pub unreadable_entries: u64,
+    pub warnings: Vec<ObservationWarning>,
+    pub truncated: bool,
+}
+
+/// One independently collected readiness signal.
+///
+/// A missing user setting is distinct from an API failure: callers can show
+/// `Unconfigured` without pretending that a default value was observed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "data", rename_all = "snake_case")]
+pub enum ReadinessComponent<T> {
+    Known { value: T },
+    Unknown { reason_code: String },
+    Unconfigured,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrimaryRefreshRateObservation {
+    pub hertz: u32,
+}
+
+/// Aggregate of DisplayConfig's Advanced Color flags for active display paths.
+/// The Windows API covers HDR and wide-color capabilities, so this type avoids
+/// claiming that every supported path is necessarily an HDR panel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdvancedColorObservation {
+    pub active_path_count: u32,
+    pub supported_path_count: u32,
+    pub enabled_path_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultRenderAudioObservation {
+    pub endpoint_exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GameReadinessObservation {
+    pub refresh_rate: ReadinessComponent<PrimaryRefreshRateObservation>,
+    pub advanced_color: ReadinessComponent<AdvancedColorObservation>,
+    /// Raw `AutoGameModeEnabled` user preference. This is a configuration hint,
+    /// not proof that Game Mode is effective for a running process.
+    pub game_mode: ReadinessComponent<bool>,
+    pub active_power_scheme: ReadinessComponent<String>,
+    pub system_drive_space: ReadinessComponent<SystemDriveSpaceObservation>,
+    pub default_render_audio: ReadinessComponent<DefaultRenderAudioObservation>,
+    /// Raw `ToastEnabled` user preference. Focus, policy, or per-app settings
+    /// can still prevent a notification banner from being shown.
+    pub toast_notifications: ReadinessComponent<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ObservedValue {
-    RegistryDword { configured: Option<u32> },
+    RegistryDword {
+        configured: Option<u32>,
+    },
     Theme(ThemeObservation),
     SleepLease {
         owned: bool,
         owner_count: usize,
         keep_display_on: bool,
     },
-    ActivePowerScheme { guid: String },
-    Processes { matches: Vec<ObservedProcess> },
+    ActivePowerScheme {
+        guid: String,
+    },
+    Processes {
+        matches: Vec<ObservedProcess>,
+    },
+    StartupInventory(StartupInventoryObservation),
+    SystemDriveSpace(SystemDriveSpaceObservation),
+    TempFiles(TempFilesObservation),
+    GameReadiness(GameReadinessObservation),
     NoOsChange,
 }
 

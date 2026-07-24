@@ -52,7 +52,7 @@ static METADATA: ActionMetadata = ActionMetadata {
     compatibility_key: "games.process_watch.v1",
     backup_codec_version: 1,
     rollback_decoder_versions: &[1],
-    auto_apply_eligible: true,
+    auto_apply_eligible: false,
     windows_update_impact: "低。WMI欠落率とprotected processの挙動を更新後に再測定します。",
 };
 

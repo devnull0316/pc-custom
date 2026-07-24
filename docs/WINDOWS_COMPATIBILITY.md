@@ -117,7 +117,7 @@ catalogは機能を狭める更新だけを即時適用できる。未知build�
 
 ### 6.1 レジストリ
 
-`RegQueryValueEx`でtypeとsizeを先に取得し、raw bytesを欠落なく保存する。string terminatorの扱いを型ごとに検証し、32/64-bit viewを明示する。rollbackは値が無かった場合にvalueを削除し、key自体がTotonoe適用前に無く、かつ空のままなら作成したkeyを削除する。既存keyや他valueは消さない。
+`RegQueryValueEx`でtypeとsizeを先に取得し、raw bytesを欠落なく保存する。string terminatorの扱いを型ごとに検証し、32/64-bit viewを明示する。rollbackは元valueが無かった場合に、現在値がTotonoeの適用値と一致するときだけvalueを削除する。原子的なempty-key compare-deleteが無いため、新規mutationは元keyが無い場合にfail-closedとし、key全体を自動削除しない。既存keyやsibling valueは消さない。
 
 MicrosoftのSettings status pageに載るregistry pathは、設定状態を読むためのreferenceであって、すべてがthird-party write contractであるとは解釈しない。Actionごとに公開setterの有無とbuild別evidenceをcatalogへ残す。
 

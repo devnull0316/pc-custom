@@ -15,8 +15,8 @@ use crate::{
 };
 
 use super::common::{
-    decode_dword, dword_bytes, evidence, map_windows_error, validate_backup,
-    validate_backup_for_apply, validate_base, REG_DWORD_TYPE,
+    decode_dword, dword_bytes, ensure_registry_key_preexisted, evidence, map_windows_error,
+    validate_backup, validate_backup_for_apply, validate_base, REG_DWORD_TYPE,
 };
 
 const ADVANCED_SUBKEY: &str =
@@ -459,6 +459,12 @@ fn compensate_failed_apply(backup: &RegistryBackup) -> ActionResult<()> {
         )
     })? {
         RegistryRestoreOutcome::Restored | RegistryRestoreOutcome::AlreadyOriginal => Ok(()),
+        RegistryRestoreOutcome::RestoredValueKeyRetained => {
+            Err(ActionError::recovery_required(
+                ActionStage::Recovery,
+                "action.explorer.apply_compensation_key_retained",
+            ))
+        }
         RegistryRestoreOutcome::ExternalConflict => Err(ActionError::recovery_required(
             ActionStage::Recovery,
             "action.explorer.apply_compensation_conflict",
@@ -467,6 +473,7 @@ fn compensate_failed_apply(backup: &RegistryBackup) -> ActionResult<()> {
 }
 
 fn apply_registry_backup(backup: &RegistryBackup) -> ActionResult<()> {
+    ensure_registry_key_preexisted(backup, ActionStage::Apply)?;
     let current = read_registry_state(&backup.location).map_err(|error| {
         map_windows_error(
             ActionStage::Apply,
@@ -665,13 +672,23 @@ macro_rules! impl_explorer_action {
                         error,
                     )
                 })?;
-                if outcome == RegistryRestoreOutcome::ExternalConflict {
-                    return Err(ActionError::new(
-                        ActionErrorCode::ExternalConflict,
-                        ActionStage::Rollback,
-                        false,
-                        "action.rollback.external_change_detected",
-                    ));
+                match outcome {
+                    RegistryRestoreOutcome::Restored
+                    | RegistryRestoreOutcome::AlreadyOriginal => {}
+                    RegistryRestoreOutcome::RestoredValueKeyRetained => {
+                        return Err(ActionError::recovery_required(
+                            ActionStage::Rollback,
+                            "action.explorer.rollback_key_retained",
+                        ));
+                    }
+                    RegistryRestoreOutcome::ExternalConflict => {
+                        return Err(ActionError::new(
+                            ActionErrorCode::ExternalConflict,
+                            ActionStage::Rollback,
+                            false,
+                            "action.rollback.external_change_detected",
+                        ));
+                    }
                 }
                 let _broadcast = notify_explorer_settings_changed();
                 let state = self.detect_current_state(context, parameters)?;
@@ -868,6 +885,10 @@ mod tests {
         if let Some(original) = original {
             write_raw_value(&location, REG_DWORD_TYPE, &dword_bytes(original))
                 .expect("seed isolated Explorer value");
+        } else {
+            write_raw_value(&location, REG_DWORD_TYPE, &dword_bytes(0))
+                .expect("create isolated Explorer key");
+            delete_value(&location).expect("leave isolated Explorer key empty");
         }
         let intended = desired(parameters).expect("derive intended Explorer value");
         let backup = prepare_registry_backup(

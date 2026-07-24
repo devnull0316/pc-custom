@@ -1,7 +1,8 @@
 use super::{WindowsError, WindowsErrorKind, WindowsResult};
+use crate::backup::PowerSchemeGuid;
 
 #[cfg(windows)]
-pub fn active_power_scheme_guid() -> WindowsResult<String> {
+pub fn active_power_scheme() -> WindowsResult<PowerSchemeGuid> {
     use windows::{
         core::GUID,
         Win32::{
@@ -28,23 +29,40 @@ pub fn active_power_scheme_guid() -> WindowsResult<String> {
             None,
         ));
     }
-    Ok(format!(
-        "{{{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}}}",
-        guid.data1,
-        guid.data2,
-        guid.data3,
-        guid.data4[0],
-        guid.data4[1],
-        guid.data4[2],
-        guid.data4[3],
-        guid.data4[4],
-        guid.data4[5],
-        guid.data4[6],
-        guid.data4[7],
-    ))
+    Ok(PowerSchemeGuid {
+        data1: guid.data1,
+        data2: guid.data2,
+        data3: guid.data3,
+        data4: guid.data4,
+    })
 }
 
 #[cfg(not(windows))]
-pub fn active_power_scheme_guid() -> WindowsResult<String> {
+pub fn active_power_scheme() -> WindowsResult<PowerSchemeGuid> {
     Err(WindowsError::unsupported("PowerGetActiveScheme"))
+}
+
+pub fn active_power_scheme_guid() -> WindowsResult<String> {
+    active_power_scheme().map(PowerSchemeGuid::canonical_string)
+}
+
+#[cfg(windows)]
+pub fn set_active_power_scheme(scheme: &PowerSchemeGuid) -> WindowsResult<()> {
+    use windows::{core::GUID, Win32::System::Power::PowerSetActiveScheme};
+
+    let guid = GUID::from_values(scheme.data1, scheme.data2, scheme.data3, scheme.data4);
+    let status = unsafe { PowerSetActiveScheme(None, Some(&guid)) };
+    if status.0 != 0 {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "PowerSetActiveScheme",
+            Some(i64::from(status.0)),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn set_active_power_scheme(_scheme: &PowerSchemeGuid) -> WindowsResult<()> {
+    Err(WindowsError::unsupported("PowerSetActiveScheme"))
 }

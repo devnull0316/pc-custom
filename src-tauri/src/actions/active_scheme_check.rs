@@ -48,7 +48,7 @@ static METADATA: ActionMetadata = ActionMetadata {
     compatibility_key: "power.active_scheme_check.v1",
     backup_codec_version: 1,
     rollback_decoder_versions: &[1],
-    auto_apply_eligible: true,
+    auto_apply_eligible: false,
     windows_update_impact: "低。読み取りAPIの利用可否のみ再確認します。",
 };
 

@@ -7,11 +7,24 @@ export type CategoryId =
   | "power"
   | "explorer"
   | "appearance"
-  | "games";
+  | "games"
+  | "setup"
+  | "storage"
+  | "notifications"
+  | "input";
 
 export type RiskLevel = "safe" | "caution" | "experimental";
 
-export type ActionKind = "persistent" | "session" | "observation";
+export type ActionKind = "persistent" | "session" | "observation" | "guided";
+
+export type MethodClass =
+  | "public_api"
+  | "microsoft_cli"
+  | "winget"
+  | "official_module"
+  | "documented_registry"
+  | "limited_external"
+  | "unverified_storage";
 
 export type ActionAvailability =
   | "mutable"
@@ -30,6 +43,7 @@ export interface ActionState {
   kind: DetectionKind;
   label: string;
   detail: string;
+  items?: readonly string[];
   observedAt?: string;
 }
 
@@ -51,7 +65,9 @@ export interface ActionPresentation {
   updateImpact: "low" | "review" | "high";
   reversible: boolean;
   kind: ActionKind;
+  autoApplyEligible?: boolean;
   availability: ActionAvailability;
+  methodClass?: MethodClass;
   methodSummary: string;
   desiredState: string;
   currentState?: ActionState | null;

@@ -52,10 +52,7 @@ fn query_wmi_process_ids() -> WindowsResult<BTreeSet<u32>> {
                 None,
             )
         })?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| row.ProcessId)
-        .collect())
+    Ok(rows.into_iter().filter_map(|row| row.ProcessId).collect())
 }
 
 #[cfg(not(windows))]

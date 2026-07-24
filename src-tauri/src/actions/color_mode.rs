@@ -16,8 +16,8 @@ use crate::{
 };
 
 use super::common::{
-    decode_dword, dword_bytes, evidence, map_windows_error, validate_backup,
-    validate_backup_for_apply, validate_base, REG_DWORD_TYPE,
+    decode_dword, dword_bytes, ensure_registry_key_preexisted, evidence, map_windows_error,
+    validate_backup, validate_backup_for_apply, validate_base, REG_DWORD_TYPE,
 };
 
 const PERSONALIZE_SUBKEY: &str =
@@ -166,6 +166,12 @@ impl ColorModeAction {
         for entry in entries.iter().rev() {
             match restore_registry_backup(entry) {
                 Ok(RegistryRestoreOutcome::Restored | RegistryRestoreOutcome::AlreadyOriginal) => {}
+                Ok(RegistryRestoreOutcome::RestoredValueKeyRetained) => {
+                    return Err(ActionError::recovery_required(
+                        ActionStage::Recovery,
+                        "action.color_mode.compensation_key_retained",
+                    ));
+                }
                 Ok(RegistryRestoreOutcome::ExternalConflict) => {
                     return Err(ActionError::recovery_required(
                         ActionStage::Recovery,
@@ -186,6 +192,7 @@ impl ColorModeAction {
 
     fn apply_registry_entries(entries: &[RegistryBackup]) -> ActionResult<()> {
         for entry in entries {
+            ensure_registry_key_preexisted(entry, ActionStage::Apply)?;
             let current = read_registry_state(&entry.location).map_err(|error| {
                 map_windows_error(
                     ActionStage::Apply,
@@ -426,6 +433,12 @@ impl Action for ColorModeAction {
                 )
             })? {
                 RegistryRestoreOutcome::Restored | RegistryRestoreOutcome::AlreadyOriginal => {}
+                RegistryRestoreOutcome::RestoredValueKeyRetained => {
+                    return Err(ActionError::recovery_required(
+                        ActionStage::Rollback,
+                        "action.color_mode.rollback_key_retained",
+                    ));
+                }
                 RegistryRestoreOutcome::ExternalConflict => {
                     return Err(ActionError::recovery_required(
                         ActionStage::Rollback,

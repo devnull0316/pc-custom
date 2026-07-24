@@ -98,4 +98,3 @@ impl fmt::Display for CoreError {
 impl Error for CoreError {}
 
 pub type CoreResult<T> = Result<T, CoreError>;
-

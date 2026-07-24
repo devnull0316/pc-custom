@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::action::{ActionId, ProcessBindingParameters};
+use crate::action::{ActionId, PowerScheme, ProcessBindingParameters};
 
 use super::{Fingerprint, RegistryBackup};
 
@@ -26,6 +26,69 @@ pub struct ProcessWatchBackup {
     pub binding: ProcessBindingParameters,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerSchemeGuid {
+    pub data1: u32,
+    pub data2: u16,
+    pub data3: u16,
+    pub data4: [u8; 8],
+}
+
+impl PowerSchemeGuid {
+    pub const BALANCED: Self = Self {
+        data1: 0x381b4222,
+        data2: 0xf694,
+        data3: 0x41f0,
+        data4: [0x96, 0x85, 0xff, 0x5b, 0xb2, 0x60, 0xdf, 0x2e],
+    };
+    pub const POWER_SAVER: Self = Self {
+        data1: 0xa1841308,
+        data2: 0x3541,
+        data3: 0x4fab,
+        data4: [0xbc, 0x81, 0xf7, 0x15, 0x56, 0xf2, 0x0b, 0x4a],
+    };
+    pub const HIGH_PERFORMANCE: Self = Self {
+        data1: 0x8c5e7fda,
+        data2: 0xe8bf,
+        data3: 0x4a96,
+        data4: [0x9a, 0x85, 0xa6, 0xe2, 0x3a, 0x8c, 0x63, 0x5c],
+    };
+
+    pub const fn for_scheme(scheme: PowerScheme) -> Self {
+        match scheme {
+            PowerScheme::Balanced => Self::BALANCED,
+            PowerScheme::PowerSaver => Self::POWER_SAVER,
+            PowerScheme::HighPerformance => Self::HIGH_PERFORMANCE,
+        }
+    }
+
+    pub fn canonical_string(self) -> String {
+        format!(
+            "{{{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}}}",
+            self.data1,
+            self.data2,
+            self.data3,
+            self.data4[0],
+            self.data4[1],
+            self.data4[2],
+            self.data4[3],
+            self.data4[4],
+            self.data4[5],
+            self.data4[6],
+            self.data4[7],
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerSchemeBackup {
+    pub original_guid: PowerSchemeGuid,
+    pub intended_scheme: PowerScheme,
+    pub intended_guid: PowerSchemeGuid,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompositeBackup {
@@ -42,6 +105,7 @@ pub enum BackupPayload {
     SleepLease(SleepLeaseBackup),
     Observation(ObservationBackup),
     ProcessWatch(ProcessWatchBackup),
+    PowerScheme(PowerSchemeBackup),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

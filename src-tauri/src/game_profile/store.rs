@@ -7,7 +7,11 @@
 //! 対象EXEは登録時に `registered_file_identity` で canonical 化し、ローカル固定ボリューム上の
 //! 通常ファイルであることと file identity を確認する(名前追従・UNC・reparse を拒否)。
 
-use std::path::PathBuf;
+use std::{
+    collections::HashSet,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -16,11 +20,13 @@ use uuid::Uuid;
 use crate::error::{CoreError, CoreResult};
 
 const PROFILES_FILE_VERSION: u32 = 1;
+const MAX_PROFILES_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_PROFILES: usize = 200;
 const MAX_ACTIONS_PER_PROFILE: usize = 32;
+const MAX_EXECUTABLE_PATH_CHARS: usize = 32_767;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StoredProfileAction {
     pub action_id: String,
     #[serde(default)]
@@ -28,7 +34,7 @@ pub struct StoredProfileAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StoredProfile {
     pub id: String,
     pub name: String,
@@ -43,6 +49,7 @@ pub struct StoredProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProfilesFile {
     version: u32,
     profiles: Vec<StoredProfile>,
@@ -51,7 +58,7 @@ struct ProfilesFile {
 /// UI から受け取るプロファイル作成要求。executable_path は生の入力で、
 /// store が canonical 化・検証してから保存する。
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateProfileRequest {
     pub name: String,
     pub executable_path: String,
@@ -61,6 +68,7 @@ pub struct CreateProfileRequest {
     pub actions: Vec<StoredProfileAction>,
 }
 
+#[derive(Debug)]
 pub struct ProfileStore {
     path: PathBuf,
     profiles: Mutex<Vec<StoredProfile>>,
@@ -69,8 +77,22 @@ pub struct ProfileStore {
 impl ProfileStore {
     /// 既存ファイルがあれば読み込み、無ければ空で開く。壊れたファイルは読み込み拒否。
     pub fn open(path: PathBuf) -> CoreResult<Self> {
-        let profiles = match std::fs::read(&path) {
-            Ok(bytes) => {
+        let profiles = match std::fs::File::open(&path) {
+            Ok(file) => {
+                // metadata確認だけでは確認後の追記を防げないため、読み取り自体を
+                // 上限+1 byteに制限する。巨大/増大中ファイルを無制限に確保しない。
+                let mut bytes = Vec::new();
+                file.take(MAX_PROFILES_FILE_BYTES + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| CoreError::storage())?;
+                if bytes.len() as u64 > MAX_PROFILES_FILE_BYTES {
+                    return Err(CoreError::new(
+                        "PROFILES_FILE_TOO_LARGE",
+                        "BOOTSTRAP",
+                        false,
+                        "プロファイル定義ファイルが安全な読込上限を超えています。",
+                    ));
+                }
                 let parsed: ProfilesFile = serde_json::from_slice(&bytes).map_err(|_| {
                     CoreError::new(
                         "PROFILES_FILE_CORRUPT",
@@ -87,6 +109,7 @@ impl ProfileStore {
                         "プロファイル定義ファイルの版が対応外です。",
                     ));
                 }
+                validate_loaded_profiles(&parsed.profiles)?;
                 parsed.profiles
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -114,20 +137,11 @@ impl ProfileStore {
                 "1プロファイルのActionが多すぎます。",
             ));
         }
-        // 登録済みActionだけを許可し、未知IDを弾く(任意ID実行への迂回防止)。
-        for action in &request.actions {
-            if action.action_id.parse::<crate::action::ActionId>().is_err() {
-                return Err(CoreError::invalid_request(
-                    "登録されていないActionは登録できません。",
-                ));
-            }
-        }
+        validate_automation_actions(&request.actions)?;
         let conflict_policy = match request.conflict_policy.as_deref() {
             None | Some("abort_profile") => "abort_profile".to_owned(),
             Some("skip_conflicting") => "skip_conflicting".to_owned(),
-            Some(_) => {
-                return Err(CoreError::invalid_request("競合方針の値が不正です。"))
-            }
+            Some(_) => return Err(CoreError::invalid_request("競合方針の値が不正です。")),
         };
 
         // 対象EXEを canonical 化し、ローカル固定ボリューム/通常ファイル/非reparse を検証する。
@@ -151,29 +165,46 @@ impl ProfileStore {
                 "登録できるプロファイル数の上限に達しました。",
             ));
         }
-        guard.push(profile.clone());
-        Self::persist(&self.path, &guard)?;
+        let mut next = guard.clone();
+        next.push(profile.clone());
+        Self::persist(&self.path, &next)?;
+        *guard = next;
         Ok(profile)
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> CoreResult<()> {
         let mut guard = self.profiles.lock();
-        let profile = guard
-            .iter_mut()
-            .find(|profile| profile.id == id)
+        let index = guard
+            .iter()
+            .position(|profile| profile.id == id)
             .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))?;
-        profile.automation_enabled = enabled;
-        Self::persist(&self.path, &guard)
+        if enabled {
+            // 旧版で保存済みの定義や、将来の移行処理が混在しても、無人適用を
+            // 許可していないActionを有効化の境界で必ず止める。
+            validate_automation_actions(&guard[index].actions)?;
+        }
+
+        // copy-on-write: 永続化候補だけを変更し、原子的保存が成功してから
+        // in-memory状態を置き換える。write/rename失敗時は旧状態を維持する。
+        let mut next = guard.clone();
+        next[index].automation_enabled = enabled;
+        Self::persist(&self.path, &next)?;
+        *guard = next;
+        Ok(())
     }
 
     pub fn delete(&self, id: &str) -> CoreResult<()> {
         let mut guard = self.profiles.lock();
-        let before = guard.len();
-        guard.retain(|profile| profile.id != id);
-        if guard.len() == before {
-            return Err(CoreError::invalid_request("対象のプロファイルがありません。"));
+        if !guard.iter().any(|profile| profile.id == id) {
+            return Err(CoreError::invalid_request(
+                "対象のプロファイルがありません。",
+            ));
         }
-        Self::persist(&self.path, &guard)
+        let mut next = guard.clone();
+        next.retain(|profile| profile.id != id);
+        Self::persist(&self.path, &next)?;
+        *guard = next;
+        Ok(())
     }
 
     /// 一時ファイルへ書いてから rename する原子的保存(Rust std は Windows で置換 rename)。
@@ -183,12 +214,124 @@ impl ProfileStore {
             profiles: profiles.to_vec(),
         };
         let bytes = serde_json::to_vec_pretty(&file).map_err(|_| CoreError::storage())?;
+        if bytes.len() as u64 > MAX_PROFILES_FILE_BYTES {
+            return Err(CoreError::invalid_request(
+                "プロファイル定義の合計サイズが保存上限を超えています。",
+            ));
+        }
         let mut temp = path.clone();
         temp.set_extension("json.tmp");
         std::fs::write(&temp, &bytes).map_err(|_| CoreError::storage())?;
         std::fs::rename(&temp, path).map_err(|_| CoreError::storage())?;
         Ok(())
     }
+}
+
+/// 永続ファイルは将来の移行データや外部編集を含み得るため、起動時にも
+/// 作成APIと同じ上限・型・自動適用境界を再検証する。
+fn validate_loaded_profiles(profiles: &[StoredProfile]) -> CoreResult<()> {
+    if profiles.len() > MAX_PROFILES {
+        return Err(profiles_file_corrupt());
+    }
+
+    let mut ids = HashSet::with_capacity(profiles.len());
+    for profile in profiles {
+        if Uuid::parse_str(&profile.id).is_err() || !ids.insert(profile.id.clone()) {
+            return Err(profiles_file_corrupt());
+        }
+        if profile.name.trim() != profile.name
+            || profile.name.is_empty()
+            || profile.name.chars().count() > 120
+        {
+            return Err(profiles_file_corrupt());
+        }
+        if profile.actions.len() > MAX_ACTIONS_PER_PROFILE {
+            return Err(profiles_file_corrupt());
+        }
+        if !matches!(
+            profile.conflict_policy.as_str(),
+            "abort_profile" | "skip_conflicting"
+        ) {
+            return Err(profiles_file_corrupt());
+        }
+        if profile.executable_path.is_empty()
+            || profile.executable_path.chars().count() > MAX_EXECUTABLE_PATH_CHARS
+            || !Path::new(&profile.executable_path).is_absolute()
+            || !profile
+                .executable_path
+                .to_ascii_lowercase()
+                .ends_with(".exe")
+        {
+            return Err(profiles_file_corrupt());
+        }
+        if hex::decode(&profile.file_id_hex)
+            .ok()
+            .filter(|bytes| bytes.len() == 16)
+            .is_none()
+        {
+            return Err(profiles_file_corrupt());
+        }
+        validate_automation_actions(&profile.actions).map_err(|_| profiles_file_corrupt())?;
+    }
+    Ok(())
+}
+
+fn profiles_file_corrupt() -> CoreError {
+    CoreError::new(
+        "PROFILES_FILE_CORRUPT",
+        "BOOTSTRAP",
+        false,
+        "プロファイル定義ファイルを安全に検証できません。破損または未対応の内容です。",
+    )
+}
+
+/// プロファイルはプロセス検知を起点に無人適用されるため、登録済みであることに加えて
+/// Action側が明示的に自動適用を許可していることを保存・有効化の境界で確認する。
+fn validate_automation_actions(actions: &[StoredProfileAction]) -> CoreResult<()> {
+    for stored in actions {
+        let parameters = parse_stored_profile_action(stored)?;
+        let action_id = parameters.action_id();
+        let action = crate::action::ACTION_REGISTRY
+            .get(action_id)
+            .ok_or_else(|| CoreError::invalid_request("登録済みActionを解決できませんでした。"))?;
+        if !action.metadata().auto_apply_eligible
+            || matches!(
+                action.metadata().kind,
+                crate::action::ActionKind::Observation | crate::action::ActionKind::Guided
+            )
+        {
+            return Err(CoreError::invalid_request(
+                "このActionは自動適用が許可されていないため、ゲームプロファイルには登録できません。",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_stored_profile_action(
+    stored: &StoredProfileAction,
+) -> CoreResult<crate::action::ActionParameters> {
+    let action_id = stored
+        .action_id
+        .parse::<crate::action::ActionId>()
+        .map_err(|_| CoreError::invalid_request("登録されていないActionは登録できません。"))?;
+    let parameters = stored
+        .parameters
+        .as_object()
+        .cloned()
+        .ok_or_else(|| CoreError::invalid_request("Actionの設定値はobjectで指定してください。"))?;
+    let parsed = crate::presentation::parse_action_request(
+        crate::presentation::PreviewActionRequest {
+            action_id: stored.action_id.clone(),
+            parameters,
+        },
+    )?;
+    if parsed.action_id() != action_id {
+        return Err(CoreError::invalid_request(
+            "Action IDと設定値の組み合わせが一致しません。",
+        ));
+    }
+    Ok(parsed)
 }
 
 #[cfg(windows)]
@@ -227,6 +370,40 @@ mod tests {
         format!(r"{root}\System32\notepad.exe")
     }
 
+    fn block_persist_temp(store: &ProfileStore) {
+        let mut blocking_temp = store.path.clone();
+        blocking_temp.set_extension("json.tmp");
+        std::fs::create_dir(&blocking_temp).expect("block temp-file write with directory");
+    }
+
+    fn eligible_request(name: &str) -> CreateProfileRequest {
+        CreateProfileRequest {
+            name: name.to_owned(),
+            executable_path: notepad(),
+            conflict_policy: None,
+            actions: vec![StoredProfileAction {
+                action_id: "theme.color_mode".to_owned(),
+                parameters: serde_json::json!({ "mode": "dark" }),
+            }],
+        }
+    }
+
+    fn persisted_profile(id: Uuid) -> StoredProfile {
+        StoredProfile {
+            id: id.to_string(),
+            name: "保存済みテスト".to_owned(),
+            executable_path: notepad(),
+            volume_serial_number: 1,
+            file_id_hex: "000102030405060708090a0b0c0d0e0f".to_owned(),
+            conflict_policy: "abort_profile".to_owned(),
+            automation_enabled: false,
+            actions: vec![StoredProfileAction {
+                action_id: "theme.color_mode".to_owned(),
+                parameters: serde_json::json!({ "mode": "dark" }),
+            }],
+        }
+    }
+
     #[test]
     fn create_list_enable_delete_round_trips_on_disk() {
         let (store, _dir) = temp_store();
@@ -243,7 +420,10 @@ mod tests {
             .expect("create profile");
         assert_eq!(created.name, "テストゲーム"); // trim 済み
         assert!(!created.automation_enabled); // 既定は無効
-        assert!(created.executable_path.to_lowercase().ends_with("notepad.exe"));
+        assert!(created
+            .executable_path
+            .to_lowercase()
+            .ends_with("notepad.exe"));
         assert_eq!(created.file_id_hex.len(), 32);
 
         // 別インスタンスで開き直しても永続化されている。
@@ -255,7 +435,10 @@ mod tests {
 
         store.delete(&created.id).expect("delete");
         assert!(store.list().is_empty());
-        assert!(ProfileStore::open(store.path.clone()).unwrap().list().is_empty());
+        assert!(ProfileStore::open(store.path.clone())
+            .unwrap()
+            .list()
+            .is_empty());
     }
 
     #[test]
@@ -274,6 +457,88 @@ mod tests {
     }
 
     #[test]
+    fn manual_only_action_is_rejected_at_create_boundary() {
+        let (store, _dir) = temp_store();
+        let result = store.create(CreateProfileRequest {
+            name: "x".to_owned(),
+            executable_path: notepad(),
+            conflict_policy: None,
+            actions: vec![StoredProfileAction {
+                action_id: "taskbar.search_mode".to_owned(),
+                parameters: serde_json::json!({ "mode": "hidden" }),
+            }],
+        });
+        let error = result.expect_err("manual-only Action must be rejected");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.user_message.contains("自動適用"));
+        assert!(store.list().is_empty());
+    }
+
+    #[test]
+    fn observation_action_is_rejected_at_create_boundary() {
+        let (store, _dir) = temp_store();
+        let result = store.create(CreateProfileRequest {
+            name: "x".to_owned(),
+            executable_path: notepad(),
+            conflict_policy: None,
+            actions: vec![StoredProfileAction {
+                action_id: "power.active_scheme_check".to_owned(),
+                parameters: serde_json::json!({}),
+            }],
+        });
+        let error = result.expect_err("observation Action must be rejected");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.user_message.contains("自動適用"));
+        assert!(store.list().is_empty());
+    }
+
+    #[test]
+    fn malformed_action_parameters_are_rejected_before_profile_storage() {
+        let (store, _dir) = temp_store();
+        let result = store.create(CreateProfileRequest {
+            name: "x".to_owned(),
+            executable_path: notepad(),
+            conflict_policy: None,
+            actions: vec![StoredProfileAction {
+                action_id: "theme.color_mode".to_owned(),
+                parameters: serde_json::json!({ "mode": "neon", "extra": true }),
+            }],
+        });
+        let error = result.expect_err("malformed parameters must be rejected");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(store.list().is_empty());
+    }
+
+    #[test]
+    fn manual_only_action_is_rejected_when_legacy_profile_is_enabled() {
+        let (store, _dir) = temp_store();
+        let created = store
+            .create(CreateProfileRequest {
+                name: "x".to_owned(),
+                executable_path: notepad(),
+                conflict_policy: None,
+                actions: vec![StoredProfileAction {
+                    action_id: "theme.color_mode".to_owned(),
+                    parameters: serde_json::json!({ "mode": "dark" }),
+                }],
+            })
+            .expect("create eligible profile");
+
+        // 旧版ファイルから読み込まれた状態を再現する。外部I/Oのmockは使わず、
+        // 実際のProfileStore有効化境界を通す。
+        store.profiles.lock()[0].actions = vec![StoredProfileAction {
+            action_id: "taskbar.search_mode".to_owned(),
+            parameters: serde_json::json!({ "mode": "hidden" }),
+        }];
+
+        let error = store
+            .set_enabled(&created.id, true)
+            .expect_err("manual-only Action must not be enabled");
+        assert!(error.user_message.contains("自動適用"));
+        assert!(!store.list()[0].automation_enabled);
+    }
+
+    #[test]
     fn nonexistent_executable_is_rejected() {
         let (store, _dir) = temp_store();
         let result = store.create(CreateProfileRequest {
@@ -283,5 +548,154 @@ mod tests {
             actions: vec![],
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn set_enabled_persist_failure_keeps_memory_and_disk_unchanged() {
+        let (store, _dir) = temp_store();
+        let created = store
+            .create(eligible_request("copy-on-write"))
+            .expect("create disabled profile");
+        assert!(!store.list()[0].automation_enabled);
+
+        // persistが書く実tempパスをディレクトリにして、実filesystemのwrite失敗を
+        // 安全なTempDir内で再現する。I/O mockや差し替えは使わない。
+        block_persist_temp(&store);
+
+        let error = store
+            .set_enabled(&created.id, true)
+            .expect_err("persist must fail");
+        assert_eq!(error.code, "STORAGE_FAILURE");
+        assert!(!store.list()[0].automation_enabled);
+
+        // disk上の原本も有効化前のまま。
+        let reopened = ProfileStore::open(store.path.clone()).expect("reopen original file");
+        assert!(!reopened.list()[0].automation_enabled);
+    }
+
+    #[test]
+    fn create_persist_failure_keeps_memory_and_disk_unchanged() {
+        let (store, _dir) = temp_store();
+        block_persist_temp(&store);
+
+        let error = store
+            .create(eligible_request("create-failure"))
+            .expect_err("persist must fail");
+        assert_eq!(error.code, "STORAGE_FAILURE");
+        assert!(store.list().is_empty());
+        assert!(!store.path.exists());
+
+        let reopened = ProfileStore::open(store.path.clone()).expect("reopen absent original");
+        assert!(reopened.list().is_empty());
+    }
+
+    #[test]
+    fn delete_persist_failure_keeps_memory_and_disk_unchanged() {
+        let (store, _dir) = temp_store();
+        let created = store
+            .create(eligible_request("delete-failure"))
+            .expect("create profile");
+        block_persist_temp(&store);
+
+        let error = store.delete(&created.id).expect_err("persist must fail");
+        assert_eq!(error.code, "STORAGE_FAILURE");
+        assert_eq!(store.list(), vec![created.clone()]);
+
+        let reopened = ProfileStore::open(store.path.clone()).expect("reopen original file");
+        assert_eq!(reopened.list(), vec![created]);
+    }
+
+    #[test]
+    fn open_rejects_profile_file_over_the_bounded_read_limit() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("profiles.json");
+        std::fs::write(&path, vec![b' '; MAX_PROFILES_FILE_BYTES as usize + 1])
+            .expect("write oversized profile file");
+
+        let error = ProfileStore::open(path).expect_err("oversized file must fail closed");
+        assert_eq!(error.code, "PROFILES_FILE_TOO_LARGE");
+    }
+
+    #[test]
+    fn open_rejects_unknown_fields_and_duplicate_profile_ids() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("profiles.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "version": PROFILES_FILE_VERSION,
+                "profiles": [],
+                "unexpected": true
+            }))
+            .expect("serialize unknown-field file"),
+        )
+        .expect("write unknown-field file");
+        assert_eq!(
+            ProfileStore::open(path.clone())
+                .expect_err("unknown fields must fail closed")
+                .code,
+            "PROFILES_FILE_CORRUPT"
+        );
+
+        let id = Uuid::from_u128(7);
+        let duplicated = ProfilesFile {
+            version: PROFILES_FILE_VERSION,
+            profiles: vec![persisted_profile(id), persisted_profile(id)],
+        };
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&duplicated).expect("serialize duplicates"),
+        )
+        .expect("write duplicates");
+        assert_eq!(
+            ProfileStore::open(path)
+                .expect_err("duplicate IDs must fail closed")
+                .code,
+            "PROFILES_FILE_CORRUPT"
+        );
+    }
+
+    #[test]
+    fn open_revalidates_action_schema_and_automation_eligibility() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("profiles.json");
+        let mut profile = persisted_profile(Uuid::from_u128(8));
+        profile.actions[0].parameters = serde_json::json!({ "mode": "neon" });
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&ProfilesFile {
+                version: PROFILES_FILE_VERSION,
+                profiles: vec![profile],
+            })
+            .expect("serialize malformed action"),
+        )
+        .expect("write malformed action");
+        assert_eq!(
+            ProfileStore::open(path.clone())
+                .expect_err("malformed action parameters must fail closed")
+                .code,
+            "PROFILES_FILE_CORRUPT"
+        );
+
+        let mut profile = persisted_profile(Uuid::from_u128(9));
+        profile.actions[0] = StoredProfileAction {
+            action_id: "taskbar.search_mode".to_owned(),
+            parameters: serde_json::json!({ "mode": "hidden" }),
+        };
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&ProfilesFile {
+                version: PROFILES_FILE_VERSION,
+                profiles: vec![profile],
+            })
+            .expect("serialize manual-only action"),
+        )
+        .expect("write manual-only action");
+        assert_eq!(
+            ProfileStore::open(path)
+                .expect_err("manual-only action must fail closed at open")
+                .code,
+            "PROFILES_FILE_CORRUPT"
+        );
     }
 }

@@ -143,7 +143,7 @@ Actionは最低限、次のfieldを持つ。
 
 `全Action事前検証 → resource lock → 全backupのdurable commit → 順次apply → 各verify → 成功commit`
 
-途中失敗は実際に適用した順の逆順でrollback/verifyする。rollback失敗は元のerrorで隠さず、timelineへ別itemとして残す。registry backupはkey有無、value有無、type、length、raw元bytes、適用bytes、viewを保持し、元々valueが無ければ削除して欠如状態へ戻す。
+途中失敗は実際に適用した順の逆順でrollback/verifyする。rollback失敗は元のerrorで隠さず、timelineへ別itemとして残す。registry backupはkey有無、value有無、type、length、raw元bytes、適用bytes、viewを保持する。元keyが既存で元valueが無ければ対象valueだけを削除して欠如状態へ戻し、元key自体が無い新規mutationはbackup前にfail-closedとする。
 
 rollback前に現在状態を`original / applied / third / unknown`へ分類する。`applied`だけが自動復元候補で、`third`はユーザー/他appの変更を黙って上書きしない。さらに未知buildでは、Action/versionのcross-build rollback承認とruntime probeが無ければ`applied`でも自動writeせず`RECOVERY_REQUIRED`にする。timelineは「この変更だけ戻す / この時点まで / 内容 / 結果 / 失敗だけ再試行 / log出力」を持つ。旧Action backup decoderは保持期間中削除しない。
 

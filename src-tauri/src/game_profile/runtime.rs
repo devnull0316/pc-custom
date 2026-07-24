@@ -5,7 +5,7 @@
 //! 2 操作だけを見せる。実際のプロセス列挙(WMI/Toolhelp)と実適用(TotonoeEngine)は
 //! `ObservedProcess` の供給と `ProfileActionSink` 実装という薄い I/O シムに閉じ込める。
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use uuid::Uuid;
 
@@ -13,9 +13,9 @@ use crate::action::ActionId;
 use crate::error::{CoreError, CoreResult};
 
 use super::{
-    ConflictPolicy, EventOutcome, GameProfile, GameProfileId, ObservedProcess, PlannedAction,
-    ProcessMatcher, ProfileActionSink, ProfileBinding, ProfileError, ProfileSupervisor,
-    ResourceIntent, StoredProfile, StoredProfileAction, TrackingMode,
+    ConflictPolicy, EventOutcome, ExitOutcome, GameProfile, GameProfileId, ObservedProcess,
+    PlannedAction, ProcessMatcher, ProfileActionSink, ProfileBinding, ProfileError,
+    ProfileSupervisor, ResourceIntent, StoredProfile, StoredProfileAction, TrackingMode,
 };
 use crate::action::ProcessFileIdentity;
 
@@ -23,13 +23,23 @@ use crate::action::ProcessFileIdentity;
 /// resource_key は登録済み Action メタデータから取得し、desired は正規化済みパラメータ列で表す
 /// (同一パラメータ=共有可 / 異なるパラメータ=競合、を安定に判定するため)。
 pub fn to_planned_action(stored: &StoredProfileAction) -> CoreResult<PlannedAction> {
-    let action_id: ActionId = stored
-        .action_id
-        .parse()
-        .map_err(|_| CoreError::invalid_request("登録されていないActionが含まれています。"))?;
-    let action = crate::action::ACTION_REGISTRY.get(action_id).ok_or_else(|| {
-        CoreError::invalid_request("登録済みActionを解決できませんでした。")
-    })?;
+    let parameters = super::store::parse_stored_profile_action(stored)?;
+    let action_id: ActionId = parameters.action_id();
+    let action = crate::action::ACTION_REGISTRY
+        .get(action_id)
+        .ok_or_else(|| CoreError::invalid_request("登録済みActionを解決できませんでした。"))?;
+    if !action.metadata().auto_apply_eligible
+        || matches!(
+            action.metadata().kind,
+            crate::action::ActionKind::Observation | crate::action::ActionKind::Guided
+        )
+    {
+        // ProfileStoreを経由しない旧定義・移行データでも、プロセス検知からの
+        // 無人適用へ到達させない最終防御。通常の手動preview/commitには影響しない。
+        return Err(CoreError::invalid_request(
+            "このActionは自動適用が許可されていないため、ゲームプロファイルでは実行できません。",
+        ));
+    }
     // BTreeMap ベースの serde_json はキー順が安定するため、desired トークンは決定的。
     let desired = serde_json::to_string(&stored.parameters).unwrap_or_default();
     let intents = action
@@ -61,7 +71,12 @@ pub fn to_game_profile(stored: &StoredProfile) -> CoreResult<GameProfile> {
 
     let conflict_policy = match stored.conflict_policy.as_str() {
         "skip_conflicting" => ConflictPolicy::SkipConflicting,
-        _ => ConflictPolicy::AbortProfile,
+        "abort_profile" => ConflictPolicy::AbortProfile,
+        _ => {
+            return Err(CoreError::invalid_request(
+                "プロファイルの競合方針が不正です。",
+            ))
+        }
     };
 
     let actions = stored
@@ -125,13 +140,42 @@ impl<S: ProfileActionSink> ProfileRuntime<S> {
             }
         }
 
-        // 無効化・削除されたものは検知対象から外す(実行中セッションは終了検知まで維持)。
-        let to_remove: Vec<GameProfileId> = self
-            .registered
-            .difference(&desired_ids)
-            .copied()
-            .collect();
+        // 無効化・削除されたものは、matcherが保持するinstanceを終了扱いにして
+        // 既適用resourceを先にrollbackする。seenを捨てるunregisterを先に行うと
+        // Exitedを永久に失うため、復元完了後にだけ監視・定義を解除する。
+        let to_remove: Vec<GameProfileId> =
+            self.registered.difference(&desired_ids).copied().collect();
         for id in to_remove {
+            for event in self.matcher.exit_events_before_unregister(id) {
+                match self.supervisor.handle(event) {
+                    Ok(EventOutcome::Exit(ExitOutcome::PartiallyFailed { .. })) => {
+                        // supervisorはfailed参照を保持しない。EngineProfileSinkの
+                        // durable journal/reconcileを唯一の復旧元として明示する。
+                        skipped.push((
+                            id.0.to_string(),
+                            CoreError::recovery_required(
+                                "無効化されたプロファイルの一部設定を復元できませんでした。変更記録からの復旧が必要です。",
+                            ),
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        skipped.push((
+                            id.0.to_string(),
+                            CoreError::recovery_required(
+                                "無効化されたプロファイルの設定を復元できませんでした。変更記録からの復旧が必要です。",
+                            ),
+                        ));
+                        break;
+                    }
+                }
+            }
+            if self.supervisor.is_active(id) {
+                continue;
+            }
+            // 部分失敗も上でRECOVERY_REQUIREDとして呼び側へ返した上で、
+            // runtimeには再試行可能なfailed stateが無いため監視状態を片付ける。
+            self.supervisor.unregister_profile(id);
             self.matcher.unregister(id);
             self.registered.remove(&id);
         }
@@ -140,8 +184,37 @@ impl<S: ProfileActionSink> ProfileRuntime<S> {
     }
 
     /// プロセススナップショットを 1 回処理し、検知差分を状態機械へ流す。
-    pub fn tick(&mut self, snapshot: &[ObservedProcess]) -> Result<Vec<EventOutcome>, ProfileError> {
+    pub fn tick(
+        &mut self,
+        snapshot: &[ObservedProcess],
+    ) -> Result<Vec<EventOutcome>, ProfileError> {
         let events = self.matcher.observe(snapshot);
+        self.handle_events(events)
+    }
+
+    /// 列挙漏れの証拠があるスナップショットを処理する。
+    /// 確認済みの起動だけを反映し、消失は完全なスナップショットまで保留する。
+    pub fn tick_incomplete(
+        &mut self,
+        snapshot: &[ObservedProcess],
+        confirmed_exits: &BTreeSet<super::InstanceKey>,
+    ) -> Result<Vec<EventOutcome>, ProfileError> {
+        let events = self.matcher.observe_incomplete(snapshot, confirmed_exits);
+        self.handle_events(events)
+    }
+
+    pub fn missing_instances(&self, snapshot: &[ObservedProcess]) -> BTreeSet<super::InstanceKey> {
+        self.matcher.missing_instances(snapshot)
+    }
+
+    pub fn tracked_instances(&self) -> BTreeSet<super::InstanceKey> {
+        self.matcher.tracked_instances()
+    }
+
+    fn handle_events(
+        &mut self,
+        events: Vec<super::ObservedEvent>,
+    ) -> Result<Vec<EventOutcome>, ProfileError> {
         let mut outcomes = Vec::with_capacity(events.len());
         for event in events {
             outcomes.push(self.supervisor.handle(event)?);
@@ -173,6 +246,7 @@ mod tests {
         applies: usize,
         rollbacks: usize,
         counter: u64,
+        fail_rollbacks: bool,
     }
     #[derive(Clone)]
     struct FakeSink {
@@ -197,8 +271,13 @@ mod tests {
             Ok(out)
         }
         fn rollback(&mut self, _applied: &AppliedAction) -> Result<(), ProfileError> {
-            self.log.borrow_mut().rollbacks += 1;
-            Ok(())
+            let mut log = self.log.borrow_mut();
+            log.rollbacks += 1;
+            if log.fail_rollbacks {
+                Err(ProfileError::Sink("injected rollback failure".to_owned()))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -221,9 +300,7 @@ mod tests {
     fn identity() -> ProcessFileIdentity {
         ProcessFileIdentity {
             volume_serial_number: 7,
-            file_id: [
-                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-            ],
+            file_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
         }
     }
 
@@ -255,6 +332,39 @@ mod tests {
     }
 
     #[test]
+    fn manual_only_action_is_rejected_at_runtime_boundary() {
+        let stored = StoredProfileAction {
+            action_id: "taskbar.search_mode".to_owned(),
+            parameters: serde_json::json!({ "mode": "hidden" }),
+        };
+        let error = to_planned_action(&stored).expect_err("manual-only Action must not be planned");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.user_message.contains("自動適用"));
+    }
+
+    #[test]
+    fn observation_action_is_rejected_at_runtime_boundary() {
+        let stored = StoredProfileAction {
+            action_id: "power.active_scheme_check".to_owned(),
+            parameters: serde_json::json!({}),
+        };
+        let error = to_planned_action(&stored).expect_err("observation Action must not be planned");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.user_message.contains("自動適用"));
+    }
+
+    #[test]
+    fn malformed_parameters_are_rejected_at_runtime_boundary() {
+        let stored = StoredProfileAction {
+            action_id: "theme.color_mode".to_owned(),
+            parameters: serde_json::json!({ "mode": "neon", "extra": true }),
+        };
+        let error = to_planned_action(&stored)
+            .expect_err("legacy malformed parameters must not reach preview");
+        assert_eq!(error.code, "INVALID_REQUEST");
+    }
+
+    #[test]
     fn runtime_applies_on_launch_and_restores_on_exit() {
         let sink = FakeSink {
             log: Rc::new(RefCell::new(Log::default())),
@@ -274,6 +384,31 @@ mod tests {
 
         // 終了を検知 → 復元。
         let outcomes = runtime.tick(&[]).expect("tick exit");
+        assert!(matches!(outcomes.as_slice(), [EventOutcome::Exit(_)]));
+        assert_eq!(log.borrow().rollbacks, 1);
+    }
+
+    #[test]
+    fn incomplete_snapshot_restores_only_with_individual_exit_confirmation() {
+        let sink = FakeSink {
+            log: Rc::new(RefCell::new(Log::default())),
+        };
+        let log = sink.log.clone();
+        let mut runtime = ProfileRuntime::new(sink);
+        assert!(runtime.sync(&[stored(true)]).is_empty());
+        runtime.tick(&[proc(1000)]).expect("tick launch");
+        assert_eq!(log.borrow().applies, 1);
+
+        assert!(runtime
+            .tick_incomplete(&[], &BTreeSet::new())
+            .expect("partial snapshot")
+            .is_empty());
+        assert_eq!(log.borrow().rollbacks, 0);
+
+        let confirmed = BTreeSet::from([proc(1000).instance]);
+        let outcomes = runtime
+            .tick_incomplete(&[], &confirmed)
+            .expect("individually confirmed exit");
         assert!(matches!(outcomes.as_slice(), [EventOutcome::Exit(_)]));
         assert_eq!(log.borrow().rollbacks, 1);
     }
@@ -301,5 +436,65 @@ mod tests {
         bad.file_id_hex = "zz".to_owned(); // 不正な本人性
         let skipped = runtime.sync(&[bad]);
         assert_eq!(skipped.len(), 1);
+    }
+
+    fn assert_running_profile_is_restored_when_removed(next: Vec<StoredProfile>) {
+        let sink = FakeSink {
+            log: Rc::new(RefCell::new(Log::default())),
+        };
+        let log = sink.log.clone();
+        let mut runtime = ProfileRuntime::new(sink);
+        let profile = stored(true);
+        let profile_id = GameProfileId(Uuid::parse_str(&profile.id).expect("profile id"));
+        assert!(runtime.sync(&[profile]).is_empty());
+        runtime.tick(&[proc(1000)]).expect("apply running profile");
+        assert!(runtime.is_active(profile_id));
+        assert_eq!(log.borrow().applies, 1);
+
+        let skipped = runtime.sync(&next);
+        assert!(skipped.is_empty());
+        assert_eq!(log.borrow().rollbacks, 1);
+        assert!(!runtime.is_active(profile_id));
+        assert!(!runtime.has_targets());
+
+        // 同じprocessが動作中でも、監視解除後に再適用されない。
+        assert!(runtime
+            .tick(&[proc(1000)])
+            .expect("tick after removal")
+            .is_empty());
+        assert_eq!(log.borrow().applies, 1);
+    }
+
+    #[test]
+    fn disabling_running_profile_restores_before_unregister() {
+        assert_running_profile_is_restored_when_removed(vec![stored(false)]);
+    }
+
+    #[test]
+    fn deleting_running_profile_restores_before_unregister() {
+        assert_running_profile_is_restored_when_removed(Vec::new());
+    }
+
+    #[test]
+    fn rollback_failure_during_sync_is_reported_for_journal_recovery() {
+        let sink = FakeSink {
+            log: Rc::new(RefCell::new(Log {
+                fail_rollbacks: true,
+                ..Log::default()
+            })),
+        };
+        let log = sink.log.clone();
+        let mut runtime = ProfileRuntime::new(sink);
+        let profile = stored(true);
+        let profile_id = GameProfileId(Uuid::parse_str(&profile.id).expect("profile id"));
+        assert!(runtime.sync(&[profile]).is_empty());
+        runtime.tick(&[proc(1000)]).expect("apply running profile");
+
+        let skipped = runtime.sync(&[stored(false)]);
+        assert_eq!(log.borrow().rollbacks, 1);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].1.code, "RECOVERY_REQUIRED");
+        assert!(!runtime.is_active(profile_id));
+        assert!(!runtime.has_targets());
     }
 }

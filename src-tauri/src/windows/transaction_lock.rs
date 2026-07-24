@@ -15,10 +15,7 @@ pub struct CoreMutationGuard {
 #[cfg(windows)]
 impl Drop for CoreMutationGuard {
     fn drop(&mut self) {
-        use windows::Win32::{
-            Foundation::CloseHandle,
-            System::Threading::ReleaseMutex,
-        };
+        use windows::Win32::{Foundation::CloseHandle, System::Threading::ReleaseMutex};
 
         if self.acquired {
             // Drop is the crash-safe last resort for early-return paths. The
@@ -130,7 +127,6 @@ pub struct CoreMutationGuard;
 
 #[cfg(not(windows))]
 pub struct AppInstanceGuard;
-
 
 #[cfg(not(windows))]
 pub fn acquire_core_mutation_lock() -> WindowsResult<CoreMutationGuard> {

@@ -94,9 +94,9 @@ pub fn read_value_state(
 #[cfg(windows)]
 fn checked_reg_type(value_type: u32) -> WindowsResult<winreg::enums::RegType> {
     use winreg::enums::{
-        REG_BINARY, REG_DWORD, REG_DWORD_BIG_ENDIAN, REG_EXPAND_SZ,
-        REG_FULL_RESOURCE_DESCRIPTOR, REG_LINK, REG_MULTI_SZ, REG_NONE, REG_QWORD,
-        REG_RESOURCE_LIST, REG_RESOURCE_REQUIREMENTS_LIST, REG_SZ,
+        REG_BINARY, REG_DWORD, REG_DWORD_BIG_ENDIAN, REG_EXPAND_SZ, REG_FULL_RESOURCE_DESCRIPTOR,
+        REG_LINK, REG_MULTI_SZ, REG_NONE, REG_QWORD, REG_RESOURCE_LIST,
+        REG_RESOURCE_REQUIREMENTS_LIST, REG_SZ,
     };
     let value = match value_type {
         x if x == REG_NONE as u32 => REG_NONE,
@@ -156,10 +156,7 @@ pub fn write_raw_value(
     let (key, _) = root(location.hive)
         .create_subkey_with_flags(
             &location.canonical_subkey,
-            KEY_CREATE_SUB_KEY
-                | KEY_QUERY_VALUE
-                | KEY_SET_VALUE
-                | view_flag(location.view),
+            KEY_CREATE_SUB_KEY | KEY_QUERY_VALUE | KEY_SET_VALUE | view_flag(location.view),
         )
         .map_err(|error| map_io("create registry key", error))?;
     key.set_raw_value(
@@ -207,7 +204,7 @@ pub fn delete_value(_location: &RegistryLocation) -> WindowsResult<()> {
     Err(WindowsError::unsupported("delete registry value"))
 }
 
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 pub fn delete_key_if_empty(location: &RegistryLocation) -> WindowsResult<bool> {
     use std::io::ErrorKind;
     use winreg::enums::{KEY_READ, KEY_WRITE};
@@ -223,24 +220,19 @@ pub fn delete_key_if_empty(location: &RegistryLocation) -> WindowsResult<bool> {
     };
     match key.enum_values().next() {
         Some(Ok(_)) => return Ok(false),
-        Some(Err(error)) => {
-            return Err(map_io("enumerate registry values before delete", error))
-        }
+        Some(Err(error)) => return Err(map_io("enumerate registry values before delete", error)),
         None => {}
     }
     match key.enum_keys().next() {
         Some(Ok(_)) => return Ok(false),
-        Some(Err(error)) => {
-            return Err(map_io("enumerate registry subkeys before delete", error))
-        }
+        Some(Err(error)) => return Err(map_io("enumerate registry subkeys before delete", error)),
         None => {}
     }
     drop(key);
 
-    let (parent_path, leaf) = location
-        .canonical_subkey
-        .rsplit_once('\\')
-        .ok_or_else(|| WindowsError::new(WindowsErrorKind::InvalidData, "split registry key", None))?;
+    let (parent_path, leaf) = location.canonical_subkey.rsplit_once('\\').ok_or_else(|| {
+        WindowsError::new(WindowsErrorKind::InvalidData, "split registry key", None)
+    })?;
     let parent = root(location.hive)
         .open_subkey_with_flags(parent_path, KEY_WRITE | view_flag(location.view))
         .map_err(|error| map_io("open registry parent key", error))?;
@@ -251,7 +243,7 @@ pub fn delete_key_if_empty(location: &RegistryLocation) -> WindowsResult<bool> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(all(test, not(windows)))]
 pub fn delete_key_if_empty(_location: &RegistryLocation) -> WindowsResult<bool> {
     Err(WindowsError::unsupported("delete registry key"))
 }

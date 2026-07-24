@@ -32,7 +32,7 @@ BRIEF 必須フィールドをそのまま持つ。
 - `kind`: `persistent`, `session`, `observation`, `guided`
 - `parameterSchema`: enum、範囲、必須/追加field拒否
 - `resourceKeys`: 排他・leaseの単位
-- `methodClass`: 公開API / 公式CLI / WinGet / 公式module / 文書化registry / 限定external
+- `methodClass`: 公開API / 公式CLI / WinGet / 公式module / 文書化registry / 限定external / 未立証storage
 - `evidenceUrls`: 一次資料
 - `compatibilityKey`: 集中互換性表への参照
 - `backupCodecVersion`, `rollbackDecoderVersions`
@@ -45,7 +45,7 @@ BRIEF 必須フィールドをそのまま持つ。
 | `persistent` | theme、power user mode | 保存した変更前状態へ戻す |
 | `session` | sleep prevention、app launch | lease解除、Totonoeが作ったsession資源だけを通常終了 |
 | `observation` | startup inventory、readiness check | OS変更なし。観測sessionを閉じるno-op |
-| `guided` | 公開setterがないDND、build揮発性が高いtaskbar項目の案内 | 設定画面を開くだけ。自動適用済みとは記録しない |
+| `guided` | 公開setterがないDNDの案内、setter根拠未承認storageの読取候補 | 新しいOS変更を作らず、自動適用済みとは記録しない。旧durable backupだけは復旧可能 |
 
 guided/observation も統一UIのため Action interface を実装するが、変更transactionの成功数や「復元可能な変更」に数えない。
 
@@ -53,7 +53,7 @@ guided/observation も統一UIのため Action interface を実装するが、�
 
 `Explorer\Advanced`の`HideFileExt`、`Hidden`、`ShowSecondsInSystemClock`と、`Themes\Personalize`の`AppsUseLightTheme`、`SystemUsesLightTheme`、`EnableTransparency`は、CC監査P3により**安全・自動化可（対象buildの実機smokeと非破壊broadcastを条件）**へ格上げする。Task 2では`explorer.show_extensions`、`explorer.show_hidden`、`theme.color_mode`を前倒し実装する。clock secondsとtransparencyもguided固定ではなく同じstable分類だが、今回の縦切り対象外である。
 
-taskbar検索、Widgets、Game Mode、DND/Focusはこの格上げに含めない。buildごとの意味が揮発しやすいもの、cleanな公開setterが無いものはdetect/guidedを維持する。
+taskbar検索、Game Modeを含む今回追加の固定HKCU候補42件は、この格上げに含めない。参照したSettings schemaや概説ページはWindows UI setter契約を立証せず、対象buildの実機UI round-tripも未実施である。そのためIDとparameter schemaはcatalogへ保持するが、`kind=guided`、`methodClass=unverified_storage`、`riskLevel=experimental`、`autoApplyEligible=false`とする。検出は固定DWORDの保存値だけを表示し、有効なWindows UI状態とは解釈しない。`validate`、`createBackup`、`apply`はhandler自身が`setter_evidence_pending`で拒否し、compatibilityの一般判定だけに依存しない。CCがAction固有の一次資料と24H2/25H2実機試験を承認するまでrelease buildで書込み経路を持たない。Widgetsは既存の監査済みstable Action、DND/Focusは引き続きguided/未実装として別に扱う。
 
 ## 3. 処理インターフェース
 
@@ -93,6 +93,8 @@ taskbar検索、Widgets、Game Mode、DND/Focusはこの格上げに含めない
 6. 検証済みの限定外部ツール連携
 
 非公開COM、undocumented registry、画面自動操作しかない場合は stable Action にしない。設定画面へのguided Actionかexperimental候補に落とす。
+
+`unverified_storage`はこの優先順位に入る変更手段ではない。固定位置を読み取ってsetter候補をレビューするための設計分類であり、文書化registryや限定externalへ読み替えてはならない。
 
 ## 5. 状態と事前条件
 
@@ -178,7 +180,11 @@ backupには必ず次を保存する。
 
 lossless backup は `RegQueryValueExW` 相当のraw readを使う。文字列として正規化して保存しない。最小権限はread時とwrite時で分け、全権限を要求しない。
 
-rollback時は現在値が実際の適用値fingerprintと一致するか先に確認する。一致しなければユーザー、GPO、他アプリによる外部変更なので自動上書きしない。元valueが無かった場合はvalueを削除し、元keyまで無かった場合でも、Totonoeが作成し現在空であると証明できる時だけkeyを削除する。
+### setter根拠未承認の固定storage候補
+
+`methodClass=unverified_storage`のActionは上記mutationモデルを実行しない。固定key/valueのread-only観測だけを許可し、raw DWORDをUI機能のオン／オフへ意味付けしない。`ActionMetadata.maximumTestedBuild`は現在`u32`のため、実機mutation試験なしを内部sentinel `0`で表し、IPCでは必ず`null`へ変換する。`0`を実在buildや互換範囲として扱ってはならない。旧versionが作成済みのdurable backupを持つ場合に限り、第三者変更を上書きしない既存rollback decoderを復旧用に保持する。
+
+rollback時は現在値が実際の適用値fingerprintと一致するか先に確認する。一致しなければユーザー、GPO、他アプリによる外部変更なので自動上書きしない。元valueが無かった場合は、元keyが既存であることをbackupで確認したうえでvalueだけを削除する。Windows registryには「現在も空ならkeyを削除する」という原子的compare-deleteがないため、MVPの新規mutationは対象key自体が無い場合にbackup段階でfail-closedとし、keyを作らない。旧版backupの復旧でkeyが作成済みの場合もkey全体は削除せず、対象valueだけを安全に除去して空keyを残し、`RECOVERY_REQUIRED`として明示する。
 
 Explorer/theme系setterの書込後は、まず`SHChangeNotify(SHCNE_ASSOCCHANGED, ...)`や対象別のbounded `WM_SETTINGCHANGE`で非破壊に反映を通知する。今回のstable ActionはExplorerを強制終了・再起動しない。通知で即時反映できなくてもregistry検証成功とUI反映を混同せず、「設定済み・再読込待ち」として結果を残す。
 
@@ -257,4 +263,4 @@ Actionごとに次のtable-driven試験を必須にする。
 - 二つのgame profileによる同値共有・異値競合
 - app update後に旧backup decoderで復元
 
-自動化試験に加え、24H2/25H2と検証対象26H1のclean VM/実機でround-tripを行う。実機未試験のActionは `maximumTestedBuild` を埋めず、自動適用不可とする。
+自動化試験に加え、24H2/25H2と検証対象26H1のclean VM/実機でround-tripを行う。実機未試験のActionはIPCの`maximumTestedBuild`を`null`とし、自動適用不可にする。内部metadataが`u32`の間は`unverified_storage`かつ`guided`だけがsentinel `0`を使用でき、static contractで他分類への混入を拒否する。setter根拠未承認Actionの自動試験は、全候補についてvalidate/backup/apply拒否とraw保存値の不変を確認する。

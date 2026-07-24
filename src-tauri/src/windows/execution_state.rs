@@ -47,11 +47,7 @@ impl SleepLeaseManager {
         Ok(Self { sender })
     }
 
-    pub fn acquire(
-        &self,
-        owner: Uuid,
-        keep_display_on: bool,
-    ) -> WindowsResult<SleepLeaseSnapshot> {
+    pub fn acquire(&self, owner: Uuid, keep_display_on: bool) -> WindowsResult<SleepLeaseSnapshot> {
         self.request(|reply| Command::Acquire {
             owner,
             keep_display_on,
@@ -68,7 +64,10 @@ impl SleepLeaseManager {
     }
 
     pub fn snapshot_for(&self, owner: Uuid) -> WindowsResult<SleepLeaseSnapshot> {
-        self.request(|reply| Command::Snapshot { owner: Some(owner), reply })
+        self.request(|reply| Command::Snapshot {
+            owner: Some(owner),
+            reply,
+        })
     }
 
     fn request(
@@ -117,7 +116,9 @@ pub fn sleep_lease_manager() -> WindowsResult<&'static SleepLeaseManager> {
 
 #[cfg(not(windows))]
 pub fn sleep_lease_manager() -> WindowsResult<&'static SleepLeaseManager> {
-    Err(WindowsError::unsupported("initialize execution-state manager"))
+    Err(WindowsError::unsupported(
+        "initialize execution-state manager",
+    ))
 }
 
 #[cfg(windows)]

@@ -25,9 +25,9 @@ use crate::{
     error::{CoreError, CoreResult},
     journal::{JournalDatabase, ReconcileResult, RecoveryClassification, TimelineItem},
     presentation::{
-        action_presentation, default_parameters, os_label, parse_action_request,
-        preview_change, state_to_ui, ActionPresentation, BootstrapStatus, CommitResult,
-        DetectionResponse, PreviewActionsRequest, PreviewResponse,
+        action_presentation, default_parameters, listing_parameters, os_label,
+        parse_action_request, preview_change, state_to_ui, ActionPresentation, BootstrapStatus,
+        CommitResult, DetectionResponse, PreviewActionsRequest, PreviewResponse,
     },
 };
 
@@ -130,7 +130,7 @@ impl TotonoeEngine {
                     .map(|identity| CompatibilityCatalog::evaluate(identity, metadata))
                     .unwrap_or_else(|| CompatibilityCatalog::decision_for_build(0));
                 let current_state = self.initial_identity.as_ref().and_then(|identity| {
-                    default_parameters(metadata.id).map(|parameters| {
+                    listing_parameters(metadata.id).map(|parameters| {
                         let context = action_context(identity, Uuid::nil(), Uuid::nil());
                         action.detect_current_state(&context, &parameters).unwrap_or_else(|error| {
                             DetectedState::Error {
@@ -159,7 +159,7 @@ impl TotonoeEngine {
             .map_err(CoreError::from)?;
         Ok(DetectionResponse {
             action_id: action_id.as_str().to_owned(),
-            state: state_to_ui(action_id, state),
+            state: state_to_ui(action.metadata(), state),
         })
     }
 
@@ -450,4 +450,3 @@ fn format_timestamp(unix_ms: u64) -> String {
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
         .to_rfc3339()
 }
-

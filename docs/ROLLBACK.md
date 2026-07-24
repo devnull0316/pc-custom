@@ -53,13 +53,15 @@ BRIEF の必須5項目を包含する。
 | 元値 | byte lengthとraw bytes。文字列へ正規化しない |
 | 適用値 | 予定値と実際値のtype/raw bytes |
 
-加えて hive、canonical subkey、value name、32/64-bit view、Totonoeがkeyを作成したかを持つ。
+加えて hive、canonical subkey、value name、32/64-bit viewを持つ。新規mutationは元keyが既存の場合だけ許可する。
 
 復元:
 
 - 元valueあり: 元type/raw bytesをそのまま設定する。
-- 元valueなし: Totonoeの適用値と一致する場合だけvalueを削除する。
-- 元keyなし: Totonoeが作り、現在空で、他の書込がないと証明できる場合だけkeyを削除する。それ以外は空keyを残して警告する。
+- 元valueなし・元keyあり: Totonoeの適用値と一致する場合だけvalueを削除し、既存keyは残す。
+- 元keyなし: 新規preview/backupをfail-closedにして書き込まない。旧版backupの復旧では対象valueだけを削除し、key全体は削除せず`RECOVERY_REQUIRED`を残す。
+
+この制約は、空確認とkey削除の間に第三者がvalueを書いた場合に、そのvalueごとkeyを消すTOCTOUを避けるためである。target valueの比較と書込/削除の間に残る狭いraceも、適用直後・復元直後の再検出と競合表示で検知し、無条件の成功扱いにはしない。
 
 ### Power mode payload
 

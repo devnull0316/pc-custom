@@ -6,6 +6,10 @@ export const CATEGORIES = [
   { id: "explorer", label: "ファイル表示", description: "ファイルを見分けやすくする", icon: "explorer" },
   { id: "appearance", label: "見た目", description: "Windowsとアプリの明暗を揃える", icon: "appearance" },
   { id: "games", label: "ゲーム", description: "登録したゲームを変更せずに見守る", icon: "game" },
+  { id: "setup", label: "セットアップ", description: "デバイスと日常の初期設定を整える", icon: "action" },
+  { id: "storage", label: "ストレージ", description: "空き容量と一時ファイルの状態を確認", icon: "info" },
+  { id: "notifications", label: "通知", description: "必要なWindows通知の表示を選ぶ", icon: "info" },
+  { id: "input", label: "入力", description: "タッチキーボードと入力候補を整える", icon: "focus" },
 ] as const satisfies readonly CategoryPresentation[];
 
 export const RESULT_TILES = [
@@ -17,7 +21,7 @@ export const RESULT_TILES = [
   { id: "recovery", title: "変更を元へ戻す", description: "適用履歴から、戻したい項目だけを選べます。", category: "recovery", icon: "recovery" },
 ] as const satisfies readonly ResultTile[];
 
-export const STATIC_ACTIONS = [
+const BASE_STATIC_ACTIONS = [
   {
     id: "session.prevent_sleep",
     actionVersion: 1,
@@ -348,3 +352,527 @@ export const STATIC_ACTIONS = [
     ],
   },
 ] as const satisfies readonly ActionPresentation[];
+
+interface RegistryFallbackDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: ActionPresentation["category"];
+  readonly riskLevel: ActionPresentation["riskLevel"];
+  readonly desiredState: string;
+}
+
+const REGISTRY_FALLBACKS = [
+  {
+    id: "taskbar.search_mode",
+    name: "タスクバー検索の表示方法を選ぶ",
+    description: "検索を隠す、アイコン、ラベル付き、検索ボックスから選びます。固定HKCU値だけを変更します。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "検索ボックスを表示する",
+  },
+  {
+    id: "taskbar.alignment",
+    name: "タスクバーを左寄せ／中央寄せにする",
+    description: "Windows 11のタスクバー配置を選びます。タスクバーを終了せず設定変更通知だけを送ります。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "タスクバーを左寄せにする",
+  },
+  {
+    id: "start.layout",
+    name: "スタートのピンとおすすめの比率を選ぶ",
+    description: "既定、ピンを増やす、おすすめを増やすから選びます。Microsoft公開の0〜2値だけを使用します。",
+    category: "appearance",
+    riskLevel: "safe",
+    desiredState: "スタートのピンを増やす",
+  },
+  {
+    id: "start.recommendations",
+    name: "スタートのヒントや新しいアプリのおすすめを減らす",
+    description: "おすすめ機能の表示だけを切り替え、ピンやインストール済みアプリは変更しません。",
+    category: "appearance",
+    riskLevel: "safe",
+    desiredState: "ヒントやおすすめを表示しない",
+  },
+  {
+    id: "explorer.launch_target",
+    name: "Explorerを開いたときの場所を選ぶ",
+    description: "ホーム、PC、ダウンロードから開始場所を選びます。既存ウィンドウの位置は変更しません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "ExplorerをPCから開く",
+  },
+  {
+    id: "explorer.recent_files",
+    name: "Explorerに最近使ったファイルを表示する",
+    description: "Explorerの最近使ったファイル欄だけを切り替え、履歴ファイル自体は削除しません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "最近使ったファイルを表示する",
+  },
+  {
+    id: "taskbar.button_grouping",
+    name: "タスクバーのボタン結合方法を選ぶ",
+    description: "常に結合、いっぱいのとき、結合しないから選びます。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "タスクバーがいっぱいのときにボタンを結合する",
+  },
+  {
+    id: "taskbar.flashing",
+    name: "タスクバーアプリの点滅通知を切り替える",
+    description: "注意が必要なアプリがタスクバーで点滅する表示だけを切り替えます。通知自体は削除しません。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "タスクバーの点滅通知を有効にする",
+  },
+  {
+    id: "taskbar.share_window",
+    name: "タスクバーからウィンドウを共有できるようにする",
+    description: "対応する会議アプリで、タスクバーからウィンドウ共有を選べる表示を切り替えます。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "タスクバーからのウィンドウ共有を有効にする",
+  },
+  {
+    id: "taskbar.show_desktop",
+    name: "タスクバー右端のデスクトップ表示を切り替える",
+    description: "タスクバー右端を選んでデスクトップを表示する操作を切り替えます。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "タスクバー右端のデスクトップ表示を有効にする",
+  },
+  {
+    id: "search.recent_on_hover",
+    name: "検索アイコンに触れたときの最近の検索表示を切り替える",
+    description: "検索アイコンへポインターを置いたときに最近の検索を開く動作を切り替えます。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "ポインターを置いても最近の検索を開かない",
+  },
+  {
+    id: "taskbar.multi_monitor",
+    name: "すべてのモニターにタスクバーを表示する",
+    description: "複数ディスプレイでタスクバーを表示するかを切り替えます。単一ディスプレイでは効果がありません。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "すべてのモニターにタスクバーを表示する",
+  },
+  {
+    id: "taskbar.multi_monitor_mode",
+    name: "複数モニターでアプリボタンを出す場所を選ぶ",
+    description: "すべて、メインとウィンドウのある画面、ウィンドウのある画面から選びます。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "ウィンドウのあるモニターにアプリボタンを表示する",
+  },
+  {
+    id: "taskbar.secondary_button_grouping",
+    name: "別モニターのタスクバーボタン結合方法を選ぶ",
+    description: "セカンダリーモニターのボタンを、常に結合、いっぱいのとき、結合しないから選びます。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "別モニターのタスクバーがいっぱいのときにボタンを結合する",
+  },
+  {
+    id: "start.show_all_pins",
+    name: "スタートですべてのピンを最初に表示する",
+    description: "スタートを開いたとき、すべてのピン一覧を先に表示するかを切り替えます。ピン内容は変更しません。",
+    category: "appearance",
+    riskLevel: "safe",
+    desiredState: "すべてのピン一覧を最初に表示する",
+  },
+  {
+    id: "start.recent_apps",
+    name: "スタートに最近追加したアプリを表示する",
+    description: "最近インストールしたアプリの一覧表示だけを切り替え、アプリ自体は変更しません。",
+    category: "appearance",
+    riskLevel: "safe",
+    desiredState: "最近追加したアプリを表示する",
+  },
+  {
+    id: "appearance.accent_start_taskbar",
+    name: "スタートとタスクバーにアクセント色を表示する",
+    description: "選択済みのWindowsアクセント色をスタートとタスクバーへ表示するかを切り替えます。色そのものは変更しません。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "スタートとタスクバーにアクセント色を表示する",
+  },
+  {
+    id: "appearance.accent_title_bars",
+    name: "タイトルバーとウィンドウ枠にアクセント色を表示する",
+    description: "選択済みのアクセント色を対応するタイトルバーとウィンドウ枠へ表示するかを切り替えます。",
+    category: "appearance",
+    riskLevel: "safe",
+    desiredState: "タイトルバーとウィンドウ枠にアクセント色を表示する",
+  },
+  {
+    id: "appearance.auto_accent",
+    name: "背景に合わせてアクセント色を自動選択する",
+    description: "デスクトップ背景に合わせたWindowsの自動アクセント選択を切り替えます。任意色の直接書込みは行いません。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "背景に合わせたアクセント色の自動選択を有効にする",
+  },
+  {
+    id: "games.game_mode",
+    name: "Windows Game Modeを切り替える",
+    description: "Windows標準のGame Mode設定だけを切り替えます。サービス停止やゲーム改変は行いません。",
+    category: "games",
+    riskLevel: "caution",
+    desiredState: "Windows Game Modeを有効にする",
+  },
+  {
+    id: "games.controller_game_bar",
+    name: "コントローラーからGame Barを開く操作を切り替える",
+    description: "コントローラーのXboxボタンでGame Barを開く設定だけを切り替えます。入力の注入は行いません。",
+    category: "games",
+    riskLevel: "safe",
+    desiredState: "コントローラーからGame Barを開かない",
+  },
+  {
+    id: "devices.autoplay",
+    name: "メディアとデバイスの自動再生を切り替える",
+    description: "リムーバブルメディアの自動再生マスター設定を切り替えます。個別の既定アプリは変更しません。",
+    category: "setup",
+    riskLevel: "safe",
+    desiredState: "メディアとデバイスの自動再生を有効にする",
+  },
+  {
+    id: "notifications.usb_errors",
+    name: "USBエラーの通知を表示する",
+    description: "USB接続エラーのWindows通知だけを切り替えます。USB機能やドライバーは変更しません。",
+    category: "notifications",
+    riskLevel: "safe",
+    desiredState: "USBエラー通知を表示する",
+  },
+  {
+    id: "notifications.weak_charger",
+    name: "低出力充電器の通知を表示する",
+    description: "充電器の出力不足を知らせるWindows通知だけを切り替えます。充電制御は変更しません。",
+    category: "notifications",
+    riskLevel: "safe",
+    desiredState: "低出力充電器の通知を表示する",
+  },
+  {
+    id: "input.autocorrect",
+    name: "タッチキーボードの自動修正を切り替える",
+    description: "Windowsのタッチ入力に対する自動修正だけを切り替えます。物理キーボードの配列は変更しません。",
+    category: "input",
+    riskLevel: "safe",
+    desiredState: "タッチキーボードの自動修正を有効にする",
+  },
+  {
+    id: "input.double_space_period",
+    name: "スペース2回でピリオドを入力する",
+    description: "タッチキーボードでスペースを2回押したときのピリオド入力を切り替えます。",
+    category: "input",
+    riskLevel: "safe",
+    desiredState: "スペース2回のピリオド入力を有効にする",
+  },
+  {
+    id: "input.auto_shift",
+    name: "タッチキーボードの自動Shiftを切り替える",
+    description: "文頭などでタッチキーボードがShiftを自動的に有効にする動作を切り替えます。",
+    category: "input",
+    riskLevel: "safe",
+    desiredState: "タッチキーボードの自動Shiftを有効にする",
+  },
+  {
+    id: "input.voice_typing_key",
+    name: "音声入力キーを表示する",
+    description: "タッチキーボードの音声入力キー表示だけを切り替えます。マイク権限は変更しません。",
+    category: "input",
+    riskLevel: "safe",
+    desiredState: "タッチキーボードに音声入力キーを表示する",
+  },
+  {
+    id: "input.multilingual_suggestions",
+    name: "多言語の入力候補を切り替える",
+    description: "Windowsの多言語入力候補を切り替えます。インストール済み言語や辞書は変更しません。",
+    category: "input",
+    riskLevel: "safe",
+    desiredState: "多言語の入力候補を有効にする",
+  },
+  {
+    id: "explorer.status_bar",
+    name: "Explorerのステータスバーを表示する",
+    description: "Explorer下部の項目数などを示すステータスバー表示を切り替えます。ファイルには触れません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "Explorerのステータスバーを表示する",
+  },
+  {
+    id: "explorer.info_tips",
+    name: "Explorerのファイル説明を表示する",
+    description: "ファイルへポインターを置いたときの説明表示を切り替えます。ファイル内容は変更しません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "Explorerのファイル説明を表示する",
+  },
+  {
+    id: "explorer.hide_empty_drives",
+    name: "空のリムーバブルドライブを隠す",
+    description: "メディアが入っていないリムーバブルドライブの表示だけを切り替えます。ドライブは無効化しません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "空のリムーバブルドライブを隠す",
+  },
+  {
+    id: "explorer.nav_expand_current",
+    name: "ナビゲーションを現在のフォルダーまで展開する",
+    description: "Explorer左側のナビゲーションを現在位置まで自動展開する動作を切り替えます。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "ナビゲーションを現在のフォルダーまで自動展開する",
+  },
+  {
+    id: "explorer.nav_show_all",
+    name: "ナビゲーションにすべてのフォルダーを表示する",
+    description: "Explorer左側のナビゲーションにすべてのフォルダーを出す表示を切り替えます。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "ナビゲーションにすべてのフォルダーを表示する",
+  },
+  {
+    id: "explorer.separate_process",
+    name: "フォルダーウィンドウを別プロセスで開く",
+    description: "Explorerのフォルダーウィンドウ分離設定を切り替えます。既存プロセスの強制終了は行いません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "フォルダーウィンドウを別プロセスで開く",
+  },
+  {
+    id: "explorer.icons_only",
+    name: "サムネイルを使わず常にアイコンを表示する",
+    description: "Explorerのサムネイル表示をアイコンだけに切り替えます。サムネイルキャッシュは削除しません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "サムネイルを表示する",
+  },
+  {
+    id: "explorer.drive_letters",
+    name: "Explorerにドライブ文字を表示する",
+    description: "ドライブ名の横にC:などのドライブ文字を表示する設定を切り替えます。割り当て自体は変更しません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "Explorerにドライブ文字を表示する",
+  },
+  {
+    id: "explorer.preview_handlers",
+    name: "プレビューウィンドウでファイル内容を表示する",
+    description: "登録済みプレビューハンドラーの利用を切り替えます。ハンドラーの追加や任意DLL実行は行いません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "登録済みプレビューハンドラーを使用する",
+  },
+  {
+    id: "explorer.sharing_wizard",
+    name: "Explorerの共有ウィザードを使う",
+    description: "ファイル共有の案内ウィザード表示を切り替えます。共有権限やネットワーク設定は変更しません。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "Explorerの共有ウィザードを使用する",
+  },
+  {
+    id: "explorer.always_show_menus",
+    name: "Explorerのメニューを常に表示する",
+    description: "従来形式のメニュー表示に対応する固定HKCU値を切り替えます。Windows UIへの反映は実機確認まで明示操作のみです。",
+    category: "explorer",
+    riskLevel: "caution",
+    desiredState: "Explorerのメニューを常に表示する",
+  },
+  {
+    id: "appearance.taskbar_animations",
+    name: "タスクバーのアニメーションを切り替える",
+    description: "タスクバーの視覚アニメーションだけを切り替えます。DWM、サービス、性能設定の一括変更は行いません。",
+    category: "appearance",
+    riskLevel: "caution",
+    desiredState: "タスクバーのアニメーションを有効にする",
+  },
+  {
+    id: "notifications.toast_banners",
+    name: "Windowsの通知バナーを切り替える",
+    description: "ユーザー全体の通知バナー表示を明示的に切り替えます。Windows SecurityやUpdateの機能は停止しません。",
+    category: "notifications",
+    riskLevel: "caution",
+    desiredState: "Windowsの通知バナーを表示する",
+  },
+] as const satisfies readonly RegistryFallbackDefinition[];
+
+function registryFallback(definition: RegistryFallbackDefinition): ActionPresentation {
+  return {
+    id: definition.id,
+    actionVersion: 1,
+    name: `設計候補: ${definition.name}`,
+    description: "候補となる固定HKCU DWORDの保存値だけを読み取ります。setterの一次資料と対象buildの実機試験が揃うまで変更しません。",
+    audience: "候補setterの根拠と、現在保存されている固定値を確認したい人向け",
+    category: definition.category,
+    tags: ["HKCU", "保存値観測", "根拠確認待ち"],
+    supportedWindowsVersions: ["Windows 11 24H2", "Windows 11 25H2"],
+    minimumBuild: 26100,
+    maximumTestedBuild: null,
+    riskLevel: "experimental",
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    updateImpact: "review",
+    reversible: false,
+    kind: "guided",
+    autoApplyEligible: false,
+    availability: "read_only",
+    methodClass: "unverified_storage",
+    methodSummary: "未立証の固定HKCU保存値を読み取るのみ（setter設計は承認待ち）",
+    desiredState: "setter根拠の承認待ち（変更は実行しません）",
+    detailPoints: [
+      "setterの一次資料と対象buildの実機UI試験が未承認のため、変更処理を実行しません。",
+      "表示するのは固定HKCU DWORDの保存値であり、Windows UIの有効状態を示しません。",
+      "validate・backup・applyの各handlerで明示的に変更を拒否します。",
+      "ゲームプロファイルの自動適用対象にはしません。",
+    ],
+  };
+}
+
+interface ObservationFallbackDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly audience: string;
+  readonly category: ActionPresentation["category"];
+  readonly tags: readonly string[];
+  readonly methodSummary: string;
+  readonly desiredState: string;
+  readonly detailPoints: readonly string[];
+}
+
+type AdditionalFallbackDefinition = ObservationFallbackDefinition | ActionPresentation;
+
+const OBSERVATION_FALLBACKS = [
+  {
+    id: "setup.startup_inventory",
+    name: "スタートアップ項目を確認する",
+    description: "HKCU/HKLMの固定RunキーとWindowsのユーザー/共通Startupフォルダーを、変更せず上限付きで一覧化します。",
+    audience: "固定RunキーとStartupフォルダーの登録項目を、無効化せず確認したい人向け",
+    category: "setup",
+    tags: ["スタートアップ", "固定Runキー", "読み取り専用"],
+    methodSummary: "固定HKCU/HKLM Runキー、Known Folder、上限付きフォルダー列挙による読み取り",
+    desiredState: "確認対象のスタートアップ項目を一覧表示する（変更なし）",
+    detailPoints: [
+      "登録済みのRunキーとWindowsのKnown Startupフォルダーだけを確認します。",
+      "コマンド本文は保持も実行もせず、項目名・場所・値の状態だけを表示します。",
+      "確認対象のスタートアップ項目の無効化、削除、書き換えは行いません。",
+    ],
+  },
+  {
+    id: "power.active_scheme_switch",
+    actionVersion: 1,
+    name: "電源プランを明示的に切り替える",
+    description: "Windows公開Power APIで、バランス・省電力・高パフォーマンスの固定候補から現在ユーザーの電源プランを選びます。FPS向上は保証しません。",
+    audience: "電源プランを自分で明示的に選びたい人向け",
+    category: "power",
+    tags: ["公開API", "明示操作", "固定候補"],
+    supportedWindowsVersions: ["Windows 11 24H2", "Windows 11 25H2"],
+    minimumBuild: 26100,
+    maximumTestedBuild: 26200,
+    riskLevel: "caution",
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    updateImpact: "low",
+    reversible: true,
+    kind: "persistent",
+    autoApplyEligible: false,
+    availability: "mutable",
+    methodClass: "public_api",
+    methodSummary: "PowerGetActiveSchemeとPowerSetActiveScheme",
+    desiredState: "選択したWindows標準の電源プラン",
+    detailPoints: [
+      "適用前のactive scheme GUIDを型付きで保存します。",
+      "復元時に別の電源プランへ変わっていた場合は上書きしません。",
+      "ゲームプロファイルの無人適用対象にはしません。",
+    ],
+  },
+  {
+    id: "storage.free_space_check",
+    name: "システムドライブの空き容量を確認する",
+    description: "Windowsの公開APIでシステムドライブの総容量と利用可能容量を読み取るだけです。",
+    audience: "インストールやゲーム開始前に空き容量だけを確認したい人向け",
+    category: "storage",
+    tags: ["ストレージ", "空き容量", "読み取り専用"],
+    methodSummary: "GetWindowsDirectoryWとGetDiskFreeSpaceExWによる読み取り",
+    desiredState: "システムドライブの容量を表示する（変更なし）",
+    detailPoints: [
+      "Windowsが使用するシステムドライブを公開APIで特定します。",
+      "総容量、全体の空き、現在のユーザーが利用できる空きを表示します。",
+      "ファイルの作成、移動、削除は行いません。",
+    ],
+  },
+  {
+    id: "storage.temp_files_check",
+    name: "一時ファイルの使用量を確認する",
+    description: "Windowsが返すユーザー一時フォルダーを、reparse pointを追跡せず件数・深さ・時間・合計量の上限内で集計します。削除はしません。",
+    audience: "削除前に一時ファイルの規模だけを安全に確認したい人向け",
+    category: "storage",
+    tags: ["ストレージ", "一時ファイル", "読み取り専用"],
+    methodSummary: "GetTempPath2Wとreparse point非追跡の上限付きmetadata走査",
+    desiredState: "一時ファイルの件数と合計サイズを表示する（変更なし）",
+    detailPoints: [
+      "Windowsが返した現在ユーザーの一時フォルダーだけを対象にします。",
+      "reparse pointを追跡せず、件数・深さ・時間・合計量に上限を設けます。",
+      "ファイル内容の確認や削除は行いません。",
+    ],
+  },
+  {
+    id: "games.readiness_check",
+    name: "ゲーム前の確認情報を表示する",
+    description: "Hz、Advanced Color、電源、空き容量、既定の音声出力を確認し、Game Modeと通知は固定HKCU登録値を設定の目安として表示します。Advanced ColorをHDRの実効状態とは断定しません。",
+    audience: "ゲーム開始前にWindowsの参考情報を一度に確認したい人向け",
+    category: "games",
+    tags: ["ゲーム準備", "7項目", "読み取り専用"],
+    methodSummary: "Windows公開APIと登録済み固定HKCU設定値による読み取り専用の合成確認",
+    desiredState: "ゲーム前の参考情報7項目をまとめて表示する（変更なし）",
+    detailPoints: [
+      "リフレッシュレート、Advanced Color、電源、空き容量、音声を独立して確認します。Advanced ColorはHDRの実効状態とは断定しません。",
+      "Game Modeと通知は固定HKCU登録値を設定の目安として表示し、実際の有効状態とは断定しません。",
+      "取得できない項目は推測せず、不明または未設定として表示します。",
+      "電源、表示、音声、通知を変更せず、ゲームへの注入も行いません。",
+    ],
+  },
+] as const satisfies readonly AdditionalFallbackDefinition[];
+
+function observationFallback(definition: AdditionalFallbackDefinition): ActionPresentation {
+  if ("actionVersion" in definition) {
+    return definition;
+  }
+  return {
+    id: definition.id,
+    actionVersion: 1,
+    name: definition.name,
+    description: definition.description,
+    audience: definition.audience,
+    category: definition.category,
+    tags: definition.tags,
+    supportedWindowsVersions: ["Windows 11 24H2", "Windows 11 25H2", "Windows 11 26H1"],
+    minimumBuild: 22631,
+    maximumTestedBuild: 26200,
+    riskLevel: "safe",
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    updateImpact: "low",
+    reversible: false,
+    kind: "observation",
+    autoApplyEligible: false,
+    availability: "read_only",
+    methodSummary: definition.methodSummary,
+    desiredState: definition.desiredState,
+    detailPoints: definition.detailPoints,
+  };
+}
+
+export const STATIC_ACTIONS: readonly ActionPresentation[] = [
+  ...BASE_STATIC_ACTIONS,
+  ...REGISTRY_FALLBACKS.map(registryFallback),
+  ...OBSERVATION_FALLBACKS.map(observationFallback),
+];

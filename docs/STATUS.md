@@ -1,56 +1,109 @@
 # Totonoe — 現況と再開手順（CC記録 2026-07-24）
 
-## 到達点（検証済み）
-- **設計**: docs/ に10文書 + DESIGN_LANGUAGE。CC監査 `CC_AUDIT_TASK1.md` 合格。技術構成=Tauri2+Rust（採点 A88.5/B76.5）。
-- **基盤(Task2)＋ゲームプロファイル核(Task3)**: **実Windowsで `cargo test --lib` = 48 passed / 0 failed**。
-- **ゲームプロファイル(Task3, CC実装 — 端から端まで)**:
-  - 核 `game_profile/`: `ProfileSupervisor`(起動→適用/終了→最後の所有者のresourceだけ逆順復元, lease共有/競合停止/多重適用防止, AbortProfile/SkipConflicting)、`ProcessMatcher`(path＋identity両一致検知, identity不明は非適用, PID再利用対応)。注入シーム`ProfileActionSink`/`ObservedProcess`。
-  - 永続化 `ProfileStore`: JSON原子的保存(安全journalと分離)、`registered_file_identity`で実行ファイル検証(ローカル固定ボリューム/非reparse/本人性)、未知Action ID拒否、既定は自動適用オフ。
-  - Tauriコマンド: profiles_list/create/set_enabled/delete、ApplicationStateへ配線。
-  - **UI**(`ProfilesView`): 作成フォーム/一覧/有効化トグル/削除、結果志向・誇張なし・a11y、ブラウザペインで描画確認・console 0。
-  - テスト: 受入試験§11の核心＋matcher＋store＝**51 passed**。
-  - レジストリ正確復元（欠如↔欠如・raw無損失・第三者非上書き・kill-point再開）
-  - トランザクション逆順rollback / 適用途中killのreconcile / 未知ビルドfail-closed
-  - IPC攻撃spike（昇格Action全拒否・nonce replay/deadline・過大payload・PID再利用/署名不一致fail-closed）
-  - 実Action6: session.prevent_sleep / power.active_scheme_check / explorer.show_extensions / explorer.show_hidden / theme.color_mode / games.process_watch
-- **UI**: dev描画確認。結果ファーストのホーム、標準ユーザー表示、Ctrl+Kパレット、backend無しは`CORE_UNAVAILABLE`へ優雅に縮退、Segoe UI Variable/ティール#2fa6a0/Mica半透明/明暗/フォーカスリング。コンソールエラー0。
+## 今回の到達点
 
-## いま出せていないもの（未実施）
-- ゲームプロファイルの**実配線**: `ProfileActionSink`をTotonoeEngineへ、`ObservedProcess`供給をwindows/process.rs+wmi_process.rsのハンドル待ちへ結線。核ロジックは完成・テスト済みだが、実OS監視ループと実適用の結線が未。
-- プロファイルの**Tauriコマンド＋UI**（作成/一覧/有効化/実行中状態、準備チェックpreflight）。
-- フルの `cargo build`（binリンク）と `tauri dev` 実アプリ起動確認。
-- 実機での実UI適用（theme切替を本番HKCUで適用→目視→rollback）。テストは隔離キー/FakeSinkのみ。
-- A/B常駐メモリ実測、追加Action、data-only共有、AI候補、実験モジュール。
+- 登録済みAction IDは **59件**。BRIEFの初期版カタログ目標50〜70件には到達した。
+- ただし、リリースで実行可能またはread-onlyとして完成したActionは **17件**。残る **42件** はsetter根拠未承認の候補であり、安定機能数へ算入しない。
+- 42候補は `guided / experimental / unverified_storage / autoApply=false` とし、`validate`、`createBackup`、`apply`をhandler自身が拒否する。固定HKCU DWORDの保存値をread-only表示するだけで、Windows UIの有効状態とは表現しない。
+- `cargo test --lib -- --test-threads=1`: **152 passed / 0 failed / 2 ignored（全154件）**。
+- `npm run build`: typecheck成功、Vite production build成功（44 modules、JS 206.78 kB / gzip 67.14 kB、789 ms）。
 
-## ブロッカー
-- **Codex(sol/ultra)がusage limit到達。復帰 2026-07-30 05:56。** それまで実装はCC側で最小限に留める方針（ユーザ指示: Claudeのリミットを温存）。
+## リリースで利用可能な17 Action
 
-## 再開コマンド（実機・ネットワーク要）
+### 既存12
+
+- `session.prevent_sleep`
+- `power.active_scheme_check`
+- `explorer.show_extensions`
+- `explorer.show_hidden`
+- `theme.color_mode`
+- `games.process_watch`
+- `explorer.compact_view`
+- `explorer.item_checkboxes`
+- `explorer.clock_seconds`
+- `taskbar.task_view`
+- `taskbar.widgets`
+- `appearance.transparency`
+
+### 今回完成した5
+
+- `setup.startup_inventory`: HKCU/HKLM Runとユーザー/共通Startupフォルダーのread-only一覧。
+- `storage.free_space_check`: Windowsシステムドライブの容量を公開APIでread-only確認。
+- `storage.temp_files_check`: 現在ユーザーの一時フォルダーを上限付き・reparse非追跡でmetadata集計。削除しない。
+- `games.readiness_check`: Hz、Advanced Color、Game Mode設定値、電源プラン、空き容量、既定音声出力、通知設定値を独立したKnown/Unknown/Unconfiguredとして合成。
+- `power.active_scheme_switch`: 固定enumのバランス/省電力/高パフォーマンスだけを公開Power APIで明示切替。元のscheme GUIDを型付きで保存し、第三者変更時は上書きしない。プロファイル自動適用対象外。
+
+## 登録済み・証拠待ちの42候補
+
+以下はcatalog、型、presentation、フロント配線まで存在するが、リリースで変更不能なGuided候補である。
+
+- タスクバー/検索/スタート: `taskbar.search_mode`、`taskbar.alignment`、`start.layout`、`start.recommendations`、`taskbar.button_grouping`、`taskbar.flashing`、`taskbar.share_window`、`taskbar.show_desktop`、`search.recent_on_hover`、`taskbar.multi_monitor`、`taskbar.multi_monitor_mode`、`taskbar.secondary_button_grouping`、`start.show_all_pins`、`start.recent_apps`
+- Explorer: `explorer.launch_target`、`explorer.recent_files`、`explorer.status_bar`、`explorer.info_tips`、`explorer.hide_empty_drives`、`explorer.nav_expand_current`、`explorer.nav_show_all`、`explorer.separate_process`、`explorer.icons_only`、`explorer.drive_letters`、`explorer.preview_handlers`、`explorer.sharing_wizard`、`explorer.always_show_menus`
+- 見た目: `appearance.accent_start_taskbar`、`appearance.accent_title_bars`、`appearance.auto_accent`、`appearance.taskbar_animations`
+- ゲーム/デバイス/通知: `games.game_mode`、`games.controller_game_bar`、`devices.autoplay`、`notifications.usb_errors`、`notifications.weak_charger`、`notifications.toast_banners`
+- 入力: `input.autocorrect`、`input.double_space_period`、`input.auto_shift`、`input.voice_typing_key`、`input.multilingual_suggestions`
+
+MicrosoftのSettings status schemaは保存場所の参照であり、第三者アプリ向けsetter契約ではない。Action固有の一次資料と対象buildでのWindows UI round-tripをCCが承認するまで、この42件にproduction書込み経路を追加しない。
+
+## 新機構の安全境界
+
+### レジストリ
+
+- 安定Actionは値の欠如/型/raw bytesを型付きbackupへ保存し、rollbackは現在値がTotonoeの適用値と一致する場合だけ元状態へ戻す。
+- 含有keyが存在しない場合はbackup前に拒否し、productionでkey全体を作成/削除しない。
+- 旧versionが作ったdurable backupは、第三者値と兄弟値を保持する復旧decoderだけを残す。
+- 42候補の `maximumTestedBuild=0` は内部の未試験sentinelで、IPC/UIでは必ず `null`。互換buildとは解釈しない。
+
+### セットアップ/ストレージ/準備チェック
+
+- Startup一覧は最大256件、名前256文字、raw値4 KiB、warning 32件に制限し、コマンド本文を保存・表示・実行しない。
+- Known Folder/一時フォルダーは固定ローカルドライブだけを許可し、既知のreparse componentを拒否する。
+- 一時ファイル走査はreparse非追跡、最大5000項目/512ディレクトリ/深さ8/300 ms協調上限/512 GiB集計上限。読めない分岐や上限到達は `truncated` として表示し、削除しない。
+- readinessのGame Mode/通知は登録済み設定値の目安で、実効状態とは断定しない。Advanced ColorもHDR有効状態とは断定しない。
+
+### 電源プラン
+
+- requestは固定3値enumだけで、任意GUIDやコマンド引数を受け取らない。
+- `PowerGetActiveScheme` / `PowerSetActiveScheme`だけを使い、適用前後とrollback前後を再読取する。
+- 元GUID以外から始まった適用、または適用値以外から始まったrollbackはExternalConflictとして停止する。
+- この実行環境では実切替がOS code 5で拒否された。元の省電力プランが維持されたことは確認済みだが、異なるプランへの実切替成功は未確認。
+
+### ゲームプロファイル監視
+
+- watcher spawn失敗、同期失敗、rollback失敗を無視せずhealthへ集約し、stickyなruntime異常時は新規mutationをfail-closedにする。
+- 終了時は空snapshotを同期してactive profileの復元を試み、結果を返す。
+- 不完全なprocess snapshotは全件終了と推測しない。追跡済みPIDをhandle、creation time、signaled stateで個別確認できた場合だけ終了扱いにする。
+- ProfileStoreは1 MiB/200 profile/32 actions等の上限、未知field拒否、UUID重複拒否、strict parameter schema、automation eligibility再検証を行う。
+
+## 検証記録
+
+```text
+cargo test --lib -- --test-threads=1
+test result: ok. 152 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out
+
+npm run build
+tsc --noEmit -p tsconfig.json --pretty false
+tsc --noEmit -p tsconfig.node.json --pretty false
+vite v5.4.11: 44 modules transformed, built in 789ms
 ```
-# 環境: rustc/cargo 1.97(MSVC) + VS BuildTools 2022(VCTools+Win11 SDK) 導入済み
-export PATH="$USERPROFILE/.cargo/bin:$PATH"
-cd src-tauri && cargo test --lib -- --test-threads=1     # 33 passed を再確認
-cargo build                                              # binリンク（初回は数分）
-cd .. && npm run dev                                     # UI（preview: totonoe-web / port1420）
-npx tauri dev                                            # 実アプリ窓（要 cargo build 成功）
-```
 
-## 実配線 完了（Task3ライブ）
-- 実`EngineProfileSink`: 既存engine公開経路(preview→commit→list_timeline→rollback_item)だけで実適用/復元。engine無改修。per-item参照でlease共有下も正しく復元。
-- 実`ObservedProcess`供給: `snapshot_process_identities`をポーラ(3秒)で`ProfileRuntime.tick`へ。有効プロファイルが無い間はスナップショットも省く省コスト。
-- `ProfileWatcher`背景スレッド → ApplicationStateへ配線(起動時spawn/Drop join)。クラッシュは次回reconcileが引き取る。
-- **フルアプリ `totonoe.exe` ビルド成功**(17.8MB, main+generate_context+dist埋込)。
-- **実機スモーク合格**(`#[ignore]`, `--ignored`で実行): 実HKCU HideFileExtに apply→値変化→rollback→**型・値・有無まで正確復元**。本番mutation経路を Windows 25H2(26200, TestedMutable)で実証。
+- 明示実行した電源プラン実機スモークは、代替2プランへのAPI呼出しがともにOS code 5で拒否されたため環境skip。各失敗後と終了時に元scheme不変を検証した。
+- 既存の実HKCU `HideFileExt` apply→detect→rollback→detectスモークは、Windows 25H2 build 26200で型・値・有無まで正確復元済み。今回の42候補にはこの証跡を流用しない。
+- `git diff --check` はエラーなし（作業環境のLF→CRLF予告のみ）。
 
-## 起動アボート → 解決済み（実機起動確認）
-- 症状(修正前): `totonoe.exe`(debug/release両方)が **`0xC0000409`(main到達前)** でアボート。データDIR未作成・出力/WERなし。
-- **根本原因**: カスタム `windows-app-manifest.xml` の `<dpiAwareness>`/`<longPathAware>` 要素値に空白・改行が含まれ、Windowsローダがプロセス生成時にfastfailしていた（アプリコードは無関係＝同libのテストバイナリは全通過していた）。
-- **修正**: tauri 既定マニフェスト(`tauri_build::build()`, asInvoker + PerMonitorV2 を含む)へ切替。壊れたマニフェストファイルは削除。(commit 019e0df)
-- **検証**: 実Windowsで**起動・ブートストラップ完走を確認** — `%LOCALAPPDATA%\Totonoe\data\` に instance.lock + totonoe.db 生成（＝engine初期化・profile store・watcher起動が実行された）。**ネイティブコア常駐 ~36MB working set**（Electronのランタイム100–200MB級に対し軽量＝Tauri採用根拠を実測で裏付け）。
+## 未実装・CC確認が必要な項目
 
-## 残り(機能・計測)
-1. GUIの見た目の目視(窓の描画): 実機で `npx tauri dev` 起動で確認可(バックエンド起動は実証済み、WebView2描画のみ未目視)。
-2. 追加Action / 準備チェックpreflight / data-only共有 / AI候補 / 実験モジュール（7/30 Codex実装→CC監査）。
+1. 42レジストリ候補ごとの第三者setter契約となる一次資料、26100/26200 clean VMでの設定UI→detect→apply→UI確認→rollback→UI確認。承認後にのみstableへ個別昇格する。
+2. WinGet導入Action。固定appIdだけでは不十分で、source/publisher/package agreement、出力上限、hard timeout、既存導入判定、uninstallをrollbackと呼べる条件、ユーザーデータ保持方針をCCが決める必要がある。現時点で `winget.exe` 実行経路は追加していない。
+3. 任意アクセントカラー変更。今回の3候補は保存値のsetter意味論が未立証のためGuidedのまま。
+4. ライト/ダーク時刻連動。設計のみ許容のため未実装。
+5. 最前面/書式なし貼り付け。PowerToys導入支援を優先する方針のため独自hook/injectionは未実装。
+6. 現在設定の独立エクスポート。各persistent Actionのdurable typed backupは存在するが、ユーザー向け一括export/import契約は未設計。
+7. 一時ファイル削除。事前一覧、選択、使用中判定、reparse再検証、rollback不能表示の契約がないためread-only止まり。
+8. Windows 11の電源モードslider/overlay。今回実装したのは文書化されたpower scheme切替であり、同一機能とは表現しない。
+9. 既存stable registry Actionの「比較直後から書込み直前」の狭いTOCTOUと、filesystem検証後のread TOCTOU。第三者変更非上書きの再読取はあるが、kernel-level CASではない。
+10. 実GUIで59件の表示、42件の変更不能表示、観測一覧スクロール、電源Action確認画面をWindows 24H2/25H2で目視する。
 
-## オーケストレーション記録
-Codex(実装) × CC(設計統括/監査/実ビルド検証) ループ。ドライバ: `../claude-codex-orchestrator/scripts/codex-worker.sh "<task>" sol <workdir>`（SANDBOX=workspace-write, EFFORT=ultra, 通信オフ=コード生成のみ）。
+## 禁止事項
+
+Defender/Firewall/Windows Update停止、pagefile、HPET/BCD、大量サービス停止、process injection、任意コード実行、任意引数のshell連結、出所不明downloadは実装しない。今回も追加していない。

@@ -28,6 +28,10 @@ pub enum MethodClass {
     OfficialModule,
     DocumentedRegistry,
     LimitedExternal,
+    /// A fixed storage location that may be observed, but whose setter
+    /// semantics have not been established by primary documentation and
+    /// target-build UI smoke tests.
+    UnverifiedStorage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +88,26 @@ impl ActionMetadata {
         }
         if self.requiresExplorerRestart {
             return Err("stable MVP Actions may not force-restart Explorer");
+        }
+        if matches!(self.kind, ActionKind::Observation | ActionKind::Guided)
+            && self.auto_apply_eligible
+        {
+            return Err("observation and guided Actions may not be auto-applied");
+        }
+        if self.method_class == MethodClass::UnverifiedStorage
+            && (self.kind != ActionKind::Guided || self.maximumTestedBuild != 0)
+        {
+            return Err(
+                "unverified storage must be guided and use the untested build sentinel",
+            );
+        }
+        if self.maximumTestedBuild == 0
+            && self.method_class != MethodClass::UnverifiedStorage
+        {
+            return Err("only unverified storage may use the untested build sentinel");
+        }
+        if self.maximumTestedBuild != 0 && self.maximumTestedBuild < self.minimumBuild {
+            return Err("maximum tested build must not be below the minimum build");
         }
         Ok(())
     }

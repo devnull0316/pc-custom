@@ -1,0 +1,717 @@
+use crate::action::{
+    ObservationWarning, StartupEntrySource, StartupEntryStatus, StartupInventoryEntry,
+    StartupInventoryObservation, SystemDriveSpaceObservation, TempFilesObservation,
+};
+
+use super::{WindowsError, WindowsErrorKind, WindowsResult};
+
+const MAX_STARTUP_ENTRIES: usize = 256;
+const MAX_STARTUP_VALUE_BYTES: usize = 4 * 1024;
+const MAX_STARTUP_NAME_CHARS: usize = 256;
+const MAX_WARNINGS: usize = 32;
+const MAX_TEMP_ENTRIES: u64 = 5_000;
+const MAX_TEMP_DIRECTORIES: u64 = 512;
+const MAX_TEMP_DEPTH: u8 = 8;
+const MAX_TEMP_TOTAL_BYTES: u64 = 512 * 1024 * 1024 * 1024;
+
+fn warning(source: &'static str, code: &'static str) -> ObservationWarning {
+    ObservationWarning {
+        source: source.to_owned(),
+        code: code.to_owned(),
+    }
+}
+
+fn push_warning(warnings: &mut Vec<ObservationWarning>, source: &'static str, code: &'static str) {
+    if warnings.len() < MAX_WARNINGS
+        && !warnings
+            .iter()
+            .any(|value| value.source == source && value.code == code)
+    {
+        warnings.push(warning(source, code));
+    }
+}
+
+#[cfg(windows)]
+fn api_error(operation: &'static str, error: windows::core::Error) -> WindowsError {
+    WindowsError::new(
+        WindowsErrorKind::ApiFailure,
+        operation,
+        Some(i64::from(error.code().0)),
+    )
+}
+
+#[cfg(windows)]
+fn bounded_name(value: &std::ffi::OsStr) -> String {
+    value
+        .to_string_lossy()
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                '\u{fffd}'
+            } else {
+                character
+            }
+        })
+        .take(MAX_STARTUP_NAME_CHARS)
+        .collect()
+}
+
+#[cfg(windows)]
+fn is_local_disk_path(path: &std::path::Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+    use windows::{
+        core::PCWSTR,
+        Win32::{Storage::FileSystem::GetDriveTypeW, System::WindowsProgramming::DRIVE_FIXED},
+    };
+
+    if !path.is_absolute() {
+        return false;
+    }
+    let drive = match path.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => letter,
+            _ => return false,
+        },
+        _ => return false,
+    };
+    let root = format!("{}:{}", char::from(drive), std::path::MAIN_SEPARATOR);
+    let mut wide = std::ffi::OsStr::new(&root)
+        .encode_wide()
+        .collect::<Vec<_>>();
+    wide.push(0);
+    unsafe { GetDriveTypeW(PCWSTR::from_raw(wide.as_ptr())) == DRIVE_FIXED }
+}
+
+#[cfg(windows)]
+fn path_has_reparse_component(path: &std::path::Path) -> std::io::Result<bool> {
+    use std::os::windows::fs::MetadataExt;
+    use std::path::Component;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    let mut current = std::path::PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if matches!(component, Component::Prefix(_) | Component::RootDir) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&current)?;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(windows)]
+fn push_startup_entry(
+    report: &mut StartupInventoryObservation,
+    entry: StartupInventoryEntry,
+) -> bool {
+    if report.entries.len() >= MAX_STARTUP_ENTRIES {
+        report.truncated = true;
+        push_warning(
+            &mut report.warnings,
+            "startup_inventory",
+            "entry_limit_reached",
+        );
+        return false;
+    }
+    report.entries.push(entry);
+    true
+}
+
+#[cfg(windows)]
+fn registry_string_is_well_formed(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+        return false;
+    }
+    let mut units = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    if units.last().copied() != Some(0) {
+        return false;
+    }
+    while units.last().copied() == Some(0) {
+        units.pop();
+    }
+    !units.is_empty()
+        && !units.contains(&0)
+        && String::from_utf16(&units)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn registry_entry_status(value: &winreg::RegValue) -> StartupEntryStatus {
+    use winreg::enums::{REG_EXPAND_SZ, REG_SZ};
+
+    if value.bytes.len() > MAX_STARTUP_VALUE_BYTES {
+        return StartupEntryStatus::RegistryValueTooLarge;
+    }
+    let value_type = value.vtype.clone() as u32;
+    if value_type != REG_SZ as u32 && value_type != REG_EXPAND_SZ as u32 {
+        return StartupEntryStatus::UnsupportedRegistryType;
+    }
+    if !registry_string_is_well_formed(&value.bytes) {
+        return StartupEntryStatus::MalformedRegistryValue;
+    }
+    if value_type == REG_EXPAND_SZ as u32 {
+        StartupEntryStatus::RegistryExpandableCommand
+    } else {
+        StartupEntryStatus::RegistryCommand
+    }
+}
+
+#[cfg(windows)]
+fn enumerate_run_key(
+    report: &mut StartupInventoryObservation,
+    hive: winreg::HKEY,
+    view_flag: u32,
+    source: StartupEntrySource,
+    source_label: &'static str,
+) {
+    use std::io::ErrorKind;
+    use winreg::enums::KEY_READ;
+
+    let key = match winreg::RegKey::predef(hive).open_subkey_with_flags(
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        KEY_READ | view_flag,
+    ) {
+        Ok(key) => key,
+        Err(error) if error.kind() == ErrorKind::NotFound => return,
+        Err(_) => {
+            push_warning(
+                &mut report.warnings,
+                source_label,
+                "registry_key_unreadable",
+            );
+            return;
+        }
+    };
+
+    for value in key.enum_values() {
+        let (name, raw_value) = match value {
+            Ok(value) => value,
+            Err(_) => {
+                push_warning(
+                    &mut report.warnings,
+                    source_label,
+                    "registry_value_unreadable",
+                );
+                continue;
+            }
+        };
+        let was_name_truncated = name.chars().count() > MAX_STARTUP_NAME_CHARS;
+        let status = registry_entry_status(&raw_value);
+        if matches!(
+            status,
+            StartupEntryStatus::MalformedRegistryValue
+                | StartupEntryStatus::UnsupportedRegistryType
+                | StartupEntryStatus::RegistryValueTooLarge
+        ) {
+            push_warning(&mut report.warnings, source_label, "invalid_registry_value");
+        }
+        if was_name_truncated {
+            push_warning(&mut report.warnings, source_label, "entry_name_truncated");
+        }
+        if !push_startup_entry(
+            report,
+            StartupInventoryEntry {
+                name: name
+                    .chars()
+                    .map(|character| {
+                        if character.is_control() {
+                            '\u{fffd}'
+                        } else {
+                            character
+                        }
+                    })
+                    .take(MAX_STARTUP_NAME_CHARS)
+                    .collect(),
+                source,
+                status,
+            },
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn known_folder_path(folder_id: windows::core::GUID) -> WindowsResult<std::path::PathBuf> {
+    use windows::Win32::{
+        Foundation::HANDLE,
+        System::Com::CoTaskMemFree,
+        UI::Shell::{SHGetKnownFolderPath, KF_FLAG_DEFAULT},
+    };
+
+    let path = unsafe {
+        SHGetKnownFolderPath(&folder_id, KF_FLAG_DEFAULT, HANDLE::default())
+            .map_err(|error| api_error("resolve known startup folder", error))?
+    };
+    let converted = unsafe { path.to_string() };
+    unsafe { CoTaskMemFree(Some(path.0.cast())) };
+    converted.map(std::path::PathBuf::from).map_err(|_| {
+        WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "decode known startup folder",
+            None,
+        )
+    })
+}
+
+#[cfg(windows)]
+fn enumerate_startup_folder(
+    report: &mut StartupInventoryObservation,
+    folder_id: windows::core::GUID,
+    source: StartupEntrySource,
+    source_label: &'static str,
+) {
+    use std::os::windows::fs::MetadataExt;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    let folder = match known_folder_path(folder_id) {
+        Ok(folder) => folder,
+        Err(_) => {
+            push_warning(
+                &mut report.warnings,
+                source_label,
+                "known_folder_unavailable",
+            );
+            return;
+        }
+    };
+    if !is_local_disk_path(&folder) {
+        push_warning(
+            &mut report.warnings,
+            source_label,
+            "non_local_startup_folder_not_scanned",
+        );
+        return;
+    }
+    match path_has_reparse_component(&folder) {
+        Ok(true) => {
+            push_warning(
+                &mut report.warnings,
+                source_label,
+                "folder_reparse_not_followed",
+            );
+            return;
+        }
+        Ok(false) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(_) => {
+            push_warning(
+                &mut report.warnings,
+                source_label,
+                "startup_folder_unreadable",
+            );
+            return;
+        }
+    }
+    match std::fs::symlink_metadata(&folder) {
+        Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 => {
+            push_warning(
+                &mut report.warnings,
+                source_label,
+                "folder_reparse_not_followed",
+            );
+            return;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(_) => {
+            push_warning(
+                &mut report.warnings,
+                source_label,
+                "startup_folder_unreadable",
+            );
+            return;
+        }
+    }
+
+    let entries = match std::fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(_) => {
+            push_warning(
+                &mut report.warnings,
+                source_label,
+                "startup_folder_unreadable",
+            );
+            return;
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                push_warning(
+                    &mut report.warnings,
+                    source_label,
+                    "folder_entry_unreadable",
+                );
+                continue;
+            }
+        };
+        let status = match std::fs::symlink_metadata(entry.path()) {
+            Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 => {
+                StartupEntryStatus::ReparsePointNotFollowed
+            }
+            Ok(_) => StartupEntryStatus::StartupFile,
+            Err(_) => {
+                push_warning(
+                    &mut report.warnings,
+                    source_label,
+                    "folder_entry_unreadable",
+                );
+                StartupEntryStatus::StartupFile
+            }
+        };
+        if !push_startup_entry(
+            report,
+            StartupInventoryEntry {
+                name: bounded_name(&entry.file_name()),
+                source,
+                status,
+            },
+        ) {
+            break;
+        }
+    }
+}
+
+#[cfg(windows)]
+pub fn read_startup_inventory() -> WindowsResult<StartupInventoryObservation> {
+    use windows::Win32::UI::Shell::{FOLDERID_CommonStartup, FOLDERID_Startup};
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
+
+    let mut report = StartupInventoryObservation {
+        entries: Vec::new(),
+        warnings: Vec::new(),
+        truncated: false,
+    };
+    enumerate_run_key(
+        &mut report,
+        HKEY_CURRENT_USER,
+        KEY_WOW64_64KEY,
+        StartupEntrySource::CurrentUserRun,
+        "hkcu_run",
+    );
+    enumerate_run_key(
+        &mut report,
+        HKEY_LOCAL_MACHINE,
+        KEY_WOW64_64KEY,
+        StartupEntrySource::LocalMachineRun64,
+        "hklm_run_64",
+    );
+    enumerate_run_key(
+        &mut report,
+        HKEY_LOCAL_MACHINE,
+        KEY_WOW64_32KEY,
+        StartupEntrySource::LocalMachineRun32,
+        "hklm_run_32",
+    );
+    enumerate_startup_folder(
+        &mut report,
+        FOLDERID_Startup,
+        StartupEntrySource::UserStartupFolder,
+        "user_startup_folder",
+    );
+    enumerate_startup_folder(
+        &mut report,
+        FOLDERID_CommonStartup,
+        StartupEntrySource::CommonStartupFolder,
+        "common_startup_folder",
+    );
+    Ok(report)
+}
+
+#[cfg(not(windows))]
+pub fn read_startup_inventory() -> WindowsResult<StartupInventoryObservation> {
+    Err(WindowsError::unsupported("read startup inventory"))
+}
+
+#[cfg(windows)]
+fn windows_directory() -> WindowsResult<std::path::PathBuf> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+    use windows::Win32::System::SystemInformation::GetWindowsDirectoryW;
+
+    let mut buffer = vec![0u16; 32_768];
+    let length = unsafe { GetWindowsDirectoryW(Some(&mut buffer)) } as usize;
+    if length == 0 {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "resolve Windows directory",
+            None,
+        ));
+    }
+    if length >= buffer.len() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ResourceLimit,
+            "read bounded Windows directory",
+            None,
+        ));
+    }
+    Ok(std::path::PathBuf::from(OsString::from_wide(
+        &buffer[..length],
+    )))
+}
+
+#[cfg(windows)]
+pub fn read_system_drive_space() -> WindowsResult<SystemDriveSpaceObservation> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+    use windows::{core::PCWSTR, Win32::Storage::FileSystem::GetDiskFreeSpaceExW};
+
+    let windows_directory = windows_directory()?;
+    let drive = match windows_directory.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => letter,
+            _ => {
+                return Err(WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "validate Windows system drive",
+                    None,
+                ))
+            }
+        },
+        _ => {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "validate Windows system drive",
+                None,
+            ))
+        }
+    };
+    let root = format!("{}:{}", char::from(drive), std::path::MAIN_SEPARATOR);
+    let mut wide = std::ffi::OsStr::new(&root)
+        .encode_wide()
+        .collect::<Vec<_>>();
+    wide.push(0);
+    let mut available_bytes = 0u64;
+    let mut total_bytes = 0u64;
+    let mut total_free_bytes = 0u64;
+    unsafe {
+        GetDiskFreeSpaceExW(
+            PCWSTR::from_raw(wide.as_ptr()),
+            Some(&mut available_bytes),
+            Some(&mut total_bytes),
+            Some(&mut total_free_bytes),
+        )
+        .map_err(|error| api_error("read system drive free space", error))?;
+    }
+    Ok(SystemDriveSpaceObservation {
+        volume: format!("{}:", char::from(drive)),
+        available_bytes,
+        total_bytes,
+        total_free_bytes,
+    })
+}
+
+#[cfg(not(windows))]
+pub fn read_system_drive_space() -> WindowsResult<SystemDriveSpaceObservation> {
+    Err(WindowsError::unsupported("read system drive free space"))
+}
+
+#[cfg(windows)]
+fn user_temp_path() -> WindowsResult<std::path::PathBuf> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+    use windows::Win32::Storage::FileSystem::GetTempPath2W;
+
+    let mut buffer = vec![0u16; 32_768];
+    let length = unsafe { GetTempPath2W(Some(&mut buffer)) } as usize;
+    if length == 0 {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "resolve user temp directory",
+            None,
+        ));
+    }
+    if length >= buffer.len() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ResourceLimit,
+            "read bounded user temp directory",
+            None,
+        ));
+    }
+    let path = std::path::PathBuf::from(OsString::from_wide(&buffer[..length]));
+    if !path.is_absolute() || !is_local_disk_path(&path) {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate user temp directory",
+            None,
+        ));
+    }
+    Ok(path)
+}
+
+#[cfg(windows)]
+pub fn read_user_temp_inventory() -> WindowsResult<TempFilesObservation> {
+    use std::os::windows::fs::MetadataExt;
+    use std::time::{Duration, Instant};
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    const MAX_SCAN_DURATION: Duration = Duration::from_millis(300);
+
+    let root = user_temp_path()?;
+    let mut report = TempFilesObservation {
+        file_count: 0,
+        directory_count: 0,
+        total_bytes: 0,
+        skipped_reparse_points: 0,
+        unreadable_entries: 0,
+        warnings: Vec::new(),
+        truncated: false,
+    };
+    match path_has_reparse_component(&root) {
+        Ok(true) => {
+            report.skipped_reparse_points = 1;
+            report.truncated = true;
+            push_warning(
+                &mut report.warnings,
+                "user_temp",
+                "root_reparse_not_followed",
+            );
+            return Ok(report);
+        }
+        Ok(false) => {}
+        Err(_) => {
+            report.unreadable_entries = 1;
+            report.truncated = true;
+            push_warning(&mut report.warnings, "user_temp", "temp_root_unreadable");
+            return Ok(report);
+        }
+    }
+    match std::fs::symlink_metadata(&root) {
+        Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 => {
+            report.skipped_reparse_points = 1;
+            report.truncated = true;
+            push_warning(
+                &mut report.warnings,
+                "user_temp",
+                "root_reparse_not_followed",
+            );
+            return Ok(report);
+        }
+        Ok(_) => {}
+        Err(_) => {
+            report.unreadable_entries = 1;
+            report.truncated = true;
+            push_warning(&mut report.warnings, "user_temp", "temp_root_unreadable");
+            return Ok(report);
+        }
+    }
+
+    let started = Instant::now();
+    let mut processed_entries = 0u64;
+    let mut pending = vec![(root, 0u8)];
+    while let Some((directory, depth)) = pending.pop() {
+        if started.elapsed() >= MAX_SCAN_DURATION {
+            report.truncated = true;
+            push_warning(&mut report.warnings, "user_temp", "time_budget_reached");
+            break;
+        }
+        let entries = match std::fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(_) => {
+                report.unreadable_entries = report.unreadable_entries.saturating_add(1);
+                report.truncated = true;
+                push_warning(&mut report.warnings, "user_temp", "directory_unreadable");
+                continue;
+            }
+        };
+        for entry in entries {
+            if processed_entries >= MAX_TEMP_ENTRIES || started.elapsed() >= MAX_SCAN_DURATION {
+                report.truncated = true;
+                push_warning(&mut report.warnings, "user_temp", "scan_budget_reached");
+                pending.clear();
+                break;
+            }
+            processed_entries += 1;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    report.unreadable_entries = report.unreadable_entries.saturating_add(1);
+                    report.truncated = true;
+                    push_warning(&mut report.warnings, "user_temp", "entry_unreadable");
+                    continue;
+                }
+            };
+            let metadata = match std::fs::symlink_metadata(entry.path()) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    report.unreadable_entries = report.unreadable_entries.saturating_add(1);
+                    report.truncated = true;
+                    push_warning(&mut report.warnings, "user_temp", "metadata_unreadable");
+                    continue;
+                }
+            };
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+                report.skipped_reparse_points = report.skipped_reparse_points.saturating_add(1);
+                continue;
+            }
+            if metadata.is_dir() {
+                report.directory_count = report.directory_count.saturating_add(1);
+                if depth >= MAX_TEMP_DEPTH || report.directory_count >= MAX_TEMP_DIRECTORIES {
+                    report.truncated = true;
+                    push_warning(&mut report.warnings, "user_temp", "directory_limit_reached");
+                } else {
+                    pending.push((entry.path(), depth + 1));
+                }
+                continue;
+            }
+
+            let size = metadata.len();
+            let Some(next_total) = report.total_bytes.checked_add(size) else {
+                report.truncated = true;
+                push_warning(&mut report.warnings, "user_temp", "byte_limit_reached");
+                pending.clear();
+                break;
+            };
+            if next_total > MAX_TEMP_TOTAL_BYTES {
+                report.truncated = true;
+                push_warning(&mut report.warnings, "user_temp", "byte_limit_reached");
+                pending.clear();
+                break;
+            }
+            report.total_bytes = next_total;
+            report.file_count = report.file_count.saturating_add(1);
+        }
+    }
+    Ok(report)
+}
+
+#[cfg(not(windows))]
+pub fn read_user_temp_inventory() -> WindowsResult<TempFilesObservation> {
+    Err(WindowsError::unsupported("read user temp inventory"))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_string_validation_is_bounded_and_strict() {
+        let valid = "notepad.exe\0"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert!(registry_string_is_well_formed(&valid));
+        assert!(!registry_string_is_well_formed(&valid[..valid.len() - 2]));
+        assert!(!registry_string_is_well_formed(&[0, 0]));
+    }
+
+    #[test]
+    fn only_local_disk_paths_are_scannable() {
+        assert!(is_local_disk_path(std::path::Path::new(r"C:\Windows\Temp")));
+        assert!(!is_local_disk_path(std::path::Path::new(
+            r"\\server\share\Temp"
+        )));
+        assert!(!is_local_disk_path(std::path::Path::new(r"relative\Temp")));
+        assert!(!is_local_disk_path(std::path::Path::new(
+            r"C:relative\Temp"
+        )));
+    }
+}

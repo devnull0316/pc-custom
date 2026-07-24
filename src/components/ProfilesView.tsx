@@ -34,9 +34,12 @@ export function ProfilesView({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   const live = dataMode === "live";
-  // 自動適用に向くのは、破壊的でなく元へ戻せる Action。観測専用は準備セットに含めない。
+  // core metadataが明示的に許可したActionだけを自動適用候補へ出す。
   const selectable = useMemo(
-    () => actions.filter((action) => action.kind !== "observation"),
+    () => actions.filter(
+      (action) => action.autoApplyEligible === true
+        && (action.kind === "persistent" || action.kind === "session"),
+    ),
     [actions],
   );
 

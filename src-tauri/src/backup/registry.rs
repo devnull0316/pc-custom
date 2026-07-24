@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::windows::{
-    delete_key_if_empty, delete_value, read_value_state, write_raw_value, RawRegistryValue,
-    WindowsError,
+    delete_value, read_value_state, write_raw_value, RawRegistryValue, WindowsError,
 };
 
 use super::Fingerprint;
@@ -134,7 +133,9 @@ pub enum RegistryClassification {
     Original,
     Applied,
     Third,
-    /// Rollback removed the value, but a created empty key still needs deletion.
+    /// A legacy rollback removed the value, but the key did not originally
+    /// exist. The key is retained because safely comparing and deleting it is
+    /// not atomic.
     CreatedKeyWithoutValue,
 }
 
@@ -143,6 +144,13 @@ pub enum RegistryClassification {
 pub enum RegistryRestoreOutcome {
     Restored,
     AlreadyOriginal,
+    /// The target value was safely removed, but an empty key was retained.
+    ///
+    /// This is only reachable while recovering a backup written by an older
+    /// Totonoe version. Deleting an apparently-empty registry key is not an
+    /// atomic compare-and-delete operation and could erase values written by
+    /// another process after the emptiness check.
+    RestoredValueKeyRetained,
     ExternalConflict,
 }
 
@@ -178,6 +186,13 @@ pub fn prepare_registry_backup(
     }
     let location = target.location();
     let original = read_registry_state(&location)?;
+    if !original.key_existed {
+        return Err(WindowsError::new(
+            crate::windows::WindowsErrorKind::InvalidData,
+            "require pre-existing registry key for reversible mutation",
+            None,
+        ));
+    }
     Ok(RegistryBackup {
         location,
         original,
@@ -215,11 +230,7 @@ pub fn restore_registry_backup(
         RegistryClassification::Original => Ok(RegistryRestoreOutcome::AlreadyOriginal),
         RegistryClassification::Third => Ok(RegistryRestoreOutcome::ExternalConflict),
         RegistryClassification::CreatedKeyWithoutValue => {
-            if delete_key_if_empty(&backup.location)? {
-                Ok(RegistryRestoreOutcome::Restored)
-            } else {
-                Ok(RegistryRestoreOutcome::ExternalConflict)
-            }
+            Ok(RegistryRestoreOutcome::RestoredValueKeyRetained)
         }
         RegistryClassification::Applied => {
             if backup.original.value_existed {
@@ -238,8 +249,8 @@ pub fn restore_registry_backup(
             } else {
                 delete_value(&backup.location)?;
             }
-            if !backup.original.key_existed && !delete_key_if_empty(&backup.location)? {
-                return Ok(RegistryRestoreOutcome::ExternalConflict);
+            if !backup.original.key_existed {
+                return Ok(RegistryRestoreOutcome::RestoredValueKeyRetained);
             }
             Ok(RegistryRestoreOutcome::Restored)
         }
@@ -270,74 +281,80 @@ mod tests {
         RegistryTarget::current_user_64(key, value_name)
     }
 
+    fn legacy_missing_key_backup(target: RegistryTarget, intended: u32) -> RegistryBackup {
+        RegistryBackup {
+            location: target.location(),
+            original: RegistryValueState {
+                key_existed: false,
+                value_existed: false,
+                value_type: None,
+                raw_bytes: Vec::new(),
+            },
+            intended_type: winreg::enums::REG_DWORD as u32,
+            intended_raw: intended.to_le_bytes().to_vec(),
+            applied_type: winreg::enums::REG_DWORD as u32,
+            applied_raw: intended.to_le_bytes().to_vec(),
+            action_version: 1,
+            windows_build: 26_100,
+        }
+    }
+
     #[test]
-    fn absent_value_round_trips_to_absent_key() {
+    fn missing_key_is_rejected_before_backup() {
         let target = unique_target("RoundTripValue");
-        let backup = prepare_registry_backup(
+        let location = target.location();
+        let error = prepare_registry_backup(
             target,
             winreg::enums::REG_DWORD as u32,
             1u32.to_le_bytes().to_vec(),
             1,
             26_100,
         )
-        .expect("prepare backup under the isolated test key");
-        assert!(!backup.original.key_existed);
-        assert!(!backup.original.value_existed);
+        .expect_err("a missing key must not produce a mutable backup");
+        assert_eq!(error.kind, crate::windows::WindowsErrorKind::InvalidData);
+        let after = read_registry_state(&location).expect("read missing key after rejection");
+        assert!(!after.key_existed);
+        assert!(!after.value_existed);
+    }
 
+    #[test]
+    fn legacy_missing_key_backup_removes_only_target_and_preserves_sibling() {
+        let target = unique_target("LegacyTarget");
+        let backup = legacy_missing_key_backup(target, 1);
+        let mut sibling = backup.location.clone();
+        sibling.value_name = "SiblingValue".to_owned();
         write_raw_value(
             &backup.location,
             backup.intended_type,
             &backup.intended_raw,
         )
-        .expect("apply isolated test value");
+        .expect("seed legacy applied value");
+        let sibling_raw = vec![0xde, 0xad, 0xbe, 0xef];
+        write_raw_value(
+            &sibling,
+            winreg::enums::REG_BINARY as u32,
+            &sibling_raw,
+        )
+        .expect("seed third-party sibling value");
         assert_eq!(
-            classify_registry_backup(&backup).unwrap(),
+            classify_registry_backup(&backup).expect("classify legacy applied state"),
             RegistryClassification::Applied
         );
         assert_eq!(
-            restore_registry_backup(&backup).unwrap(),
-            RegistryRestoreOutcome::Restored
+            restore_registry_backup(&backup).expect("safely restore legacy backup"),
+            RegistryRestoreOutcome::RestoredValueKeyRetained
         );
-        assert!(verify_registry_backup_restored(&backup).unwrap());
-        assert!(!read_registry_state(&backup.location).unwrap().key_existed);
+        let target_after = read_registry_state(&backup.location).expect("read restored target");
+        assert!(target_after.key_existed);
+        assert!(!target_after.value_existed);
+        let sibling_after = read_registry_state(&sibling).expect("read preserved sibling");
+        assert_eq!(sibling_after.value_type, Some(winreg::enums::REG_BINARY as u32));
+        assert_eq!(sibling_after.raw_bytes, sibling_raw);
+        assert!(!verify_registry_backup_restored(&backup).expect("verify retained key is partial"));
+
+        delete_value(&sibling).expect("remove isolated sibling value");
+        delete_key_if_empty(&backup.location).expect("remove isolated legacy test key");
     }
-
-    #[test]
-    fn rollback_resumes_after_value_delete_kill_point() {
-        let target = unique_target("DeleteThenCrash");
-        let backup = prepare_registry_backup(
-            target,
-            winreg::enums::REG_DWORD as u32,
-            1u32.to_le_bytes().to_vec(),
-            1,
-            26_100,
-        )
-        .expect("prepare isolated missing-key backup");
-        write_raw_value(
-            &backup.location,
-            backup.intended_type,
-            &backup.intended_raw,
-        )
-        .expect("apply isolated value");
-
-        // Kill point between value deletion and deletion of the key created by
-        // Totonoe. Recovery must finish only if that key is still empty.
-        delete_value(&backup.location).expect("simulate completed delete-value step");
-        assert_eq!(
-            classify_registry_backup(&backup).expect("classify rollback midpoint"),
-            RegistryClassification::CreatedKeyWithoutValue
-        );
-        assert_eq!(
-            restore_registry_backup(&backup).expect("resume missing-key rollback"),
-            RegistryRestoreOutcome::Restored
-        );
-        assert!(verify_registry_backup_restored(&backup).expect("verify absent key"));
-    }
-
-
-
-
-
     #[test]
     fn existing_type_and_raw_bytes_round_trip_losslessly() {
         let target = unique_target("RawValue");
@@ -417,6 +434,14 @@ mod tests {
     #[test]
     fn third_state_is_reported_and_never_overwritten() {
         let target = unique_target("ExternalChange");
+        let location = target.location();
+        write_raw_value(
+            &location,
+            winreg::enums::REG_DWORD as u32,
+            &0u32.to_le_bytes(),
+        )
+        .expect("create isolated pre-existing key");
+        delete_value(&location).expect("leave isolated key without target value");
         let backup = prepare_registry_backup(
             target,
             winreg::enums::REG_DWORD as u32,

@@ -4,4 +4,3 @@ fn main() {
     // する原因だった。tauri 既定マニフェスト(asInvoker + PerMonitorV2 を含む)を使う。
     tauri_build::build();
 }
-
