@@ -356,3 +356,61 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   .app-shell, .sidebar, .topbar, .dialog-backdrop { backdrop-filter: none; }
   .risk-rail, .connection-dot { forced-color-adjust: none; }
 }
+
+/* --- ゲームプロファイル画面 --- */
+.profiles-view { display: flex; flex-direction: column; gap: 1.5rem; }
+.profiles-view .view-header h1 { margin: .15rem 0 .4rem; font-size: 1.55rem; font-weight: 600; }
+.profiles-view .view-header p { margin: 0; max-width: 64ch; line-height: 1.6; color: color-mix(in srgb, var(--text) 66%, transparent); }
+.muted { color: color-mix(in srgb, var(--text) 60%, transparent); }
+.small { font-size: .8rem; }
+
+.inline-note { display: flex; align-items: center; gap: .6rem; padding: .7rem .9rem; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); font-size: .9rem; }
+
+.profiles-layout { display: grid; grid-template-columns: minmax(0, 380px) 1fr; gap: 1.25rem; align-items: start; }
+@media (max-width: 900px) { .profiles-layout { grid-template-columns: 1fr; } }
+
+.profile-create, .profile-list-panel { display: flex; flex-direction: column; gap: 1rem;
+  padding: 1.15rem; border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); }
+.profile-create h2, .profile-list-panel h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+
+.field { display: flex; flex-direction: column; gap: .4rem; border: 0; margin: 0; padding: 0; }
+.field > span, .field > legend { font-weight: 600; font-size: .85rem; padding: 0; }
+.field input[type="text"] { padding: .55rem .7rem; border-radius: 8px; font: inherit; color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
+.field input[type="text"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.field small { color: color-mix(in srgb, var(--text) 58%, transparent); font-size: .78rem; line-height: 1.5; }
+
+.action-picker { display: flex; flex-direction: column; gap: .3rem; max-height: 280px; overflow-y: auto; padding-right: .2rem; }
+.action-pick { display: flex; gap: .6rem; align-items: flex-start; padding: .5rem .55rem; border-radius: 8px; cursor: pointer; }
+.action-pick:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.action-pick input { margin-top: .2rem; }
+.action-pick span { display: flex; flex-direction: column; gap: .1rem; }
+.action-pick small { color: color-mix(in srgb, var(--text) 58%, transparent); font-size: .78rem; }
+
+.link-button { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+
+.empty-block { display: flex; flex-direction: column; align-items: center; text-align: center; gap: .4rem;
+  padding: 2rem 1rem; color: color-mix(in srgb, var(--text) 60%, transparent); }
+.empty-block svg { opacity: .7; }
+
+.profile-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .8rem; }
+.profile-card { display: flex; flex-direction: column; gap: .7rem; padding: .9rem 1rem; border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); }
+.profile-card__head { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; }
+.profile-card__head > div { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.profile-card__head strong { font-size: 1rem; }
+.profile-card__head code { font-size: .78rem; color: color-mix(in srgb, var(--text) 58%, transparent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-state { flex-shrink: 0; font-size: .74rem; font-weight: 600; padding: .2rem .55rem; border-radius: 999px; }
+.profile-state--on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.profile-state--off { color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.profile-card__actions-count { display: flex; align-items: center; gap: .4rem; font-size: .82rem;
+  color: color-mix(in srgb, var(--text) 62%, transparent); }
+.profile-card__controls { display: flex; align-items: center; gap: .5rem; }
+.profile-card__controls .secondary-button { flex: 1; }

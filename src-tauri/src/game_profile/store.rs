@@ -20,6 +20,7 @@ const MAX_PROFILES: usize = 200;
 const MAX_ACTIONS_PER_PROFILE: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct StoredProfileAction {
     pub action_id: String,
     #[serde(default)]
@@ -27,6 +28,7 @@ pub struct StoredProfileAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct StoredProfile {
     pub id: String,
     pub name: String,
@@ -49,6 +51,7 @@ struct ProfilesFile {
 /// UI から受け取るプロファイル作成要求。executable_path は生の入力で、
 /// store が canonical 化・検証してから保存する。
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateProfileRequest {
     pub name: String,
     pub executable_path: String,

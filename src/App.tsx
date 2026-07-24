@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   commitPreview,
+  createProfile,
+  deleteProfile,
   detectAction,
+  listProfiles,
   loadCoreSnapshot,
   previewActions,
   publicErrorCode,
   publicErrorMessage,
   reconcileNow,
   rollbackItem,
+  setProfileEnabled,
 } from "./backend";
 import { STATIC_ACTIONS } from "./catalog";
 import { ActionBrowser } from "./components/ActionBrowser";
@@ -16,15 +20,18 @@ import { CommandPalette, type PaletteCommand } from "./components/CommandPalette
 import { Dialog } from "./components/Dialog";
 import { HomeView } from "./components/HomeView";
 import { Icon } from "./components/Icon";
+import { ProfilesView } from "./components/ProfilesView";
 import { Sidebar } from "./components/Sidebar";
 import { TimelineView } from "./components/TimelineView";
 import type {
   ActionPresentation,
   BootstrapStatus,
   CategoryId,
+  CreateProfileRequest,
   DataMode,
   PreviewResponse,
   ProfileDraftItem,
+  StoredProfile,
   TimelineItem,
   ViewId,
 } from "./model";
@@ -61,6 +68,8 @@ export function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [draftOpen, setDraftOpen] = useState(false);
   const [profileDraft, setProfileDraft] = useState<readonly ProfileDraftItem[]>([]);
+  const [profiles, setProfiles] = useState<readonly StoredProfile[]>([]);
+  const [profileBusy, setProfileBusy] = useState(false);
   const [uiError, setUiError] = useState<UiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const initialLoadStarted = useRef(false);
@@ -88,11 +97,21 @@ export function App() {
     }
   }, []);
 
+  const refreshProfiles = useCallback(async () => {
+    try {
+      setProfiles(await listProfiles());
+    } catch {
+      // 閲覧モード（安全コア未接続）ではプロファイルを空表示にする。
+      setProfiles([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (initialLoadStarted.current) return;
     initialLoadStarted.current = true;
     void refreshSnapshot(true);
-  }, [refreshSnapshot]);
+    void refreshProfiles();
+  }, [refreshProfiles, refreshSnapshot]);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
@@ -146,6 +165,7 @@ export function App() {
     const navigation: PaletteCommand[] = [
       { id: "nav-home", label: "ホームを開く", description: "結果タイルへ移動", icon: "home", execute: () => setView("home") },
       { id: "nav-actions", label: "Actionを探す", description: "カテゴリと詳細を表示", icon: "action", execute: () => navigate("actions") },
+      { id: "nav-profiles", label: "ゲームプロファイル", description: "ゲーム別の準備を管理", icon: "game", execute: () => setView("profiles") },
       { id: "nav-timeline", label: "変更を元へ戻す", description: "タイムラインへ移動", icon: "timeline", execute: () => setView("timeline") },
     ];
     const actionCommands: PaletteCommand[] = actions.map((action): PaletteCommand => ({
@@ -235,6 +255,48 @@ export function App() {
     }
   }
 
+  async function handleCreateProfile(request: CreateProfileRequest) {
+    setProfileBusy(true);
+    setUiError(null);
+    try {
+      const created = await createProfile(request);
+      setNotice(`プロファイル「${created.name}」を作成しました。自動適用はまだオフです。`);
+      await refreshProfiles();
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function handleSetProfileEnabled(id: string, enabled: boolean) {
+    setProfileBusy(true);
+    setUiError(null);
+    try {
+      await setProfileEnabled(id, enabled);
+      setNotice(enabled ? "自動適用を有効にしました。" : "自動適用を止めました。");
+      await refreshProfiles();
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function handleDeleteProfile(id: string) {
+    setProfileBusy(true);
+    setUiError(null);
+    try {
+      await deleteProfile(id);
+      setNotice("プロファイルを削除しました。");
+      await refreshProfiles();
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
   function addToDraft(action: ActionPresentation) {
     setProfileDraft((current) => current.some((item) => item.actionId === action.id) ? current : [...current, { actionId: action.id, title: action.name }]);
     setNotice("プロファイル下書きへ追加しました。保存や自動適用はまだ行っていません。");
@@ -259,6 +321,8 @@ export function App() {
             <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
           ) : view === "actions" ? (
             <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
+          ) : view === "profiles" ? (
+            <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} profiles={profiles} />
           ) : (
             <TimelineView bootstrap={bootstrap} dataMode={dataMode} items={timeline} onOpenActions={() => navigate("actions")} onRequestRollback={setRollbackTarget} onRetryRecovery={() => void runReconcile()} recoveryBusy={recoveryBusy} rollbackPendingId={rollbackPendingId} />
           )}

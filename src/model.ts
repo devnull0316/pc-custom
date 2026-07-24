@@ -1,6 +1,6 @@
 export type DataMode = "loading" | "live" | "catalog";
 
-export type ViewId = "home" | "actions" | "timeline";
+export type ViewId = "home" | "actions" | "timeline" | "profiles";
 
 export type CategoryId =
   | "session"
@@ -195,6 +195,29 @@ export interface CategoryPresentation {
 export interface ProfileDraftItem {
   actionId: string;
   title: string;
+}
+
+export interface StoredProfileAction {
+  actionId: string;
+  parameters?: unknown;
+}
+
+export interface StoredProfile {
+  id: string;
+  name: string;
+  executablePath: string;
+  volumeSerialNumber: number;
+  fileIdHex: string;
+  conflictPolicy: string;
+  automationEnabled: boolean;
+  actions: readonly StoredProfileAction[];
+}
+
+export interface CreateProfileRequest {
+  name: string;
+  executablePath: string;
+  conflictPolicy?: string;
+  actions: readonly StoredProfileAction[];
 }
 
 export function isMutationAllowed(

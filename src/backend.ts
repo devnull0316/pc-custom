@@ -7,11 +7,13 @@ import type {
   CommitPreviewRequest,
   CommitResult,
   CoreErrorShape,
+  CreateProfileRequest,
   DetectionResponse,
   PreviewActionsRequest,
   PreviewResponse,
   ReconcileResult,
   RollbackItemRequest,
+  StoredProfile,
   TimelineItem,
 } from "./model";
 
@@ -125,6 +127,22 @@ export function rollbackItem(request: RollbackItemRequest): Promise<CommitResult
 
 export function reconcileNow(): Promise<ReconcileResult> {
   return call<ReconcileResult>("reconcile_now");
+}
+
+export function listProfiles(): Promise<readonly StoredProfile[]> {
+  return call<readonly StoredProfile[]>("profiles_list");
+}
+
+export function createProfile(request: CreateProfileRequest): Promise<StoredProfile> {
+  return call<StoredProfile>("profile_create", { request });
+}
+
+export function setProfileEnabled(id: string, enabled: boolean): Promise<void> {
+  return call<void>("profile_set_enabled", { id, enabled });
+}
+
+export function deleteProfile(id: string): Promise<void> {
+  return call<void>("profile_delete", { id });
 }
 
 export function publicErrorMessage(error: unknown): string {
