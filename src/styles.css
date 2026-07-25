@@ -181,7 +181,10 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .category-button__copy small { color: var(--text-tertiary); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .category-count { color: var(--text-tertiary); font-size: 10px; }
 .action-list { padding: 10px 8px 12px; }
-.list-label { margin: 0 8px 6px; color: var(--text-tertiary); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.list-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 8px 6px; color: var(--text-tertiary); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.list-label__hint { display: inline-flex; align-items: center; gap: 3px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+/* 本文の型階層より小さくしない。既存の kbd と同じ 10px に揃える。 */
+.list-label__hint kbd { min-width: 17px; padding: 1px 4px; font-size: 10px; }
 .action-row { position: relative; display: grid; grid-template-columns: 3px minmax(0, 1fr) auto 16px; gap: 8px; align-items: center; width: 100%; min-height: 61px; padding: 8px 8px 8px 5px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; content-visibility: auto; contain-intrinsic-size: auto 61px; }
 .action-row:hover { background: var(--surface-hover); }
 .action-row[aria-current="true"] { background: var(--surface-active); }

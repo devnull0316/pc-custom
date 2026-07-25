@@ -142,7 +142,12 @@ export function ActionBrowser({
               row?.scrollIntoView({ block: "nearest" });
             }}
           >
-            <p className="list-label">このカテゴリ</p>
+            <p className="list-label">
+              <span>このカテゴリ</span>
+              {/* 矢印で辿れることは、言われなければ誰も気づかない。
+                  コマンドパレットと同じようにヒントを出す（Raycast/Linear の作法）。 */}
+              <span className="list-label__hint"><kbd>↑</kbd><kbd>↓</kbd>で移動</span>
+            </p>
             {categoryActions.length === 0 ? (
               <div className="inline-empty"><Icon name="action" /><p><strong>Actionはありません</strong>このカテゴリには登録済みActionがありません。</p></div>
             ) : categoryActions.map((action) => (
