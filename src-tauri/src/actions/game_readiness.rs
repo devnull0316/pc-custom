@@ -438,3 +438,36 @@ mod tests {
         assert_eq!(error.code, ActionErrorCode::RecoveryRequired);
     }
 }
+
+#[cfg(all(test, windows))]
+mod readiness_items_tests {
+    use super::*;
+    use crate::compatibility::OsIdentity;
+
+    /// ゲーム前の準備確認は、要約1行ではなく**項目ごと**に並べて出す（BRIEF §4）。
+    /// UIはこの items をそのまま一覧表示するので、7項目そろうことを実機で確かめる。
+    #[test]
+    fn readiness_items_list_all_seven_checks() {
+        let os = OsIdentity::from_test_build(26_200);
+        let context = ActionContext {
+            os_identity: &os,
+            transaction_id: uuid::Uuid::new_v4(),
+            item_id: uuid::Uuid::new_v4(),
+            is_elevated: false,
+            observed_at_unix_ms: 0,
+        };
+        let state = GAME_READINESS_CHECK_ACTION
+            .detect_current_state(&context, &ActionParameters::GamesReadinessCheck {})
+            .expect("readiness detection runs on this machine");
+        let Some(value) = state.known_value() else {
+            panic!("readiness should report a known value");
+        };
+        let view = crate::presentation::observed_items_for_test(value);
+        assert_eq!(view.len(), 7, "7項目そろう: {view:?}");
+        for line in &view {
+            assert!(line.contains(" — "), "項目名と値が並ぶ: {line}");
+        }
+        println!("readiness items:");
+        for line in &view { println!("  {line}"); }
+    }
+}

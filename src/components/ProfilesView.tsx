@@ -8,6 +8,7 @@ import type {
   ImportPreviewItem,
   StoredProfile,
 } from "../model";
+import { GameReadinessPanel } from "./GameReadinessPanel";
 import { Icon } from "./Icon";
 
 interface ProfilesViewProps {
@@ -260,6 +261,8 @@ export function ProfilesView({
           )}
         </div>
       </div>
+
+      <GameReadinessPanel dataMode={dataMode} />
 
       <div className="config-io">
         <h2>設定のバックアップ・移行</h2>

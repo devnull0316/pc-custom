@@ -497,3 +497,21 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   background: color-mix(in srgb, var(--text) 4%, transparent); }
 .temp-cleanup__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .temp-cleanup__message { font-size: .85rem; color: var(--accent); }
+
+/* --- ゲーム前の準備確認 --- */
+.readiness-panel { margin-top: 1.5rem; padding: 1.15rem; border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  display: flex; flex-direction: column; gap: .7rem; }
+.readiness-panel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.readiness-panel__head h2 { margin: 0 0 .25rem; font-size: 1.05rem; font-weight: 600; }
+.readiness-panel__head p { margin: 0; max-width: 64ch; }
+.readiness-panel__head button { flex-shrink: 0; }
+.readiness-panel__summary { margin: 0; font-size: .9rem; font-weight: 600; }
+.readiness-panel__list { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.readiness-panel__list li { display: flex; align-items: center; gap: .5rem; font-size: .85rem;
+  padding: .45rem .6rem; border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 4%, transparent); }
+.readiness-panel__row--unknown { color: color-mix(in srgb, var(--text) 68%, transparent); }
+.readiness-panel__message { margin: 0; font-size: .85rem; color: var(--accent); }

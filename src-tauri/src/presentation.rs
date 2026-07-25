@@ -899,7 +899,9 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
                 "Totonoeのスリープ防止なし".to_owned()
             }
         }
-        ObservedValue::ActivePowerScheme { guid } => format!("有効な電源プラン: {guid}"),
+        ObservedValue::ActivePowerScheme { guid } => {
+            format!("有効な電源プラン: {}", power_scheme_display_name(guid))
+        }
         ObservedValue::Processes { matches } => {
             format!("本人性を確認できたプロセス {}件", matches.len())
         }
@@ -1037,6 +1039,12 @@ fn observed_detail(value: &ObservedValue) -> String {
     }
 }
 
+/// テストから項目一覧を確認するための入口。UIへ出るのと同じ配列を返す。
+#[cfg(test)]
+pub fn observed_items_for_test(value: &ObservedValue) -> Vec<String> {
+    observed_items(value)
+}
+
 fn observed_items(value: &ObservedValue) -> Vec<String> {
     match value {
         ObservedValue::StartupInventory(inventory) => inventory
@@ -1051,7 +1059,76 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
                 )
             })
             .collect(),
+        // ゲーム準備チェックは1行の要約ではなく、項目ごとに並べて見せる（BRIEF §4 の準備確認画面）。
+        ObservedValue::GameReadiness(readiness) => {
+            vec![
+                format!("画面のリフレッシュレート — {}", readiness_line_refresh(readiness)),
+                format!("HDR（Advanced Color） — {}", readiness_line_advanced_color(readiness)),
+                format!("ゲームモードの設定値 — {}", configured_toggle_hint_label(&readiness.game_mode)),
+                format!("電源プラン — {}", readiness_line_power(readiness)),
+                format!("システムドライブの空き — {}", readiness_line_space(readiness)),
+                format!("既定の音声出力 — {}", readiness_line_audio(readiness)),
+                format!("通知の設定値 — {}", configured_toggle_hint_label(&readiness.toast_notifications)),
+            ]
+        }
         _ => Vec::new(),
+    }
+}
+
+fn readiness_line_refresh(r: &GameReadinessObservation) -> String {
+    match &r.refresh_rate {
+        ReadinessComponent::Known { value } => format!("{} Hz", value.hertz),
+        ReadinessComponent::Unknown { .. } => "不明".to_owned(),
+        ReadinessComponent::Unconfigured => "未設定".to_owned(),
+    }
+}
+
+fn readiness_line_advanced_color(r: &GameReadinessObservation) -> String {
+    match &r.advanced_color {
+        ReadinessComponent::Known { value } => format!(
+            "有効{} / 対応{} / 接続{}（HDRの実効状態とは断定しません）",
+            value.enabled_path_count, value.supported_path_count, value.active_path_count
+        ),
+        ReadinessComponent::Unknown { .. } => "不明".to_owned(),
+        ReadinessComponent::Unconfigured => "未設定".to_owned(),
+    }
+}
+
+/// Windows標準の電源プランGUIDを、利用者に見せる名前へ。
+/// このプロダクトは専門用語を見せない方針なので、生のGUIDを画面に出さない。
+/// OEM独自プランなど未知のGUIDは、推測せず「その他のプラン」と表示する。
+pub fn power_scheme_display_name(guid: &str) -> String {
+    let normalized = guid.trim().trim_start_matches('{').trim_end_matches('}').to_ascii_lowercase();
+    match normalized.as_str() {
+        "381b4222-f694-41f0-9685-ff5bb260df2e" => "バランス".to_owned(),
+        "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c" => "高パフォーマンス".to_owned(),
+        "a1841308-3541-4fab-bc81-f71556f20b4a" => "省電力".to_owned(),
+        _ => "その他のプラン".to_owned(),
+    }
+}
+
+fn readiness_line_power(r: &GameReadinessObservation) -> String {
+    match &r.active_power_scheme {
+        ReadinessComponent::Known { value } => power_scheme_display_name(value),
+        ReadinessComponent::Unknown { .. } => "不明".to_owned(),
+        ReadinessComponent::Unconfigured => "未設定".to_owned(),
+    }
+}
+
+fn readiness_line_space(r: &GameReadinessObservation) -> String {
+    match &r.system_drive_space {
+        ReadinessComponent::Known { value } => format_bytes(value.available_bytes),
+        ReadinessComponent::Unknown { .. } => "不明".to_owned(),
+        ReadinessComponent::Unconfigured => "未設定".to_owned(),
+    }
+}
+
+fn readiness_line_audio(r: &GameReadinessObservation) -> String {
+    match &r.default_render_audio {
+        ReadinessComponent::Known { value } if value.endpoint_exists => "既定の出力あり".to_owned(),
+        ReadinessComponent::Known { .. } => "既定の出力なし".to_owned(),
+        ReadinessComponent::Unknown { .. } => "不明".to_owned(),
+        ReadinessComponent::Unconfigured => "未設定".to_owned(),
     }
 }
 
