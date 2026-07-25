@@ -345,6 +345,37 @@ CCが直した点:
   今日だけで観測側の欠陥を4種類出しているため、単独の測定で降格はしない。別の観測（新窓での比較、DPI変化の除外）で
   再確認してから判断する。
 
+### `explorer.compact_view` 第2観測（2026-07-26）
+
+- 行ピッチとは別に、同じ4項目の先頭上端から末尾下端までを `list_height` として測る観測を追加した。
+- 各測定では `OwnedExplorerWindow` を再利用し、変更前・変更後・復元後にそれぞれ新しいExplorer窓を開く。窓は
+  `EnumWindows` の `CabinetWClass`、起動前に存在しなかったハンドル、一意な検査フォルダー名を含むタイトルで限定する。
+- 実行時は新規起動後も `EnumWindows` の `CabinetWClass` が0件で、変更前の自窓を取得できなかった。そのため
+  `list_height` の変更前後値は**観測不能**。候補窓自体が空なので、判定文字列の別項目への一致や既存窓の取り違えではない。
+- 設定書込み前に安全終了し、一時フォルダーは `TempDir` で削除された。第2観測が観測不能のため、
+  `explorer.compact_view` は降格せず現状を維持する。
+
+## `explorer.compact_view` の決着（2026-07-26）
+
+保留にしていた1件に、独立した第2の観測で決着をつけた。
+
+codexが `list_height`（先頭項目の上端から末尾項目の下端まで）を追加。行ピッチとは別の量で、
+全項目の余白変化が積み上がるぶん感度が高い。**新しく開いた窓**で測定した（既存窓は更新されないため）。
+
+```
+before:  item_height=24  row_pitch=28  list_height=108
+applied: item_height=24  row_pitch=28  list_height=108
+```
+
+**独立した2つの観測が、新窓でもそろって変化なし。** よって `explorer.compact_view` を
+既存3件と同じ手順でGuidedへ降格した（kind / auto_apply_eligible / riskLevel、
+validateガードで変更経路を封鎖、`demoted_actions_refuse_to_mutate` に追加）。
+
+これで**黙って何もしない可変Actionは4件見つけて全て潰した**。
+
+codexの環境では窓を取得できず `OBSERVATION_UNAVAILABLE` で終わったが、CCの環境では取得できた。
+**UI観測を伴う検証はCC側で実行する**という分担が明確になった（codexは測定コードを書き、CCが走らせる）。
+
 ## 未実装・CC確認が必要な項目
 
 1. 42レジストリ候補ごとの第三者setter契約となる一次資料、26100/26200 clean VMでの設定UI→detect→apply→UI確認→rollback→UI確認。承認後にのみstableへ個別昇格する。

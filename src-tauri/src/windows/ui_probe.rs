@@ -680,6 +680,7 @@ mod tests {
     struct ExplorerRowLayout {
         item_height: i32,
         row_pitch: i32,
+        list_height: i32,
     }
 
     fn explorer_row_layout(
@@ -709,6 +710,8 @@ mod tests {
         Ok(ExplorerRowLayout {
             item_height: heights[heights.len() / 2],
             row_pitch,
+            list_height: bounds.last().expect("measured item bounds").bottom
+                - bounds.first().expect("measured item bounds").top,
         })
     }
 
@@ -890,10 +893,10 @@ mod tests {
         restored_window.close_and_assert();
         assert_eq!(restored, before, "restored Explorer row spacing must equal baseline");
 
-        if applied != before {
-            println!("EVIDENCE: compact view changed row spacing in a fresh Explorer window");
+        if applied.list_height != before.list_height {
+            println!("EVIDENCE: compact view changed four-item list height in a fresh Explorer window");
         } else {
-            println!("EVIDENCE: compact view did not change measurable Explorer row spacing");
+            println!("EVIDENCE: compact view did not change measurable four-item list height");
         }
     }
 

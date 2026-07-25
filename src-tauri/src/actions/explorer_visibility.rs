@@ -350,14 +350,14 @@ static COMPACT_VIEW_METADATA: ActionMetadata = ActionMetadata {
     ],
     minimumBuild: 26_100,
     maximumTestedBuild: 26_200,
-    riskLevel: ActionRiskLevel::Safe,
+    riskLevel: ActionRiskLevel::Caution,
     requiresAdmin: false,
     requiresRestart: false,
     requiresExplorerRestart: false,
     conflicts: &[],
     dependencies: &[],
     action_version: 1,
-    kind: ActionKind::Persistent,
+    kind: ActionKind::Guided,
     parameter_schema: r#"{"enabled":"boolean"}"#,
     resource_keys: &[
         "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:usecompactmode",
@@ -369,7 +369,7 @@ static COMPACT_VIEW_METADATA: ActionMetadata = ActionMetadata {
     compatibility_key: "explorer.compact_view.v1",
     backup_codec_version: 1,
     rollback_decoder_versions: &[1],
-    auto_apply_eligible: true,
+    auto_apply_eligible: false,
     windows_update_impact: "中。Windows更新後に値と非破壊通知の実機スモークを再実施します。",
 };
 
@@ -1095,6 +1095,7 @@ mod demotion_tests {
             ActionId::TaskbarTaskView,
             ActionId::TaskbarWidgets,
             ActionId::ExplorerClockSeconds,
+            ActionId::ExplorerCompactView,
         ] {
             let action = ACTION_REGISTRY.get(id).expect("registered");
             assert_eq!(
