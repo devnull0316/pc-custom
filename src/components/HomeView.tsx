@@ -33,7 +33,7 @@ export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategor
         </section>
       ) : null}
       <section aria-labelledby="results-title">
-        <div className="section-heading"><div><h2 id="results-title">整えたいこと</h2><p>{actions.length}件の登録済みActionから安全な候補を表示します。</p></div></div>
+        <div className="section-heading"><div><h2 id="results-title">整えたいこと</h2><p>登録済みの{actions.length}項目から、いまのWindowsで実際に変えられるものを見分けて表示します。</p></div></div>
         <div className="result-grid">
           {RESULT_TILES.map((tile, index) => (
             <button className={`result-tile result-tile--${index + 1}`} key={tile.id} onClick={() => tile.category === "recovery" ? onOpenTimeline() : onOpenCategory(tile.category)} type="button">

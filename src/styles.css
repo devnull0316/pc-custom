@@ -66,6 +66,8 @@
 }
 
 * { box-sizing: border-box; }
+/* 日本語で行末に「す。」だけが落ちるのを防ぐ。禁則も併せて厳密にする。 */
+p, small, li, .result-tile__copy small, .action-row__copy small { text-wrap: pretty; line-break: strict; }
 html, body, #root { width: 100%; height: 100%; margin: 0; }
 body { min-width: 720px; background: transparent; color: var(--text); font-size: 14px; overflow: hidden; }
 button, input { font: inherit; }
@@ -140,9 +142,10 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .recovery-callout p:last-child { margin: 0; color: var(--text-secondary); font-size: 12px; }
 .read-only-badge { display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--caution); background: var(--surface); font-size: 10px; font-weight: 650; }
 
-.result-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+/* 6タイルを3列×2行で均等に置く。以前は6列指定で最後の1枚が孤立していた。 */
+.result-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .result-tile { grid-column: span 2; min-height: 104px; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start; padding: 15px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); text-align: left; transition: background-color 180ms ease-out, border-color 180ms ease-out, transform 180ms ease-out; }
-.result-tile--1, .result-tile--2 { grid-column: span 3; }
+.result-tile, .result-tile--1, .result-tile--2 { grid-column: span 1; }
 .result-tile:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-1px); }
 .result-tile__icon { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); color: var(--text-secondary); }
 .result-tile__copy { display: grid; gap: 5px; }
