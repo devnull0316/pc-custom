@@ -140,6 +140,21 @@ taskbar_left=0 width=1920 start_left=518 start_width=45 center_ratio=0.282
 
 再現手順: `cargo test --lib taskbar_alignment_write -- --ignored --nocapture`（実機のタスクバーを一時的に変更し、必ず復元する）。
 
+### 反映されるものと、されないものが実測で分かれた
+
+同じ枠組みをアクセントカラーにも当てた。こちらは `DwmGetColorizationColor` が**保存値ではなくDWMの実効色**を返すため、反映を機械判定できる。
+
+| 対象 | 書き込み後の実UI | 結論 |
+| --- | --- | --- |
+| `TaskbarAl`（タスクバー配置） | スタートボタンは6秒待っても動かず | 第三者書き込みは反映されない。**案内に留める** |
+| `ColorizationColor`（ウィンドウの色） | 実効色が #006FC4 → #AB4B24 へ変化 | **反映される。変更機能を実装できる** |
+
+どちらも元の値・型・有無へ正確に復元済み（テストが `backup.original` との一致を検証）。
+
+この差は重要で、「Windowsの設定は第三者から変えられない」と一括りにするのは誤りだと分かった。**項目ごとに実測して仕分ける**必要があり、その仕分けを機械的に行う手段がこれで手に入った。
+
+次の増分: ウィンドウの色変更Action（`ColorizationColor` + `ColorizationAfterglow` の複合backup、固定プリセット色のみ、実効色で適用検証）。実装パターンは `actions/color_mode.rs` の複合レジストリActionと同一で、反映することは上記で実証済み。
+
 ## 42候補の行き止まりを解消（CC 2026-07-25）
 
 実測でUIへ反映されないと分かった以上、これらを「表示するだけ」で終わらせない。**Windows自身の設定画面へ案内する導線**を追加した（`src/settings_link.rs`）。

@@ -238,4 +238,79 @@ mod tests {
         let final_state = read_registry_state(&backup.location).expect("read back");
         assert_eq!(final_state, backup.original, "値・型・有無まで元どおりに戻す");
     }
+
+    /// アクセントカラーは DwmGetColorizationColor で**実効色**を読めるため、
+    /// タスクバーと同じ枠組みで往復検証できる。反映されるなら変更機能を解禁できるし、
+    /// 反映されないならタスクバーと同じく案内に留める根拠になる。
+    #[test]
+    #[ignore = "実機のアクセントカラーを一時的に変更する証拠取得用"]
+    fn accent_colour_write_actually_changes_the_effective_dwm_colour() {
+        use crate::backup::{
+            prepare_registry_backup, read_registry_state, restore_registry_backup,
+            RegistryRestoreOutcome, RegistryTarget,
+        };
+        use crate::windows::{notify_theme_changed, system_accent_color, write_raw_value};
+        use std::{thread::sleep, time::Duration};
+
+        const DWM_SUBKEY: &str = r"Software\Microsoft\Windows\DWM";
+        const VALUE: &str = "ColorizationColor";
+        const REG_DWORD: u32 = 4;
+
+        let before = match system_accent_color() {
+            Ok(colour) => colour,
+            Err(error) => {
+                println!("実効色を読めないため証拠取得をスキップ: {error:?}");
+                return;
+            }
+        };
+        println!(
+            "before: effective #{:02X}{:02X}{:02X}",
+            before.red, before.green, before.blue
+        );
+
+        // 元の色から十分離れた色を選ぶ（判定を確実にするため）。
+        let probe: u32 = if before.red > 128 { 0xC4_20_60_A0 } else { 0xC4_C0_50_20 };
+        let target = RegistryTarget::current_user_64(DWM_SUBKEY, VALUE);
+        let backup = prepare_registry_backup(target, REG_DWORD, probe.to_le_bytes().to_vec(), 1, 26_200)
+            .expect("prepare accent backup");
+
+        write_raw_value(&backup.location, REG_DWORD, &probe.to_le_bytes())
+            .expect("write probe colour");
+        let _ = notify_theme_changed();
+
+        let mut changed = None;
+        for _ in 0..25 {
+            sleep(Duration::from_millis(200));
+            if let Ok(now) = system_accent_color() {
+                if now.red != before.red || now.green != before.green || now.blue != before.blue {
+                    changed = Some(now);
+                    break;
+                }
+            }
+        }
+
+        // 何があっても元へ戻す。
+        let restored = restore_registry_backup(&backup).expect("restore accent colour");
+        let _ = notify_theme_changed();
+        assert!(
+            matches!(
+                restored,
+                RegistryRestoreOutcome::Restored | RegistryRestoreOutcome::AlreadyOriginal
+            ),
+            "元の状態へ戻せること: {restored:?}"
+        );
+
+        match changed {
+            Some(now) => println!(
+                "EVIDENCE: 実効色が #{:02X}{:02X}{:02X} へ変化。アクセントカラー変更は反映される",
+                now.red, now.green, now.blue
+            ),
+            None => println!(
+                "EVIDENCE: 実効色は変化せず。保存値を書いてもDWMへは反映されない（案内に留めるべき）"
+            ),
+        }
+
+        let final_state = read_registry_state(&backup.location).expect("read back");
+        assert_eq!(final_state, backup.original, "値・型・有無まで元どおりに戻す");
+    }
 }
