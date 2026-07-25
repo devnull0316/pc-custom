@@ -11,6 +11,7 @@ pub mod game_profile;
 pub mod ipc;
 pub mod journal;
 pub mod presentation;
+pub mod settings_link;
 pub mod setup;
 pub mod theme_schedule;
 pub mod windows;
@@ -63,6 +64,7 @@ pub fn run() {
             commands::theme_schedule_set,
             commands::storage_temp_cleanup_plan,
             commands::storage_temp_cleanup_apply,
+            commands::open_windows_settings,
         ])
         .run(tauri::generate_context!())
         .expect("Totonoe runtime terminated unexpectedly");

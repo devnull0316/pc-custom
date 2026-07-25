@@ -73,6 +73,8 @@ pub struct ActionPresentation {
     pub desired_state: String,
     pub current_state: Option<UiActionState>,
     pub detail_points: Vec<String>,
+    /// Windows設定アプリの該当ページ（無ければ None）。UIの案内ボタン用。
+    pub settings_page: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -231,6 +233,8 @@ pub fn action_presentation(
         desired_state: desired_state_for(metadata).to_owned(),
         current_state: current_state.map(|state| state_to_ui(metadata, state)),
         detail_points,
+        settings_page: crate::settings_link::settings_page_for(metadata.id)
+            .map(|page| page.to_owned()),
     }
 }
 

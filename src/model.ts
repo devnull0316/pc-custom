@@ -72,6 +72,7 @@ export interface ActionPresentation {
   desiredState: string;
   currentState?: ActionState | null;
   detailPoints: readonly string[];
+  settingsPage?: string | null;
 }
 
 export interface BootstrapStatus {

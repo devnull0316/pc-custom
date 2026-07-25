@@ -152,6 +152,14 @@ pub fn storage_temp_cleanup_apply(
         .map_err(|_| CoreError::invalid_request("一時ファイルを削除できませんでした。"))
 }
 
+/// 該当するWindows設定ページを開く。固定表にあるms-settings URIのみ。
+#[tauri::command]
+pub fn open_windows_settings(action_id: String) -> CoreResult<String> {
+    let action_id = ActionId::from_str(&action_id)
+        .map_err(|_| CoreError::invalid_request("登録されていないAction IDです。"))?;
+    crate::settings_link::open_settings_page(action_id).map(|page| page.to_owned())
+}
+
 #[tauri::command]
 pub fn setup_app_catalog() -> Vec<crate::setup::SetupAppDto> {
     crate::setup::app_catalog()

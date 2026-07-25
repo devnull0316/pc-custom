@@ -115,6 +115,7 @@ mod tests {
             desired_state: "オン".to_owned(),
             current_state: state,
             detail_points: vec![],
+            settings_page: None,
         }
     }
 

@@ -140,6 +140,18 @@ taskbar_left=0 width=1920 start_left=518 start_width=45 center_ratio=0.282
 
 再現手順: `cargo test --lib taskbar_alignment_write -- --ignored --nocapture`（実機のタスクバーを一時的に変更し、必ず復元する）。
 
+## 42候補の行き止まりを解消（CC 2026-07-25）
+
+実測でUIへ反映されないと分かった以上、これらを「表示するだけ」で終わらせない。**Windows自身の設定画面へ案内する導線**を追加した（`src/settings_link.rs`）。
+
+- ActionId → `ms-settings:` ページの**固定表**のみ。任意URL・パス・コマンドは受け付けない。
+- 起動は `ShellExecuteW` に定数文字列を渡すだけで、シェルを経由しない。
+- 設定アプリに該当ページが無いもの（Explorer系はフォルダーオプション側）は**案内を出さない**。嘘の導線を作らないため。
+- UIには「Windowsの設定を開く」ボタンと、「この項目はWindowsの設定画面から変更できます。Totonoeは現在値の表示だけを行います」の一文を出す。
+- テスト4件: 全マッピングが `ms-settings:` スキームで空白・引数連結・引用符を含まないこと、Explorer系は案内なし、主要候補には必ず導線があること、表示情報に `settingsPage` が載ること。
+
+これで42候補は「変えられないと言われて終わり」ではなく、「ここで変えられます」と示す状態になった。
+
 ## 未実装・CC確認が必要な項目
 
 1. 42レジストリ候補ごとの第三者setter契約となる一次資料、26100/26200 clean VMでの設定UI→detect→apply→UI確認→rollback→UI確認。承認後にのみstableへ個別昇格する。

@@ -239,6 +239,10 @@ export function configSnapshotExport(): Promise<string> {
   return call<string>("config_snapshot_export");
 }
 
+export function openWindowsSettings(actionId: string): Promise<string> {
+  return call<string>("open_windows_settings", { actionId });
+}
+
 export function setupCatalog(): Promise<readonly SetupAppDto[]> {
   return call<readonly SetupAppDto[]>("setup_app_catalog");
 }

@@ -1,3 +1,4 @@
+import { openWindowsSettings } from "../backend";
 import { useState } from "react";
 
 import { CATEGORIES } from "../catalog";
@@ -245,7 +246,20 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           <button className="primary-button" disabled={!mutationAllowed || previewing} onClick={onPreview} type="button">{previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}{previewing ? "プレビュー作成中" : "適用プレビュー"}</button>
         )}
         <button className="secondary-button" disabled={inDraft || !profileEligible} onClick={onAddToDraft} type="button"><Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : profileEligible ? "プロファイルへ追加" : "自動適用の対象外"}</button>
+        {action.settingsPage ? (
+          <button
+            className="secondary-button"
+            disabled={dataMode !== "live"}
+            onClick={() => void openWindowsSettings(action.id).catch(() => undefined)}
+            type="button"
+          >
+            <Icon name="arrow" />Windowsの設定を開く
+          </button>
+        ) : null}
       </div>
+      {action.settingsPage && action.availability !== "mutable" ? (
+        <p className="blocked-reason"><Icon name="info" size={15} />この項目はWindowsの設定画面から変更できます。Totonoeは現在値の表示だけを行います。</p>
+      ) : null}
     </div>
   );
 }
