@@ -916,6 +916,171 @@ mod tests {
             .to_string_lossy().into_owned()
     }
 
+    /// **この観測は判定に使えない**（記録として残す）。
+    ///
+    /// UIAが返す項目名は、拡張子の表示設定に**鈍感**で、常に正式なファイル名を返す。
+    /// 同一の `HideFileExt=1` の下で、別プロセスのシェル表示名は「拡張子なし」を返したのに、
+    /// Explorer UIA は「.txt 付き」を返した。信号が食い違う以上、この観測で
+    /// 「反映されない」と結論づけてはならない。
+    /// `show_extensions` の判定根拠は、別プロセスのシェル表示名のほうである。
+    #[test]
+    #[ignore = "記録用: UIA名は拡張子表示設定に鈍感なため判定に使わないこと"]
+    fn show_extensions_write_changes_the_fresh_explorer_listing() {
+        const SUBKEY: &str =
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const STEM: &str = "ext-row-9b41";
+
+        let dir = probe_folder("totonoe-ext-probe-", &["ext-row-9b41.txt"]);
+        let title = probe_title(&dir);
+        let with_ext = format!("{STEM}.txt");
+
+        let observe = |handle: isize| -> Option<bool> {
+            // 拡張子つきで見えるなら true、拡張子なしで見えるなら false、どちらでもなければ None。
+            if explorer_item_observation(handle, &with_ext).is_ok() {
+                Some(true)
+            } else if explorer_item_observation(handle, STEM).is_ok() {
+                Some(false)
+            } else {
+                None
+            }
+        };
+
+        let before_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: owned Explorer window unavailable: {error:?}");
+                return;
+            }
+        };
+        let before = observe(before_window.handle());
+        before_window.close_and_assert();
+        let Some(before) = before else {
+            println!("OBSERVATION_UNAVAILABLE: probe item was not observable in Explorer");
+            return;
+        };
+        println!("before: extension_shown={before}");
+
+        let target = RegistryTarget::current_user_64(SUBKEY, "HideFileExt");
+        let original = current_boolean_value(target);
+        // HideFileExt: 0 = 拡張子を表示 / 1 = 隠す
+        let desired: u32 = if before { 1 } else { 0 };
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let applied = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => {
+                let seen = observe(window.handle());
+                window.close_and_assert();
+                seen
+            }
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: owned Explorer window unavailable after change: {error:?}");
+                None
+            }
+        };
+        guard.restore_and_assert();
+        assert_eq!(current_boolean_value(target), original, "元の値へ正確に戻す");
+
+        match applied {
+            Some(seen) => {
+                println!("applied: extension_shown={seen} (desired HideFileExt={desired})");
+                if seen != before {
+                    println!("EVIDENCE: show_extensions changed what a fresh Explorer window lists");
+                } else {
+                    println!("EVIDENCE: show_extensions did not change a fresh Explorer window listing");
+                }
+            }
+            None => println!("EVIDENCE: inconclusive"),
+        }
+    }
+
+    /// 最後の未測定Action。既存窓では反映されないと既に分かっているので、
+    /// **新しく開いた窓**に隠しファイルが現れるかで判定する。
+    #[test]
+    #[ignore = "temporarily changes hidden-file visibility and opens only an owned Explorer window"]
+    fn show_hidden_write_changes_the_fresh_explorer_listing() {
+        const SUBKEY: &str =
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VISIBLE: &str = "plain-row-5c2e";
+        const SECRET: &str = "secret-row-5c2e";
+
+        let dir = probe_folder("totonoe-hidden-probe-", &[VISIBLE, SECRET]);
+        let title = probe_title(&dir);
+        // 片方だけ隠し属性にする。属性が付かなければ判定できないので確認する。
+        let secret_path = dir.path().join(SECRET);
+        let _ = std::process::Command::new("attrib").arg("+h").arg(&secret_path).output();
+        let hidden_attribute_set = {
+            use std::os::windows::fs::MetadataExt;
+            std::fs::metadata(&secret_path)
+                .map(|m| m.file_attributes() & 2 != 0)
+                .unwrap_or(false)
+        };
+        if !hidden_attribute_set {
+            println!("OBSERVATION_UNAVAILABLE: could not mark the probe item hidden");
+            return;
+        }
+
+        let sees_secret = |handle: isize| {
+            explorer_item_observation(handle, SECRET).is_ok()
+        };
+
+        let before_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: owned Explorer window unavailable: {error:?}");
+                return;
+            }
+        };
+        // 対照として、隠しでない項目は必ず見えるはず。見えないなら観測自体が壊れている。
+        let control_visible = explorer_item_observation(before_window.handle(), VISIBLE).is_ok();
+        let before = sees_secret(before_window.handle());
+        before_window.close_and_assert();
+        println!("before: control_item_visible={control_visible} secret_visible={before}");
+        if !control_visible {
+            println!("OBSERVATION_UNAVAILABLE: control item was not observable");
+            return;
+        }
+
+        let target = RegistryTarget::current_user_64(SUBKEY, "Hidden");
+        let original = current_boolean_value(target);
+        // 1 = 隠しファイルを表示 / 2 = 表示しない
+        let desired: u32 = if before { 2 } else { 1 };
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let applied = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => {
+                let seen = sees_secret(window.handle());
+                window.close_and_assert();
+                Some(seen)
+            }
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: owned Explorer window unavailable after change: {error:?}");
+                None
+            }
+        };
+        guard.restore_and_assert();
+
+        let restored = current_boolean_value(target);
+        assert_eq!(restored, original, "元の値へ正確に戻す");
+
+        match applied {
+            Some(seen) => {
+                println!("applied: secret_visible={seen} (desired={desired})");
+                if seen != before {
+                    println!("EVIDENCE: show_hidden changed what a fresh Explorer window lists");
+                } else {
+                    println!("EVIDENCE: show_hidden did not change a fresh Explorer window listing");
+                }
+            }
+            None => println!("EVIDENCE: inconclusive"),
+        }
+    }
+
     #[test]
     #[ignore = "temporarily changes item checkboxes and opens only an owned Explorer window"]
     fn explorer_item_checkboxes_write_changes_the_fresh_explorer_ui() {

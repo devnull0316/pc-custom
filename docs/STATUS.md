@@ -371,7 +371,7 @@ CCが直した点:
 | `session.prevent_sleep` | lease API＋実機の通し経路 | 適用→履歴→復元まで通過 |
 | `power.active_scheme_switch` | `PowerGetActiveScheme` | 公開APIで検証（この環境はOSがcode 5で拒否） |
 
-### 効かないので降格（Guided＋変更経路を封鎖）
+### 効かないので降格（Guided＋変更経路を封鎖）※ show_hidden を追加
 
 | Action | 観測 | 実測値 |
 | --- | --- | --- |
@@ -380,10 +380,24 @@ CCが直した点:
 | `explorer.clock_seconds` | UIAで時計の文字列 | 「時計 11:15」のまま秒が出ない |
 | `explorer.compact_view` | 行ピッチと**リスト全体高** | `28/108` → `28/108`（独立2量とも不変） |
 | `explorer.item_checkboxes` | 項目テキストの左端座標 | `[174,174,174,174]` → 変化なし（delta 0） |
+| `explorer.show_hidden` | 新窓Explorerに隠し項目が現れるか（対照項目で観測の健全性も確認） | 対照は見える／隠し項目は前後とも見えず |
 
-**5件が「適用したと表示されるのに何も起きない」状態で出荷されていた。** すべて発見し、
+**6件が「適用したと表示されるのに何も起きない」状態で出荷されていた。** すべて発見し、
 `kind: Guided` / `auto_apply_eligible: false` へ落とし、共通マクロの `validate` で変更経路自体を封じた。
 `demoted_actions_refuse_to_mutate` が5件すべてを固定している。
+
+### `show_extensions` は降格しなかった（観測が鈍感だったため）
+
+同じ方法で `show_extensions` も測ったところ「変化なし」と出たが、**この観測は判定に使えない**。
+UIAが返す項目名は拡張子の表示設定に鈍感で、常に正式なファイル名を返すからである。
+
+根拠: 同一の `HideFileExt=1` の下で
+- 別プロセスのシェル表示名 → 「拡張子なし」
+- Explorer UIA の項目名 → 「.txt 付き」
+
+信号が食い違う以上、この観測で「反映されない」と結論づけてはならない。
+`show_extensions` の判定根拠は別プロセスのシェル表示名のままとし、当該テストは
+「判定に使わないこと」と明記して残した。**鈍感な観測で正常な機能を殺さない。**
 
 ### 分かれ目
 
