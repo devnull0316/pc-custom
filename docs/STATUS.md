@@ -220,14 +220,28 @@ Explorerウィンドウを開いて外から観測する方法を試したが、
 | `session.prevent_sleep` | **確認済み** | 実機の通し経路テスト＋lease API |
 | `power.active_scheme_switch` | 公開APIで検証（この環境ではOSがcode 5で拒否） | `PowerGetActiveScheme` |
 | `explorer.show_hidden` | **未確認** | Explorerウィンドウの一覧をUIAで読む必要あり |
-| `explorer.item_checkboxes` | **未確認** | 同上 |
-| `explorer.compact_view` | **未確認** | 同上 |
-| `appearance.transparency` | **未確認** | 外から観測する手段が未特定 |
-| `theme.color_mode` | **未確認** | 外から観測する手段が未特定 |
+| `explorer.item_checkboxes` | **観測不能（今回）** | 自作の一意な検査フォルダーを開き、EnumWindows＋タイトル部分一致で限定したExplorer項目のUIA Toggle/CheckBox状態を読む。今回の実行セッションではCabinetWClassが生成されず未実測 |
+| `explorer.compact_view` | **観測不能（今回）** | 同じ自窓のExplorer一覧項目をUIAで読み、行高・行間を比較する。今回の実行セッションではCabinetWClassが生成されず未実測 |
+| `appearance.transparency` | **観測不能（今回）** | `DwmGetColorizationColor` の実効 `opaque_blend` を外から読む。変更前の読取りが `0x80070002` 相当で失敗したため未実測 |
+| `theme.color_mode` | **観測不能（今回）** | 自窓として開いたExplorerの描画領域を画面DCから読み、平均輝度を比較する。今回の実行セッションではCabinetWClassが生成されず未実測 |
 
-未確認の5件は、`show_extensions` と同じ Explorer 系（内容表示）に属するものが3件で、
-反映される見込みは高い。ただし**見込みで出荷したことが今回の3件の不具合を生んだ**ため、
-確認できるまでは「確認済み」とは書かない。次にやるのはこの5件の確認である。
+2026-07-26 に今回対象の4件へ `#[ignore]` の往復テストを追加した。観測可能な環境では、
+元状態の型・raw bytes・値の欠如を退避し、変更後の外部観測、元状態への復元、復元後の外部観測まで行う。
+ただし今回のテスト実行セッションは対話シェルから分離されており、`FindWindowW("Shell_TrayWnd")` と
+CabinetWClassの `EnumWindows` がともに空だった。別のデスクトップ操作経路からのExplorer起動も承認されなかった。
+`DwmGetColorizationColor` も変更前の読取りで失敗した。4件とも設定を書き込む前に安全に終了しており、
+反映する／しないのどちらにも分類しない。**確認済み化もGuided降格も行わず、結論を保留する。**
+
+追加テスト: `explorer_item_checkboxes_write_changes_the_fresh_explorer_ui`、
+`explorer_compact_view_write_changes_the_fresh_explorer_row_spacing`、
+`appearance_transparency_write_changes_the_effective_dwm_blend`、
+`theme_color_mode_write_changes_a_fresh_explorer_window_luminance`。
+
+今回の4テストはすべて `ok` だが、出力は `OBSERVATION_UNAVAILABLE` であり反映確認ではない。
+`cargo test --lib -- --test-threads=1` は **179 passed / 1 failed / 18 ignored**。
+失敗は既存の `accent_color_reads_a_valid_hex_on_this_machine` で、同じ対話DWM不在による
+`DwmGetColorizationColor` の `0x80070002` 相当。これをfilterした残りは
+**179 passed / 0 failed / 18 ignored / 1 filtered out**。
 
 ### 観測方法を直したら、実害は3件だった
 
@@ -299,6 +313,37 @@ HideFileExt=1 -> "totonoe-extension-probe2"
 - テスト4件: 全マッピングが `ms-settings:` スキームで空白・引数連結・引用符を含まないこと、Explorer系は案内なし、主要候補には必ず導線があること、表示情報に `settingsPage` が載ること。
 
 これで42候補は「変えられないと言われて終わり」ではなく、「ここで変えられます」と示す状態になった。
+
+## CC監査: codexによる4件検証（2026-07-26）
+
+codexへ範囲を限定して依頼（effort=high、対象4件の検証のみ、新機能・リファクタ禁止）。
+
+**結果: 4件とも「観測対象がその設定を追跡しない」ため保留。推測での昇格・降格はなし。** これは正しい判断。
+
+| Action | 観測対象 | 実測 |
+| --- | --- | --- |
+| `explorer.item_checkboxes` | UIAのToggle/CheckBox状態 | 項目は観測できたが、チェックボックス状態はUIAに出てこない |
+| `explorer.compact_view` | 行の高さ・ピッチ | `item_height=24 / row_pitch=28` を実測。変更後も**変わらず** |
+| `appearance.transparency` | DWMの `opaque_blend` | 読めるが、この設定を追跡しない |
+| `theme.color_mode` | Explorer描画領域の平均輝度 | 対象窓が前面でないと採取できず |
+
+CC監査で確認した点:
+
+- `actions/` 配下は未変更。Action metadataや変更経路に手を付けていない（指示通り）。
+- Explorerウィンドウの操作は `find_explorer_window_by_title` 経由で**自窓限定**。`FindWindowW` の直接使用は Shell_TrayWnd のみ（唯一の窓なので安全）。
+- `OwnedExplorerWindow` に `Drop` があり、パニック時も窓が残らない（RAII）。
+- 全 `#[ignore]` 18件を通しで実行し、`HideFileExt` `ColorizationColor` とも元の値、一時フォルダーの残骸なしを確認。
+
+CCが直した点:
+
+- `theme.color_mode` のテストが `.expect()` で観測失敗をテスト失敗に変えていた。他3件と同じ安全終了へ修正。
+  **環境要因が失敗として残ると、本当の退行を隠す。**
+
+未解決として残るもの:
+
+- `explorer.compact_view` は行ピッチという**妥当な観測対象**で変化なしを実測した。降格の判断材料になり得るが、
+  今日だけで観測側の欠陥を4種類出しているため、単独の測定で降格はしない。別の観測（新窓での比較、DPI変化の除外）で
+  再確認してから判断する。
 
 ## 未実装・CC確認が必要な項目
 

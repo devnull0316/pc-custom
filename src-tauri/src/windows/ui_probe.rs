@@ -408,6 +408,606 @@ pub fn shell_display_name(_path: &std::path::Path) -> WindowsResult<String> {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use crate::backup::{
+        prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryBackup,
+        RegistryRestoreOutcome, RegistryTarget,
+    };
+    use crate::windows::{
+        notify_explorer_settings_changed, notify_theme_changed, write_raw_value,
+    };
+    use std::{
+        collections::HashSet,
+        path::Path,
+        thread::sleep,
+        time::{Duration, Instant},
+    };
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE, WPARAM};
+    use windows::Win32::Graphics::Gdi::{GetDC, GetPixel, ReleaseDC, CLR_INVALID};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTogglePattern,
+        TreeScope_Descendants, UIA_CheckBoxControlTypeId, UIA_ListItemControlTypeId,
+        UIA_TogglePatternId,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW, IsWindow,
+        IsWindowVisible, PostMessageW, SetForegroundWindow, ShowWindow, SW_SHOWMAXIMIZED,
+        WM_CLOSE,
+    };
+
+    const REG_DWORD: u32 = 4;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProbeNotification {
+        Explorer,
+        Theme,
+    }
+
+    struct RegistryRestoreGuard {
+        entries: Vec<RegistryBackup>,
+        notification: ProbeNotification,
+        restored: bool,
+    }
+
+    impl RegistryRestoreGuard {
+        fn new(entries: Vec<RegistryBackup>, notification: ProbeNotification) -> Self {
+            Self {
+                entries,
+                notification,
+                restored: false,
+            }
+        }
+
+        fn apply(&self) {
+            for entry in &self.entries {
+                write_raw_value(&entry.location, entry.intended_type, &entry.intended_raw)
+                    .expect("write probe value");
+                let applied = read_registry_state(&entry.location)
+                    .expect("read applied probe value");
+                assert_eq!(applied, entry.applied_state(), "probe value was applied exactly");
+            }
+            self.notify();
+        }
+
+        fn restore_and_assert(&mut self) {
+            for entry in self.entries.iter().rev() {
+                let outcome = restore_registry_backup(entry).expect("restore probe value");
+                assert!(matches!(
+                    outcome,
+                    RegistryRestoreOutcome::Restored | RegistryRestoreOutcome::AlreadyOriginal
+                ));
+            }
+            self.notify();
+            for entry in &self.entries {
+                let restored = read_registry_state(&entry.location)
+                    .expect("read restored probe value");
+                assert_eq!(restored, entry.original,
+                    "value, type, bytes, and absence must be restored exactly");
+            }
+            self.restored = true;
+        }
+
+        fn notify(&self) {
+            match self.notification {
+                ProbeNotification::Explorer => { let _ = notify_explorer_settings_changed(); }
+                ProbeNotification::Theme => { let _ = notify_theme_changed(); }
+            }
+        }
+    }
+
+    impl Drop for RegistryRestoreGuard {
+        fn drop(&mut self) {
+            if self.restored { return; }
+            for entry in self.entries.iter().rev() {
+                if let Err(error) = restore_registry_backup(entry) {
+                    eprintln!("emergency probe restoration failed: {error}");
+                }
+            }
+            self.notify();
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct ExplorerWindowInfo {
+        handle: isize,
+        title: String,
+    }
+
+    fn explorer_windows() -> Vec<ExplorerWindowInfo> {
+        unsafe extern "system" fn callback(window: HWND, param: LPARAM) -> BOOL {
+            let result = &mut *(param.0 as *mut Vec<ExplorerWindowInfo>);
+            if !IsWindowVisible(window).as_bool() { return TRUE; }
+            let mut class_buffer = [0u16; 128];
+            let class_len = GetClassNameW(window, &mut class_buffer);
+            if class_len <= 0 { return TRUE; }
+            if String::from_utf16_lossy(&class_buffer[..class_len as usize]) != "CabinetWClass" {
+                return TRUE;
+            }
+            let mut title_buffer = [0u16; 512];
+            let title_len = GetWindowTextW(window, &mut title_buffer);
+            if title_len <= 0 { return TRUE; }
+            result.push(ExplorerWindowInfo {
+                handle: window.0 as isize,
+                title: String::from_utf16_lossy(&title_buffer[..title_len as usize]),
+            });
+            TRUE
+        }
+
+        let mut result = Vec::new();
+        unsafe {
+            let _ = EnumWindows(Some(callback),
+                LPARAM(&mut result as *mut Vec<ExplorerWindowInfo> as isize));
+        }
+        result
+    }
+
+    struct OwnedExplorerWindow {
+        handle: Option<isize>,
+    }
+
+    impl OwnedExplorerWindow {
+        fn open(path: &Path, title_needle: &str) -> WindowsResult<Self> {
+            let existing: HashSet<isize> = explorer_windows().into_iter()
+                .map(|window| window.handle).collect();
+            std::process::Command::new("explorer.exe")
+                .arg(format!("/n,{}", path.display()))
+                .spawn()
+                .map_err(|error| WindowsError::io("launch owned Explorer", &error))?;
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while Instant::now() < deadline {
+                sleep(Duration::from_millis(200));
+                if let Some(window) = explorer_windows().into_iter().find(|window| {
+                    !existing.contains(&window.handle) && window.title.contains(title_needle)
+                }) {
+                    let handle = HWND(window.handle as *mut core::ffi::c_void);
+                    unsafe {
+                        let _ = ShowWindow(handle, SW_SHOWMAXIMIZED);
+                        let _ = SetForegroundWindow(handle);
+                    }
+                    sleep(Duration::from_millis(700));
+                    return Ok(Self { handle: Some(window.handle) });
+                }
+            }
+            eprintln!("Explorer windows after launch: {:?}", explorer_windows());
+            Err(WindowsError::new(WindowsErrorKind::InvalidData,
+                "new owned Explorer window not found", None))
+        }
+
+        fn handle(&self) -> isize {
+            self.handle.expect("owned Explorer window is open")
+        }
+
+        fn close_and_assert(mut self) {
+            let handle = self.handle.take().expect("owned Explorer window is open");
+            close_owned_explorer_window(handle, true);
+        }
+    }
+
+    impl Drop for OwnedExplorerWindow {
+        fn drop(&mut self) {
+            if let Some(handle) = self.handle.take() {
+                close_owned_explorer_window(handle, false);
+            }
+        }
+    }
+
+    fn close_owned_explorer_window(handle: isize, assert_closed: bool) {
+        let window = HWND(handle as *mut core::ffi::c_void);
+        unsafe { let _ = PostMessageW(window, WM_CLOSE, WPARAM(0), LPARAM(0)); }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if !unsafe { IsWindow(window) }.as_bool() { return; }
+            sleep(Duration::from_millis(100));
+        }
+        if assert_closed { panic!("owned Explorer window did not close"); }
+        eprintln!("owned Explorer window did not close during emergency cleanup");
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ExplorerItemObservation {
+        bounds: RECT,
+        toggle_pattern: bool,
+        checkbox_descendants: usize,
+    }
+
+    fn explorer_item_observation(
+        window_handle: isize,
+        exact_name: &str,
+    ) -> WindowsResult<ExplorerItemObservation> {
+        fn fail(operation: &'static str) -> WindowsError {
+            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+        }
+
+        unsafe {
+            let window = HWND(window_handle as *mut core::ffi::c_void);
+            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let owns_com = init.is_ok();
+            let result = (|| -> WindowsResult<ExplorerItemObservation> {
+                let automation: IUIAutomation =
+                    CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                        .map_err(|_| fail("CoCreateInstance"))?;
+                let root: IUIAutomationElement = automation.ElementFromHandle(window)
+                    .map_err(|_| fail("ElementFromHandle explorer"))?;
+                let condition = automation.CreateTrueCondition()
+                    .map_err(|_| fail("CreateTrueCondition"))?;
+                let all = root.FindAll(TreeScope_Descendants, &condition)
+                    .map_err(|_| fail("FindAll"))?;
+                let count = all.Length().map_err(|_| fail("Length"))?;
+                for index in 0..count {
+                    let Ok(element) = all.GetElement(index) else { continue; };
+                    let Ok(name) = element.CurrentName() else { continue; };
+                    if name.to_string() != exact_name
+                        || element.CurrentControlType().ok() != Some(UIA_ListItemControlTypeId)
+                    {
+                        continue;
+                    }
+                    let bounds = element.CurrentBoundingRectangle()
+                        .map_err(|_| fail("CurrentBoundingRectangle"))?;
+                    let toggle_pattern = element
+                        .GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
+                        .is_ok();
+                    let mut checkbox_descendants = 0usize;
+                    if let Ok(children) = element.FindAll(TreeScope_Descendants, &condition) {
+                        let child_count = children.Length().unwrap_or(0);
+                        for child_index in 0..child_count {
+                            if let Ok(child) = children.GetElement(child_index) {
+                                if child.CurrentControlType().ok()
+                                    == Some(UIA_CheckBoxControlTypeId)
+                                {
+                                    checkbox_descendants += 1;
+                                }
+                            }
+                        }
+                    }
+                    return Ok(ExplorerItemObservation {
+                        bounds,
+                        toggle_pattern,
+                        checkbox_descendants,
+                    });
+                }
+                Err(WindowsError::new(WindowsErrorKind::InvalidData,
+                    "requested Explorer list item not found", None))
+            })();
+            if owns_com { CoUninitialize(); }
+            result
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ExplorerRowLayout {
+        item_height: i32,
+        row_pitch: i32,
+    }
+
+    fn explorer_row_layout(
+        window_handle: isize,
+        item_names: &[&str],
+    ) -> WindowsResult<ExplorerRowLayout> {
+        let mut bounds = Vec::with_capacity(item_names.len());
+        for name in item_names {
+            bounds.push(explorer_item_observation(window_handle, name)?.bounds);
+        }
+        bounds.sort_by_key(|rect| (rect.top, rect.left));
+        let mut pitches = Vec::new();
+        for pair in bounds.windows(2) {
+            let pitch = pair[1].top - pair[0].top;
+            if pitch > 0 && (pair[1].left - pair[0].left).abs() < 8 {
+                pitches.push(pitch);
+            }
+        }
+        pitches.sort_unstable();
+        let Some(row_pitch) = pitches.get(pitches.len() / 2).copied() else {
+            return Err(WindowsError::new(WindowsErrorKind::InvalidData,
+                "Explorer items are not in a measurable vertical list", None));
+        };
+        let mut heights: Vec<i32> = bounds.iter()
+            .map(|rect| rect.bottom - rect.top).collect();
+        heights.sort_unstable();
+        Ok(ExplorerRowLayout {
+            item_height: heights[heights.len() / 2],
+            row_pitch,
+        })
+    }
+
+    fn explorer_window_luminance(window_handle: isize) -> WindowsResult<u32> {
+        let window = HWND(window_handle as *mut core::ffi::c_void);
+        unsafe { let _ = SetForegroundWindow(window); }
+        sleep(Duration::from_millis(150));
+        if unsafe { GetForegroundWindow() } != window {
+            return Err(WindowsError::new(WindowsErrorKind::InvalidData,
+                "owned Explorer window is not foreground", None));
+        }
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(window, &mut rect) }
+            .map_err(|_| WindowsError::new(WindowsErrorKind::ApiFailure,
+                "GetWindowRect", None))?;
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width < 400 || height < 300 {
+            return Err(WindowsError::new(WindowsErrorKind::InvalidData,
+                "owned Explorer window is too small for colour sampling", None));
+        }
+
+        let screen = unsafe { GetDC(HWND::default()) };
+        if screen.0.is_null() {
+            return Err(WindowsError::new(WindowsErrorKind::ApiFailure,
+                "GetDC screen", None));
+        }
+        let mut total = 0u64;
+        let mut samples = 0u64;
+        for x_step in 0..8 {
+            for y_step in 0..8 {
+                let x = rect.left + width * (60 + x_step * 4) / 100;
+                let y = rect.top + height * (58 + y_step * 4) / 100;
+                let color = unsafe { GetPixel(screen, x, y) }.0;
+                if color == CLR_INVALID { continue; }
+                let red = color & 0xff;
+                let green = (color >> 8) & 0xff;
+                let blue = (color >> 16) & 0xff;
+                total += u64::from((red * 299 + green * 587 + blue * 114) / 1_000);
+                samples += 1;
+            }
+        }
+        unsafe { let _ = ReleaseDC(HWND::default(), screen); }
+        if samples == 0 {
+            return Err(WindowsError::new(WindowsErrorKind::ApiFailure,
+                "GetPixel Explorer window", None));
+        }
+        Ok((total / samples) as u32)
+    }
+
+    fn current_boolean_value(target: RegistryTarget) -> u32 {
+        let state = read_registry_state(&target.location()).expect("read current probe value");
+        if state.value_existed && state.value_type == Some(REG_DWORD) && state.raw_bytes.len() == 4 {
+            let value = u32::from_le_bytes(state.raw_bytes[..4].try_into().expect("DWORD bytes"));
+            if value <= 1 { return value; }
+        }
+        0
+    }
+
+    fn prepare_boolean_probe(target: RegistryTarget, desired: u32) -> RegistryBackup {
+        prepare_registry_backup(target, REG_DWORD, desired.to_le_bytes().to_vec(),
+            1, 26_200).expect("prepare typed probe backup")
+    }
+
+    fn probe_folder(prefix: &str, item_names: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::Builder::new().prefix(prefix).tempdir()
+            .expect("create unique probe directory");
+        for name in item_names {
+            std::fs::write(dir.path().join(name), b"probe").expect("create probe item");
+        }
+        dir
+    }
+
+    fn probe_title(dir: &tempfile::TempDir) -> String {
+        dir.path().file_name().expect("probe directory name")
+            .to_string_lossy().into_owned()
+    }
+
+    #[test]
+    #[ignore = "temporarily changes item checkboxes and opens only an owned Explorer window"]
+    fn explorer_item_checkboxes_write_changes_the_fresh_explorer_ui() {
+        const SUBKEY: &str =
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const ITEM: &str = "checkbox-target-7f3a";
+        let target = RegistryTarget::current_user_64(SUBKEY, "AutoCheckSelect");
+        let dir = probe_folder("totonoe-checkbox-probe-", &[ITEM]);
+        let title = probe_title(&dir);
+
+        let before_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: owned Explorer window unavailable: {error:?}");
+                return;
+            }
+        };
+        let before = explorer_item_observation(before_window.handle(), ITEM)
+            .expect("observe checkbox baseline outside Explorer");
+        before_window.close_and_assert();
+        let before_marker = (before.toggle_pattern, before.checkbox_descendants);
+        println!("before: {before:?}");
+
+        let original = current_boolean_value(target);
+        let desired = u32::from(original == 0);
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let applied_window = OwnedExplorerWindow::open(dir.path(), &title)
+            .expect("open owned Explorer after checkbox change");
+        let applied = explorer_item_observation(applied_window.handle(), ITEM)
+            .expect("observe applied checkbox state outside Explorer");
+        applied_window.close_and_assert();
+        println!("applied: {applied:?}");
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+        let restored_window = OwnedExplorerWindow::open(dir.path(), &title)
+            .expect("open owned Explorer after checkbox restore");
+        let restored = explorer_item_observation(restored_window.handle(), ITEM)
+            .expect("observe restored checkbox state outside Explorer");
+        restored_window.close_and_assert();
+        assert_eq!((restored.toggle_pattern, restored.checkbox_descendants), before_marker,
+            "restored Explorer checkbox UI must equal the baseline");
+
+        let applied_marker = (applied.toggle_pattern, applied.checkbox_descendants);
+        if applied_marker != before_marker {
+            println!("EVIDENCE: item checkbox UIA marker changed in a fresh Explorer window");
+        } else {
+            println!("OBSERVATION_UNAVAILABLE: UIA exposed no checkbox-specific state change");
+        }
+    }
+
+    #[test]
+    #[ignore = "temporarily changes compact view and opens only an owned Explorer window"]
+    fn explorer_compact_view_write_changes_the_fresh_explorer_row_spacing() {
+        const SUBKEY: &str =
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const ITEMS: &[&str] = &[
+            "compact-row-a-71c2", "compact-row-b-71c2",
+            "compact-row-c-71c2", "compact-row-d-71c2",
+        ];
+        let target = RegistryTarget::current_user_64(SUBKEY, "UseCompactMode");
+        let dir = probe_folder("totonoe-compact-probe-", ITEMS);
+        let title = probe_title(&dir);
+
+        let before_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: owned Explorer window unavailable: {error:?}");
+                return;
+            }
+        };
+        let before = explorer_row_layout(before_window.handle(), ITEMS)
+            .expect("observe measurable Explorer row spacing");
+        before_window.close_and_assert();
+        println!("before: {before:?}");
+
+        let original = current_boolean_value(target);
+        let desired = u32::from(original == 0);
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let applied_window = OwnedExplorerWindow::open(dir.path(), &title)
+            .expect("open owned Explorer after compact change");
+        let applied = explorer_row_layout(applied_window.handle(), ITEMS)
+            .expect("observe applied Explorer row spacing");
+        applied_window.close_and_assert();
+        println!("applied: {applied:?}");
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+        let restored_window = OwnedExplorerWindow::open(dir.path(), &title)
+            .expect("open owned Explorer after compact restore");
+        let restored = explorer_row_layout(restored_window.handle(), ITEMS)
+            .expect("observe restored Explorer row spacing");
+        restored_window.close_and_assert();
+        assert_eq!(restored, before, "restored Explorer row spacing must equal baseline");
+
+        if applied != before {
+            println!("EVIDENCE: compact view changed row spacing in a fresh Explorer window");
+        } else {
+            println!("EVIDENCE: compact view did not change measurable Explorer row spacing");
+        }
+    }
+
+    #[test]
+    #[ignore = "temporarily changes transparency and observes effective DWM state"]
+    fn appearance_transparency_write_changes_the_effective_dwm_blend() {
+        const SUBKEY: &str =
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+        let target = RegistryTarget::current_user_64(SUBKEY, "EnableTransparency");
+        let before = match crate::windows::system_accent_color() {
+            Ok(observation) => observation,
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: effective DWM blend unavailable: {error:?}");
+                return;
+            }
+        };
+        let desired = u32::from(before.opaque_blend);
+        println!("before: opaque_blend={} desired_transparency={desired}",
+            before.opaque_blend);
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+        guard.apply();
+        let mut changed = None;
+        for _ in 0..30 {
+            sleep(Duration::from_millis(200));
+            if let Ok(now) = crate::windows::system_accent_color() {
+                if now.opaque_blend != before.opaque_blend {
+                    changed = Some(now.opaque_blend);
+                    break;
+                }
+            }
+        }
+
+        guard.restore_and_assert();
+        let mut restored = false;
+        for _ in 0..30 {
+            sleep(Duration::from_millis(200));
+            if let Ok(now) = crate::windows::system_accent_color() {
+                if now.opaque_blend == before.opaque_blend {
+                    restored = true;
+                    break;
+                }
+            }
+        }
+        assert!(restored, "effective DWM blend must return to its baseline");
+
+        if let Some(opaque) = changed {
+            println!("EVIDENCE: effective DWM opaque_blend changed to {opaque}");
+        } else {
+            println!("OBSERVATION_UNAVAILABLE: DWM opaque_blend did not track this setting");
+        }
+    }
+
+    #[test]
+    #[ignore = "temporarily changes color mode and samples only an owned Explorer window"]
+    fn theme_color_mode_write_changes_a_fresh_explorer_window_luminance() {
+        const SUBKEY: &str =
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+        let apps = RegistryTarget::current_user_64(SUBKEY, "AppsUseLightTheme");
+        let system = RegistryTarget::current_user_64(SUBKEY, "SystemUsesLightTheme");
+        let dir = probe_folder("totonoe-theme-probe-", &["theme-sample-82d1"]);
+        let title = probe_title(&dir);
+
+        let before_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: owned Explorer window unavailable: {error:?}");
+                return;
+            }
+        };
+        // 他3件と同じく、観測できない環境では失敗ではなく安全終了にする。
+        // expect にすると、環境要因がテスト失敗として残り、本当の退行を隠してしまう。
+        let before = match explorer_window_luminance(before_window.handle()) {
+            Ok(value) => value,
+            Err(error) => {
+                println!("OBSERVATION_UNAVAILABLE: Explorer luminance unavailable: {error:?}");
+                return;
+            }
+        };
+        before_window.close_and_assert();
+        let desired = u32::from(before < 128);
+        println!("before: luminance={before} desired_light={desired}");
+
+        let mut guard = RegistryRestoreGuard::new(vec![
+            prepare_boolean_probe(apps, desired),
+            prepare_boolean_probe(system, desired),
+        ], ProbeNotification::Theme);
+        guard.apply();
+        sleep(Duration::from_millis(700));
+
+        let applied_window = OwnedExplorerWindow::open(dir.path(), &title)
+            .expect("open owned Explorer after theme change");
+        let applied = explorer_window_luminance(applied_window.handle())
+            .expect("sample applied Explorer luminance outside Explorer");
+        applied_window.close_and_assert();
+        println!("applied: luminance={applied}");
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(700));
+        let restored_window = OwnedExplorerWindow::open(dir.path(), &title)
+            .expect("open owned Explorer after theme restore");
+        let restored = explorer_window_luminance(restored_window.handle())
+            .expect("sample restored Explorer luminance outside Explorer");
+        restored_window.close_and_assert();
+        assert!(restored.abs_diff(before) <= 25,
+            "restored Explorer luminance must return near baseline: {before} -> {restored}");
+
+        if applied.abs_diff(before) >= 60 {
+            println!("EVIDENCE: fresh Explorer luminance changed from {before} to {applied}");
+        } else {
+            println!("OBSERVATION_UNAVAILABLE: sampled Explorer region did not distinguish themes");
+        }
+    }
 
     /// この環境でWindowsの実UIを機械的に観測できるかの調査。
     /// 環境によって取得できないことがあるため、失敗しても診断を出して落とさない。
