@@ -175,10 +175,79 @@ pub fn observe_taskbar_clock_text() -> WindowsResult<String> {
     Err(WindowsError::unsupported("observe taskbar clock"))
 }
 
+/// タイトルに `needle` を含む Explorer ウィンドウを1つ探す。
+///
+/// `FindWindowW` は最初に見つかったウィンドウを返すため、利用者が既に開いている
+/// 別のウィンドウを掴んでしまう。列挙して**部分一致**で自分の対象だけを選ぶ。
+#[cfg(windows)]
+pub fn find_explorer_window_by_title(needle: &str) -> WindowsResult<isize> {
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetWindowTextW, IsWindowVisible,
+    };
+
+    struct Search {
+        needle: String,
+        found: Option<isize>,
+    }
+
+    unsafe extern "system" fn callback(window: HWND, param: LPARAM) -> BOOL {
+        let search = &mut *(param.0 as *mut Search);
+        if search.found.is_some() {
+            return TRUE;
+        }
+        if !IsWindowVisible(window).as_bool() {
+            return TRUE;
+        }
+        let mut class_buffer = [0u16; 128];
+        let class_len = GetClassNameW(window, &mut class_buffer);
+        if class_len <= 0 {
+            return TRUE;
+        }
+        let class_name = String::from_utf16_lossy(&class_buffer[..class_len as usize]);
+        if class_name != "CabinetWClass" {
+            return TRUE;
+        }
+        let mut title_buffer = [0u16; 512];
+        let title_len = GetWindowTextW(window, &mut title_buffer);
+        if title_len <= 0 {
+            return TRUE;
+        }
+        let title = String::from_utf16_lossy(&title_buffer[..title_len as usize]);
+        if title.contains(&search.needle) {
+            search.found = Some(window.0 as isize);
+        }
+        TRUE
+    }
+
+    let mut search = Search {
+        needle: needle.to_owned(),
+        found: None,
+    };
+    unsafe {
+        let _ = EnumWindows(
+            Some(callback),
+            LPARAM(&mut search as *mut Search as isize),
+        );
+    }
+    search.found.ok_or_else(|| {
+        WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "explorer window with the requested title not found",
+            None,
+        )
+    })
+}
+
+#[cfg(not(windows))]
+pub fn find_explorer_window_by_title(_needle: &str) -> WindowsResult<isize> {
+    Err(WindowsError::unsupported("find explorer window"))
+}
+
 /// 開いているExplorerウィンドウが一覧表示している項目名。
 /// Explorerは別プロセスなので、自プロセスのキャッシュに影響されない観測点になる。
 #[cfg(windows)]
-pub fn explorer_window_item_names(title: &str) -> WindowsResult<Vec<String>> {
+pub fn explorer_window_item_names(window_handle: isize) -> WindowsResult<Vec<String>> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
@@ -187,16 +256,12 @@ pub fn explorer_window_item_names(title: &str) -> WindowsResult<Vec<String>> {
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
     };
-    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
-
     fn fail(operation: &'static str) -> WindowsError {
         WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
     }
 
     unsafe {
-        let wide_title = windows::core::HSTRING::from(title);
-        let window: HWND = FindWindowW(windows::core::w!("CabinetWClass"), &wide_title)
-            .map_err(|_| fail("FindWindowW CabinetWClass with title"))?;
+        let window = HWND(window_handle as *mut core::ffi::c_void);
         let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let owns_com = init.is_ok();
         let result = (|| -> WindowsResult<Vec<String>> {
@@ -234,7 +299,7 @@ pub fn explorer_window_item_names(title: &str) -> WindowsResult<Vec<String>> {
 }
 
 #[cfg(not(windows))]
-pub fn explorer_window_item_names(title: &str) -> WindowsResult<Vec<String>> {
+pub fn explorer_window_item_names(window_handle: isize) -> WindowsResult<Vec<String>> {
     Err(WindowsError::unsupported("explorer window items"))
 }
 
@@ -759,7 +824,7 @@ mod tests {
     /// そのウィンドウにだけ操作を限定する必要がある。
     /// それまでは走らせない。誤った結論は結論が無いより悪い。
     #[test]
-    #[ignore = "未完成: 対象ウィンドウを特定できていないため実行しないこと"]
+    #[ignore = "実機のExplorerを一時的に開いて設定を変更する"]
     fn shipped_show_hidden_actually_changes_the_explorer_listing() {
         use crate::backup::{
             prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryTarget,
@@ -769,15 +834,13 @@ mod tests {
         use windows::core::HSTRING;
         use windows::Win32::Foundation::{LPARAM, WPARAM};
         use windows::Win32::UI::Shell::ShellExecuteW;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, PostMessageW, SW_SHOWNORMAL, WM_CLOSE,
-        };
+        use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, SW_SHOWNORMAL, WM_CLOSE};
 
         const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
-        const HIDDEN_NAME: &str = "totonoe-hidden-probe.txt";
+        const HIDDEN_NAME: &str = "zz-secret-item.txt";
 
         // 隠し属性つきの検査用ファイルを作る。
-        let dir = std::env::temp_dir().join("totonoe-hidden-probe-dir");
+        let dir = std::env::temp_dir().join("totonoe-probe-folder");
         let _ = std::fs::create_dir_all(&dir);
         let hidden = dir.join(HIDDEN_NAME);
         std::fs::write(&hidden, b"probe").expect("create probe");
@@ -797,9 +860,18 @@ mod tests {
         }
         sleep(Duration::from_millis(2500));
 
-        let listed = |names: &[String]| names.iter().any(|n| n.contains("totonoe-hidden-probe"));
-        const PROBE_DIR: &str = "totonoe-hidden-probe-dir";
-        let before_names = match explorer_window_item_names(PROBE_DIR) {
+        let listed = |names: &[String]| names.iter().any(|n| n.contains("zz-secret-item"));
+        const PROBE_DIR: &str = "totonoe-probe-folder";
+        // 自分が開いたウィンドウだけを対象にする。見つからなければ何もしない。
+        let window = match find_explorer_window_by_title(PROBE_DIR) {
+            Ok(handle) => handle,
+            Err(error) => {
+                println!("自分のExplorerウィンドウを特定できないためスキップ: {error:?}");
+                let _ = std::fs::remove_dir_all(&dir);
+                return;
+            }
+        };
+        let before_names = match explorer_window_item_names(window) {
             Ok(names) => names,
             Err(error) => {
                 println!("Explorerを観測できないためスキップ: {error:?}");
@@ -825,10 +897,32 @@ mod tests {
         let mut changed = false;
         for _ in 0..30 {
             sleep(Duration::from_millis(300));
-            if let Ok(names) = explorer_window_item_names(PROBE_DIR) {
+            if let Ok(names) = explorer_window_item_names(window) {
                 if listed(&names) != before_visible {
                     changed = true;
                     break;
+                }
+            }
+        }
+
+        // 開いている窓に効かなくても、**新しく開いた窓**には効くかもしれない。
+        // 利用者にとって意味が違う（壊れている vs 窓を開き直せば反映される）ので切り分ける。
+        let mut fresh_window_reflects = None;
+        if !changed {
+            unsafe {
+                ShellExecuteW(None, windows::core::w!("open"), &path, None, None, SW_SHOWNORMAL);
+            }
+            sleep(Duration::from_millis(2500));
+            if let Ok(handle) = find_explorer_window_by_title(PROBE_DIR) {
+                if handle != window {
+                    if let Ok(names) = explorer_window_item_names(handle) {
+                        fresh_window_reflects = Some(listed(&names) != before_visible);
+                    }
+                    unsafe {
+                        let target =
+                            windows::Win32::Foundation::HWND(handle as *mut core::ffi::c_void);
+                        let _ = PostMessageW(target, WM_CLOSE, WPARAM(0), LPARAM(0));
+                    }
                 }
             }
         }
@@ -839,19 +933,22 @@ mod tests {
 
         // Explorerウィンドウを閉じ、検査用ファイルを片付ける。
         unsafe {
-            let probe_title = HSTRING::from(PROBE_DIR);
-            if let Ok(window) = FindWindowW(windows::core::w!("CabinetWClass"), &probe_title) {
-                let _ = PostMessageW(window, WM_CLOSE, WPARAM(0), LPARAM(0));
-            }
+            // 閉じるのは、自分が開いたウィンドウだけ。
+            let target = windows::Win32::Foundation::HWND(window as *mut core::ffi::c_void);
+            let _ = PostMessageW(target, WM_CLOSE, WPARAM(0), LPARAM(0));
         }
         sleep(Duration::from_millis(600));
         let _ = std::fs::remove_dir_all(&dir);
 
         let after = read_registry_state(&backup.location).expect("read back");
         assert_eq!(after, backup.original, "元どおりに戻す");
-        println!(
-            "EVIDENCE: 隠しファイル表示は実Explorerへ{}",
-            if changed { "反映される" } else { "反映されない" }
-        );
+        match (changed, fresh_window_reflects) {
+            (true, _) => println!("EVIDENCE: 隠しファイル表示は開いている窓へ即座に反映される"),
+            (false, Some(true)) => println!(
+                "EVIDENCE: 開いている窓には反映されないが、新しく開いた窓には反映される"
+            ),
+            (false, Some(false)) => println!("EVIDENCE: 新しく開いた窓にも反映されない"),
+            (false, None) => println!("EVIDENCE: 開いている窓には反映されず、新窓の確認はできなかった"),
+        }
     }
 }

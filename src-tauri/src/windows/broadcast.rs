@@ -10,14 +10,35 @@ pub struct BroadcastReport {
 /// Non-destructive Explorer notification. It never terminates or restarts Explorer.
 #[cfg(windows)]
 pub fn notify_explorer_settings_changed() -> BroadcastReport {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+    };
 
+    // 関連付け変更の通知だけでは、開いているExplorerはフォルダーオプションを読み直さない。
+    // 「ShellState」を伴う WM_SETTINGCHANGE が、その再読み込みを促す文書化された合図。
     unsafe {
         SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
     }
+    let acknowledged = unsafe {
+        let payload = HSTRING::from("ShellState");
+        let result = SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            WPARAM(0),
+            LPARAM(payload.as_ptr() as isize),
+            SMTO_ABORTIFHUNG,
+            2_000,
+            None,
+        );
+        let _: HWND = HWND_BROADCAST;
+        result.0 != 0
+    };
     BroadcastReport {
         shell_change_notified: true,
-        setting_change_acknowledged: false,
+        setting_change_acknowledged: acknowledged,
         setting_change_error_code: None,
     }
 }

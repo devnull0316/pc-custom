@@ -155,7 +155,33 @@ taskbar_left=0 width=1920 start_left=518 start_width=45 center_ratio=0.282
 
 → **実装済み**: `appearance.window_color`（`actions/window_color.rs`）。固定7色プリセットのみ、`ColorizationColor` と `ColorizationAfterglow` を1トランザクションで変更、片方だけ書けた場合は補償復元。実機往復も確認済み（#006FC4 → 橙 #F4B100 → 元の値へ正確に復元）。
 
-### `explorer.show_hidden` の検証は中断（未完成として記録）
+### 通知が弱かったことが判明。ただし `show_hidden` はそれでも反映されない
+
+`notify_explorer_settings_changed` は `SHChangeNotify(SHCNE_ASSOCCHANGED)` だけを送っていた。
+これは関連付けの変更を伝える合図で、**フォルダーオプションの読み直しは促さない**。
+文書化された `WM_SETTINGCHANGE` +「ShellState」の同報を追加した（この変更自体は正しい）。
+
+それでも `explorer.show_hidden` は、開いているExplorerウィンドウへ反映されなかった。
+新しく開いた窓での挙動は未確定（Explorerが既存ウィンドウを再利用するため観測できず）。
+
+**次の一手が明確になった**: これらのフォルダーオプションには `SHGetSetSettings` という
+**文書化された設定用APIがある**。Windows自身の設定アプリもこれを使い、内部で正しい通知を行う。
+レジストリへ直接書くのをやめてこのAPIを使えば、反映されない問題ごと解決する見込みが高い。
+codexが「第三者アプリ向けsetter契約が無い」と書いた項目に、実は公式の入口があった。
+
+### 検証の道具は4回直した（記録）
+
+同じ1件の検証で、道具側の欠陥が4種類出た。
+
+1. 観測点が対象の内側（シェル表示名のプロセス内キャッシュ）→ 偽陰性
+2. 要素名の完全一致 → 取りこぼし（「時計 11:15」等）
+3. `FindWindowW` が最初の窓を返す → 利用者の窓を観測・**誤って閉じた**
+4. 判定文字列がフォルダ名にも一致 → 常に真
+
+`EnumWindows` による自窓限定と、フォルダ名と重ならない検査ファイル名で 3・4 を解消した。
+**否定的な結果が出たら、まず道具を疑う。**
+
+### `explorer.show_hidden` の検証は中断（旧記録）
 
 Explorerウィンドウを開いて外から観測する方法を試したが、**3回続けて観測側に欠陥が出た**ため中断した。
 
