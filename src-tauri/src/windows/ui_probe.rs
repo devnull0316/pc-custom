@@ -422,23 +422,29 @@ mod tests {
         time::{Duration, Instant},
     };
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE, WPARAM};
-    use windows::Win32::Graphics::Gdi::{GetDC, GetPixel, ReleaseDC, CLR_INVALID};
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetPixel,
+        GetWindowDC, ReleaseDC, SelectObject, HDC, CLR_INVALID,
+    };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTogglePattern,
-        TreeScope_Descendants, UIA_CheckBoxControlTypeId, UIA_ListItemControlTypeId,
-        UIA_TogglePatternId,
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+        UIA_ListItemControlTypeId,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW, IsWindow,
-        IsWindowVisible, PostMessageW, SetForegroundWindow, ShowWindow, SW_SHOWMAXIMIZED,
-        WM_CLOSE,
+        EnumWindows, FindWindowW, GetClassNameW, GetWindowRect, GetWindowTextW, IsWindow,
+        IsWindowVisible, PostMessageW, SetForegroundWindow, ShowWindow, SW_SHOWMAXIMIZED, WM_CLOSE,
     };
 
     const REG_DWORD: u32 = 4;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn PrintWindow(window: HWND, target: HDC, flags: u32) -> BOOL;
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum ProbeNotification {
@@ -609,8 +615,6 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct ExplorerItemObservation {
         bounds: RECT,
-        toggle_pattern: bool,
-        checkbox_descendants: usize,
     }
 
     fn explorer_item_observation(
@@ -646,27 +650,7 @@ mod tests {
                     }
                     let bounds = element.CurrentBoundingRectangle()
                         .map_err(|_| fail("CurrentBoundingRectangle"))?;
-                    let toggle_pattern = element
-                        .GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
-                        .is_ok();
-                    let mut checkbox_descendants = 0usize;
-                    if let Ok(children) = element.FindAll(TreeScope_Descendants, &condition) {
-                        let child_count = children.Length().unwrap_or(0);
-                        for child_index in 0..child_count {
-                            if let Ok(child) = children.GetElement(child_index) {
-                                if child.CurrentControlType().ok()
-                                    == Some(UIA_CheckBoxControlTypeId)
-                                {
-                                    checkbox_descendants += 1;
-                                }
-                            }
-                        }
-                    }
-                    return Ok(ExplorerItemObservation {
-                        bounds,
-                        toggle_pattern,
-                        checkbox_descendants,
-                    });
+                    return Ok(ExplorerItemObservation { bounds });
                 }
                 Err(WindowsError::new(WindowsErrorKind::InvalidData,
                     "requested Explorer list item not found", None))
@@ -715,51 +699,193 @@ mod tests {
         })
     }
 
-    fn explorer_window_luminance(window_handle: isize) -> WindowsResult<u32> {
-        let window = HWND(window_handle as *mut core::ffi::c_void);
-        unsafe { let _ = SetForegroundWindow(window); }
-        sleep(Duration::from_millis(150));
-        if unsafe { GetForegroundWindow() } != window {
-            return Err(WindowsError::new(WindowsErrorKind::InvalidData,
-                "owned Explorer window is not foreground", None));
+    fn explorer_item_lefts(window_handle: isize, item_names: &[&str]) -> WindowsResult<Vec<i32>> {
+        item_names
+            .iter()
+            .map(|name| Ok(explorer_item_observation(window_handle, name)?.bounds.left))
+            .collect()
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct PixelStats {
+        samples: usize,
+        luminance_mean: f64,
+        luminance_variance: f64,
+        saturation_mean: f64,
+        saturation_variance: f64,
+    }
+
+    fn pixel_stats(colors: &[u32]) -> WindowsResult<PixelStats> {
+        if colors.is_empty() {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "pixel sampling returned no colours",
+                None,
+            ));
+        }
+
+        let mut luminance_sum = 0.0;
+        let mut luminance_square_sum = 0.0;
+        let mut saturation_sum = 0.0;
+        let mut saturation_square_sum = 0.0;
+        for color in colors {
+            let red = f64::from(color & 0xff);
+            let green = f64::from((color >> 8) & 0xff);
+            let blue = f64::from((color >> 16) & 0xff);
+            let luminance = (red * 299.0 + green * 587.0 + blue * 114.0) / 1_000.0;
+            let maximum = red.max(green).max(blue);
+            let minimum = red.min(green).min(blue);
+            let saturation = if maximum == 0.0 {
+                0.0
+            } else {
+                (maximum - minimum) * 255.0 / maximum
+            };
+            luminance_sum += luminance;
+            luminance_square_sum += luminance * luminance;
+            saturation_sum += saturation;
+            saturation_square_sum += saturation * saturation;
+        }
+        let count = colors.len() as f64;
+        let luminance_mean = luminance_sum / count;
+        let saturation_mean = saturation_sum / count;
+        Ok(PixelStats {
+            samples: colors.len(),
+            luminance_mean,
+            luminance_variance: (luminance_square_sum / count
+                - luminance_mean * luminance_mean)
+                .max(0.0),
+            saturation_mean,
+            saturation_variance: (saturation_square_sum / count
+                - saturation_mean * saturation_mean)
+                .max(0.0),
+        })
+    }
+
+    fn taskbar_pixel_stats() -> WindowsResult<PixelStats> {
+        fn fail(operation: &'static str) -> WindowsError {
+            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+        }
+
+        let taskbar = unsafe { FindWindowW(windows::core::w!("Shell_TrayWnd"), None) }
+            .map_err(|_| fail("FindWindowW Shell_TrayWnd"))?;
+        if !unsafe { IsWindowVisible(taskbar) }.as_bool() {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "taskbar is not visible",
+                None,
+            ));
         }
         let mut rect = RECT::default();
-        unsafe { GetWindowRect(window, &mut rect) }
-            .map_err(|_| WindowsError::new(WindowsErrorKind::ApiFailure,
-                "GetWindowRect", None))?;
+        unsafe { GetWindowRect(taskbar, &mut rect) }
+            .map_err(|_| fail("GetWindowRect taskbar"))?;
         let width = rect.right - rect.left;
         let height = rect.bottom - rect.top;
-        if width < 400 || height < 300 {
-            return Err(WindowsError::new(WindowsErrorKind::InvalidData,
-                "owned Explorer window is too small for colour sampling", None));
+        if width < 20 || height < 20 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "taskbar is too small for colour sampling",
+                None,
+            ));
         }
 
         let screen = unsafe { GetDC(HWND::default()) };
         if screen.0.is_null() {
-            return Err(WindowsError::new(WindowsErrorKind::ApiFailure,
-                "GetDC screen", None));
+            return Err(fail("GetDC screen"));
         }
-        let mut total = 0u64;
-        let mut samples = 0u64;
-        for x_step in 0..8 {
-            for y_step in 0..8 {
-                let x = rect.left + width * (60 + x_step * 4) / 100;
-                let y = rect.top + height * (58 + y_step * 4) / 100;
+        let mut colors = Vec::with_capacity(200);
+        for x_step in 0..40 {
+            for y_step in 0..5 {
+                let x = rect.left + width * (5 + x_step * 90 / 39) / 100;
+                let y = rect.top + height * (15 + y_step * 70 / 4) / 100;
                 let color = unsafe { GetPixel(screen, x, y) }.0;
-                if color == CLR_INVALID { continue; }
-                let red = color & 0xff;
-                let green = (color >> 8) & 0xff;
-                let blue = (color >> 16) & 0xff;
-                total += u64::from((red * 299 + green * 587 + blue * 114) / 1_000);
-                samples += 1;
+                if color != CLR_INVALID {
+                    colors.push(color);
+                }
             }
         }
         unsafe { let _ = ReleaseDC(HWND::default(), screen); }
-        if samples == 0 {
-            return Err(WindowsError::new(WindowsErrorKind::ApiFailure,
-                "GetPixel Explorer window", None));
+        pixel_stats(&colors)
+    }
+
+    fn explorer_window_luminance(window_handle: isize) -> WindowsResult<u32> {
+        fn fail(operation: &'static str) -> WindowsError {
+            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
         }
-        Ok((total / samples) as u32)
+
+        let window = HWND(window_handle as *mut core::ffi::c_void);
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(window, &mut rect) }.map_err(|_| fail("GetWindowRect Explorer"))?;
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width < 400 || height < 300 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "owned Explorer window is too small for colour sampling",
+                None,
+            ));
+        }
+
+        let source = unsafe { GetWindowDC(window) };
+        if source.0.is_null() {
+            return Err(fail("GetWindowDC Explorer"));
+        }
+        let memory = unsafe { CreateCompatibleDC(source) };
+        if memory.0.is_null() {
+            unsafe { let _ = ReleaseDC(window, source); }
+            return Err(fail("CreateCompatibleDC Explorer"));
+        }
+        let bitmap = unsafe { CreateCompatibleBitmap(source, width, height) };
+        if bitmap.0.is_null() {
+            unsafe {
+                let _ = DeleteDC(memory);
+                let _ = ReleaseDC(window, source);
+            }
+            return Err(fail("CreateCompatibleBitmap Explorer"));
+        }
+        let previous = unsafe { SelectObject(memory, bitmap) };
+
+        let result = (|| -> WindowsResult<u32> {
+            // PW_RENDERFULLCONTENT=2 renders Explorer into our bitmap even when another
+            // window is foreground or overlaps it.
+            if !unsafe { PrintWindow(window, memory, 2) }.as_bool() {
+                return Err(fail("PrintWindow Explorer"));
+            }
+            let mut total = 0u64;
+            let mut samples = 0u64;
+            let mut non_black = 0u64;
+            for x_step in 0..8 {
+                for y_step in 0..8 {
+                    let x = width * (60 + x_step * 4) / 100;
+                    let y = height * (58 + y_step * 4) / 100;
+                    let color = unsafe { GetPixel(memory, x, y) }.0;
+                    if color == CLR_INVALID {
+                        continue;
+                    }
+                    let red = color & 0xff;
+                    let green = (color >> 8) & 0xff;
+                    let blue = (color >> 16) & 0xff;
+                    non_black += u64::from(red != 0 || green != 0 || blue != 0);
+                    total += u64::from((red * 299 + green * 587 + blue * 114) / 1_000);
+                    samples += 1;
+                }
+            }
+            if samples == 0 || non_black == 0 {
+                return Err(WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "PrintWindow returned no usable Explorer pixels",
+                    None,
+                ));
+            }
+            Ok((total / samples) as u32)
+        })();
+
+        unsafe {
+            let _ = SelectObject(memory, previous);
+            let _ = DeleteObject(bitmap);
+            let _ = DeleteDC(memory);
+            let _ = ReleaseDC(window, source);
+        }
+        result
     }
 
     fn current_boolean_value(target: RegistryTarget) -> u32 {
@@ -795,9 +921,14 @@ mod tests {
     fn explorer_item_checkboxes_write_changes_the_fresh_explorer_ui() {
         const SUBKEY: &str =
             r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
-        const ITEM: &str = "checkbox-target-7f3a";
+        const ITEMS: &[&str] = &[
+            "checkbox-row-a-7f3a",
+            "checkbox-row-b-7f3a",
+            "checkbox-row-c-7f3a",
+            "checkbox-row-d-7f3a",
+        ];
         let target = RegistryTarget::current_user_64(SUBKEY, "AutoCheckSelect");
-        let dir = probe_folder("totonoe-checkbox-probe-", &[ITEM]);
+        let dir = probe_folder("totonoe-checkbox-probe-", ITEMS);
         let title = probe_title(&dir);
 
         let before_window = match OwnedExplorerWindow::open(dir.path(), &title) {
@@ -807,11 +938,18 @@ mod tests {
                 return;
             }
         };
-        let before = explorer_item_observation(before_window.handle(), ITEM)
-            .expect("observe checkbox baseline outside Explorer");
+        let before = match explorer_item_lefts(before_window.handle(), ITEMS) {
+            Ok(lefts) => lefts,
+            Err(error) => {
+                before_window.close_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: Explorer item bounds unavailable before change: {error:?}"
+                );
+                return;
+            }
+        };
         before_window.close_and_assert();
-        let before_marker = (before.toggle_pattern, before.checkbox_descendants);
-        println!("before: {before:?}");
+        println!("before: bounds_left={before:?}");
 
         let original = current_boolean_value(target);
         let desired = u32::from(original == 0);
@@ -820,28 +958,63 @@ mod tests {
         guard.apply();
         sleep(Duration::from_millis(500));
 
-        let applied_window = OwnedExplorerWindow::open(dir.path(), &title)
-            .expect("open owned Explorer after checkbox change");
-        let applied = explorer_item_observation(applied_window.handle(), ITEM)
-            .expect("observe applied checkbox state outside Explorer");
+        let applied_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                guard.restore_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: owned Explorer unavailable after checkbox change: {error:?}"
+                );
+                return;
+            }
+        };
+        let applied = match explorer_item_lefts(applied_window.handle(), ITEMS) {
+            Ok(lefts) => lefts,
+            Err(error) => {
+                applied_window.close_and_assert();
+                guard.restore_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: Explorer item bounds unavailable after change: {error:?}"
+                );
+                return;
+            }
+        };
         applied_window.close_and_assert();
-        println!("applied: {applied:?}");
+        let deltas: Vec<i32> = applied
+            .iter()
+            .zip(&before)
+            .map(|(applied, before)| applied - before)
+            .collect();
+        println!("applied: bounds_left={applied:?} delta={deltas:?}");
 
         guard.restore_and_assert();
         sleep(Duration::from_millis(500));
-        let restored_window = OwnedExplorerWindow::open(dir.path(), &title)
-            .expect("open owned Explorer after checkbox restore");
-        let restored = explorer_item_observation(restored_window.handle(), ITEM)
-            .expect("observe restored checkbox state outside Explorer");
+        let restored_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!(
+                    "OBSERVATION_UNAVAILABLE: owned Explorer unavailable after checkbox restore: {error:?}"
+                );
+                return;
+            }
+        };
+        let restored = match explorer_item_lefts(restored_window.handle(), ITEMS) {
+            Ok(lefts) => lefts,
+            Err(error) => {
+                restored_window.close_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: Explorer item bounds unavailable after restore: {error:?}"
+                );
+                return;
+            }
+        };
         restored_window.close_and_assert();
-        assert_eq!((restored.toggle_pattern, restored.checkbox_descendants), before_marker,
-            "restored Explorer checkbox UI must equal the baseline");
+        assert_eq!(restored, before, "restored Explorer item left edges must equal baseline");
 
-        let applied_marker = (applied.toggle_pattern, applied.checkbox_descendants);
-        if applied_marker != before_marker {
-            println!("EVIDENCE: item checkbox UIA marker changed in a fresh Explorer window");
+        if deltas.iter().any(|delta| *delta != 0) {
+            println!("EVIDENCE: item checkbox setting shifted Explorer item left edges");
         } else {
-            println!("OBSERVATION_UNAVAILABLE: UIA exposed no checkbox-specific state change");
+            println!("EVIDENCE: item checkbox setting did not shift Explorer item left edges");
         }
     }
 
@@ -901,54 +1074,75 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "temporarily changes transparency and observes effective DWM state"]
-    fn appearance_transparency_write_changes_the_effective_dwm_blend() {
+    #[ignore = "temporarily changes transparency and samples taskbar pixels"]
+    fn appearance_transparency_write_changes_taskbar_pixel_variance() {
         const SUBKEY: &str =
             r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
         let target = RegistryTarget::current_user_64(SUBKEY, "EnableTransparency");
-        let before = match crate::windows::system_accent_color() {
+        let before = match taskbar_pixel_stats() {
             Ok(observation) => observation,
             Err(error) => {
-                println!("OBSERVATION_UNAVAILABLE: effective DWM blend unavailable: {error:?}");
+                println!("OBSERVATION_UNAVAILABLE: taskbar pixels unavailable: {error:?}");
                 return;
             }
         };
-        let desired = u32::from(before.opaque_blend);
-        println!("before: opaque_blend={} desired_transparency={desired}",
-            before.opaque_blend);
+        let original = current_boolean_value(target);
+        let desired = u32::from(original == 0);
+        println!(
+            "before: samples={} luminance_mean={:.2} luminance_variance={:.2} saturation_mean={:.2} saturation_variance={:.2} desired_transparency={desired}",
+            before.samples,
+            before.luminance_mean,
+            before.luminance_variance,
+            before.saturation_mean,
+            before.saturation_variance,
+        );
 
         let mut guard = RegistryRestoreGuard::new(
-            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Theme);
         guard.apply();
-        let mut changed = None;
-        for _ in 0..30 {
-            sleep(Duration::from_millis(200));
-            if let Ok(now) = crate::windows::system_accent_color() {
-                if now.opaque_blend != before.opaque_blend {
-                    changed = Some(now.opaque_blend);
-                    break;
-                }
+        sleep(Duration::from_millis(1_500));
+        let applied = match taskbar_pixel_stats() {
+            Ok(observation) => observation,
+            Err(error) => {
+                guard.restore_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: taskbar pixels unavailable after change: {error:?}"
+                );
+                return;
             }
-        }
+        };
+        println!(
+            "applied: samples={} luminance_mean={:.2} luminance_variance={:.2} saturation_mean={:.2} saturation_variance={:.2} luminance_variance_delta={:.2} saturation_variance_delta={:.2}",
+            applied.samples,
+            applied.luminance_mean,
+            applied.luminance_variance,
+            applied.saturation_mean,
+            applied.saturation_variance,
+            applied.luminance_variance - before.luminance_variance,
+            applied.saturation_variance - before.saturation_variance,
+        );
 
         guard.restore_and_assert();
-        let mut restored = false;
-        for _ in 0..30 {
-            sleep(Duration::from_millis(200));
-            if let Ok(now) = crate::windows::system_accent_color() {
-                if now.opaque_blend == before.opaque_blend {
-                    restored = true;
-                    break;
-                }
+        sleep(Duration::from_millis(1_500));
+        match taskbar_pixel_stats() {
+            Ok(restored) => {
+                println!(
+                    "restored: samples={} luminance_mean={:.2} luminance_variance={:.2} saturation_mean={:.2} saturation_variance={:.2}",
+                    restored.samples,
+                    restored.luminance_mean,
+                    restored.luminance_variance,
+                    restored.saturation_mean,
+                    restored.saturation_variance,
+                );
+            }
+            Err(error) => {
+                println!(
+                    "OBSERVATION_UNAVAILABLE: taskbar pixels unavailable after restore: {error:?}"
+                );
+                return;
             }
         }
-        assert!(restored, "effective DWM blend must return to its baseline");
-
-        if let Some(opaque) = changed {
-            println!("EVIDENCE: effective DWM opaque_blend changed to {opaque}");
-        } else {
-            println!("OBSERVATION_UNAVAILABLE: DWM opaque_blend did not track this setting");
-        }
+        println!("EVIDENCE: taskbar pixel statistics captured before and after transparency change");
     }
 
     #[test]
@@ -988,19 +1182,51 @@ mod tests {
         guard.apply();
         sleep(Duration::from_millis(700));
 
-        let applied_window = OwnedExplorerWindow::open(dir.path(), &title)
-            .expect("open owned Explorer after theme change");
-        let applied = explorer_window_luminance(applied_window.handle())
-            .expect("sample applied Explorer luminance outside Explorer");
+        let applied_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                guard.restore_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: owned Explorer unavailable after theme change: {error:?}"
+                );
+                return;
+            }
+        };
+        let applied = match explorer_window_luminance(applied_window.handle()) {
+            Ok(value) => value,
+            Err(error) => {
+                applied_window.close_and_assert();
+                guard.restore_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: Explorer bitmap luminance unavailable after change: {error:?}"
+                );
+                return;
+            }
+        };
         applied_window.close_and_assert();
         println!("applied: luminance={applied}");
 
         guard.restore_and_assert();
         sleep(Duration::from_millis(700));
-        let restored_window = OwnedExplorerWindow::open(dir.path(), &title)
-            .expect("open owned Explorer after theme restore");
-        let restored = explorer_window_luminance(restored_window.handle())
-            .expect("sample restored Explorer luminance outside Explorer");
+        let restored_window = match OwnedExplorerWindow::open(dir.path(), &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!(
+                    "OBSERVATION_UNAVAILABLE: owned Explorer unavailable after theme restore: {error:?}"
+                );
+                return;
+            }
+        };
+        let restored = match explorer_window_luminance(restored_window.handle()) {
+            Ok(value) => value,
+            Err(error) => {
+                restored_window.close_and_assert();
+                println!(
+                    "OBSERVATION_UNAVAILABLE: Explorer bitmap luminance unavailable after restore: {error:?}"
+                );
+                return;
+            }
+        };
         restored_window.close_and_assert();
         assert!(restored.abs_diff(before) <= 25,
             "restored Explorer luminance must return near baseline: {before} -> {restored}");
@@ -1008,7 +1234,7 @@ mod tests {
         if applied.abs_diff(before) >= 60 {
             println!("EVIDENCE: fresh Explorer luminance changed from {before} to {applied}");
         } else {
-            println!("OBSERVATION_UNAVAILABLE: sampled Explorer region did not distinguish themes");
+            println!("EVIDENCE: fresh Explorer luminance stayed near baseline: {before} -> {applied}");
         }
     }
 

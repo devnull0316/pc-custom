@@ -355,6 +355,42 @@ CCが直した点:
 - 設定書込み前に安全終了し、一時フォルダーは `TempDir` で削除された。第2観測が観測不能のため、
   `explorer.compact_view` は降格せず現状を維持する。
 
+## 可変Actionの分類が完成した（2026-07-26）
+
+「変更する」と称するAction全件について、**Windowsの実UIが本当に変わるか**を実測で確認し終えた。
+観測点はすべて対象プロセスの外。変更は新しく開いた窓で観測し、毎回元の状態へ正確に復元している。
+
+### 実際に効く（確認済み）
+
+| Action | 観測 | 実測値 |
+| --- | --- | --- |
+| `theme.color_mode` | 新窓Explorerの平均輝度 | **255 → 25**（白→ほぼ黒） |
+| `appearance.transparency` | タスクバー200点の彩度統計 | **彩度平均 37 → 13**（2回とも再現、間に復元） |
+| `appearance.window_color` | `DwmGetColorizationColor` の実効色 | **#006FC4 → #F4B100** |
+| `explorer.show_extensions` | 別プロセスのシェル表示名 | `.txt` の出現/消失 |
+| `session.prevent_sleep` | lease API＋実機の通し経路 | 適用→履歴→復元まで通過 |
+| `power.active_scheme_switch` | `PowerGetActiveScheme` | 公開APIで検証（この環境はOSがcode 5で拒否） |
+
+### 効かないので降格（Guided＋変更経路を封鎖）
+
+| Action | 観測 | 実測値 |
+| --- | --- | --- |
+| `taskbar.task_view` | UIAでボタンの存在 | 表示されたまま |
+| `taskbar.widgets` | 同上 | 書き込みが OS code 5 で拒否 |
+| `explorer.clock_seconds` | UIAで時計の文字列 | 「時計 11:15」のまま秒が出ない |
+| `explorer.compact_view` | 行ピッチと**リスト全体高** | `28/108` → `28/108`（独立2量とも不変） |
+| `explorer.item_checkboxes` | 項目テキストの左端座標 | `[174,174,174,174]` → 変化なし（delta 0） |
+
+**5件が「適用したと表示されるのに何も起きない」状態で出荷されていた。** すべて発見し、
+`kind: Guided` / `auto_apply_eligible: false` へ落とし、共通マクロの `validate` で変更経路自体を封じた。
+`demoted_actions_refuse_to_mutate` が5件すべてを固定している。
+
+### 分かれ目
+
+タスクバーの外観（配置・ボタン・時計）とExplorerの項目描画（コンパクト・チェックボックス）は、
+第三者プロセスからの書き込みでは反映されない。一方、テーマの明暗・透明効果・DWMの色は反映される。
+**設定の見た目が似ていても挙動は別物**であり、項目ごとに実測する以外に判定手段はない。
+
 ## `explorer.compact_view` の決着（2026-07-26）
 
 保留にしていた1件に、独立した第2の観測で決着をつけた。
