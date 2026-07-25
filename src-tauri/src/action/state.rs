@@ -157,6 +157,18 @@ pub struct GameReadinessObservation {
     pub toast_notifications: ReadinessComponent<bool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowColorPreset {
+    WindowsBlue,
+    Teal,
+    Purple,
+    Green,
+    Amber,
+    Red,
+    Graphite,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ObservedValue {

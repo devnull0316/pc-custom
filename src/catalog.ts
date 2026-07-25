@@ -854,6 +854,21 @@ const OBSERVATION_FALLBACKS = [
       "アクセントカラーの変更は、setterの根拠が揃うまで行いません。",
     ],
   },
+  {
+    id: "appearance.window_color",
+    name: "ウィンドウの色を変える",
+    description: "タイトルバーなどに使われる色を、決められた色から選んで変えます。元の色は正確に戻せます。",
+    audience: "タイトルバーなどの色を、決められた色から選んで変えたい人向け",
+    category: "appearance",
+    tags: ["見た目", "色", "DWM"],
+    methodSummary: "HKCU DWMの色2値を1トランザクションで変更",
+    desiredState: "選んだ色をウィンドウに使う",
+    detailPoints: [
+      "変更するのは決められた2つの色設定だけで、任意の色は受け取りません。",
+      "2つの値を1つの変更としてまとめ、片方だけ変わった状態を残しません。",
+      "元の色・型・有無を保存し、他アプリが変更していた場合は上書きしません。",
+    ],
+  },
 ] as const satisfies readonly AdditionalFallbackDefinition[];
 
 function observationFallback(definition: AdditionalFallbackDefinition): ActionPresentation {

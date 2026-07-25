@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::ActionId;
+use super::{ActionId, WindowColorPreset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -207,6 +207,8 @@ pub enum ActionParameters {
     StorageTempFilesCheck {},
     #[serde(rename = "appearance.accent_color_check")]
     AppearanceAccentColorCheck {},
+    #[serde(rename = "appearance.window_color")]
+    AppearanceWindowColor { color: WindowColorPreset },
 }
 
 impl ActionParameters {
@@ -280,6 +282,7 @@ impl ActionParameters {
             Self::StorageFreeSpaceCheck { .. } => ActionId::StorageFreeSpaceCheck,
             Self::StorageTempFilesCheck { .. } => ActionId::StorageTempFilesCheck,
             Self::AppearanceAccentColorCheck { .. } => ActionId::AppearanceAccentColorCheck,
+            Self::AppearanceWindowColor { .. } => ActionId::AppearanceWindowColor,
         }
     }
 }

@@ -2,7 +2,7 @@
 
 ## 今回の到達点
 
-- 登録済みAction IDは **60件**。BRIEFの初期版カタログ目標50〜70件には到達した。
+- 登録済みAction IDは **61件**。BRIEFの初期版カタログ目標50〜70件には到達した。
 - ただし、リリースで実行可能またはread-onlyとして完成したActionは **17件**。残る **42件** はsetter根拠未承認の候補であり、安定機能数へ算入しない。
 - 42候補は `guided / experimental / unverified_storage / autoApply=false` とし、`validate`、`createBackup`、`apply`をhandler自身が拒否する。固定HKCU DWORDの保存値をread-only表示するだけで、Windows UIの有効状態とは表現しない。
 - `cargo test --lib -- --test-threads=1`: **170 passed / 0 failed / 2 ignored**（CC追加分を含む現在値）。
@@ -153,7 +153,7 @@ taskbar_left=0 width=1920 start_left=518 start_width=45 center_ratio=0.282
 
 この差は重要で、「Windowsの設定は第三者から変えられない」と一括りにするのは誤りだと分かった。**項目ごとに実測して仕分ける**必要があり、その仕分けを機械的に行う手段がこれで手に入った。
 
-次の増分: ウィンドウの色変更Action（`ColorizationColor` + `ColorizationAfterglow` の複合backup、固定プリセット色のみ、実効色で適用検証）。実装パターンは `actions/color_mode.rs` の複合レジストリActionと同一で、反映することは上記で実証済み。
+→ **実装済み**: `appearance.window_color`（`actions/window_color.rs`）。固定7色プリセットのみ、`ColorizationColor` と `ColorizationAfterglow` を1トランザクションで変更、片方だけ書けた場合は補償復元。実機往復も確認済み（#006FC4 → 橙 #F4B100 → 元の値へ正確に復元）。
 
 ## 42候補の行き止まりを解消（CC 2026-07-25）
 

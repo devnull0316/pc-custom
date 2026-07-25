@@ -93,6 +93,7 @@ const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "storage.free_space_check": "storage",
   "storage.temp_files_check": "storage",
   "appearance.accent_color_check": "appearance",
+  "appearance.window_color": "appearance",
   "games.readiness_check": "games",
 };
 

@@ -103,6 +103,7 @@ function parametersForAction(actionId: string): Record<string, boolean | number 
   if (actionId === "storage.free_space_check") return {};
   if (actionId === "storage.temp_files_check") return {};
   if (actionId === "appearance.accent_color_check") return {};
+  if (actionId === "appearance.window_color") return { color: "teal" };
   return {};
 }
 

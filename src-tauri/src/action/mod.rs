@@ -18,7 +18,7 @@ pub use parameters::{
     TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode,
 };
 pub use registry::{ActionRegistry, ACTION_REGISTRY};
-pub use state::{
+pub use state::{WindowColorPreset, 
     AdvancedColorObservation, DefaultRenderAudioObservation, DetectedState,
     GameReadinessObservation, ObservationWarning, ObservedProcess, ObservedValue,
     PrimaryRefreshRateObservation, ReadinessComponent, StartupEntrySource,

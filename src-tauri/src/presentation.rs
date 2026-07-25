@@ -509,6 +509,9 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::StorageFreeSpaceCheck => ActionParameters::StorageFreeSpaceCheck {},
         ActionId::StorageTempFilesCheck => ActionParameters::StorageTempFilesCheck {},
         ActionId::AppearanceAccentColorCheck => ActionParameters::AppearanceAccentColorCheck {},
+        ActionId::AppearanceWindowColor => ActionParameters::AppearanceWindowColor {
+            color: crate::action::WindowColorPreset::WindowsBlue,
+        },
     })
 }
 
@@ -597,7 +600,7 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::GamesControllerGameBar => "games",
         ActionId::DevicesAutoplay | ActionId::SetupStartupInventory => "setup",
         ActionId::StorageFreeSpaceCheck | ActionId::StorageTempFilesCheck => "storage",
-        ActionId::AppearanceAccentColorCheck => "appearance",
+        ActionId::AppearanceAccentColorCheck | ActionId::AppearanceWindowColor => "appearance",
         ActionId::NotificationsUsbErrors
         | ActionId::NotificationsWeakCharger
         | ActionId::NotificationsToastBanners => "notifications",
@@ -716,6 +719,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::AppearanceAccentColorCheck => {
             "いまWindowsが使っている色を、変更せずに確かめたい人向け"
         }
+        ActionId::AppearanceWindowColor => {
+            "タイトルバーなどの色を、決められた色から選んで変えたい人向け"
+        }
     }
 }
 
@@ -784,6 +790,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::StorageFreeSpaceCheck => "変更せず、システムドライブ容量を確認",
         ActionId::StorageTempFilesCheck => "削除せず、ユーザー一時ファイルを上限付き集計",
         ActionId::AppearanceAccentColorCheck => "公開APIで現在の配色を読み取り（変更なし）",
+        ActionId::AppearanceWindowColor => "HKCU DWMの色2値を1トランザクションで変更",
     }
 }
 

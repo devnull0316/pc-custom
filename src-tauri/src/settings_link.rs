@@ -39,6 +39,7 @@ pub const fn settings_page_for(action: ActionId) -> Option<&'static str> {
         | ActionId::AppearanceAccentTitleBars
         | ActionId::AppearanceAutoAccent
         | ActionId::AppearanceAccentColorCheck
+        | ActionId::AppearanceWindowColor
         | ActionId::ThemeColorMode
         | ActionId::AppearanceTransparency => "ms-settings:personalization-colors",
         ActionId::AppearanceTaskbarAnimations => "ms-settings:easeofaccess-visualeffects",
