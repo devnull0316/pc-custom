@@ -175,6 +175,50 @@ pub fn observe_taskbar_clock_text() -> WindowsResult<String> {
     Err(WindowsError::unsupported("observe taskbar clock"))
 }
 
+/// フォルダーオプションの文書化された設定API。
+/// レジストリへ直接書くのと違い、Windows自身が使う経路なので必要な通知も内部で行われる。
+/// `_bitfield1` のビット0が「すべてのファイルを表示」、ビット1が「拡張子を表示」。
+#[cfg(windows)]
+pub fn shell_state_show_hidden() -> WindowsResult<bool> {
+    use windows::Win32::Foundation::FALSE;
+    use windows::Win32::UI::Shell::{SHGetSetSettings, SHELLSTATEA, SSF_SHOWALLOBJECTS};
+
+    let mut state = SHELLSTATEA::default();
+    unsafe {
+        SHGetSetSettings(Some(&mut state), SSF_SHOWALLOBJECTS, FALSE);
+    }
+    Ok(state._bitfield1 & 1 != 0)
+}
+
+/// 「すべてのファイルを表示」を設定する（文書化API経由）。
+#[cfg(windows)]
+pub fn set_shell_state_show_hidden(show: bool) -> WindowsResult<()> {
+    use windows::Win32::Foundation::{FALSE, TRUE};
+    use windows::Win32::UI::Shell::{SHGetSetSettings, SHELLSTATEA, SSF_SHOWALLOBJECTS};
+
+    let mut state = SHELLSTATEA::default();
+    unsafe {
+        SHGetSetSettings(Some(&mut state), SSF_SHOWALLOBJECTS, FALSE);
+        if show {
+            state._bitfield1 |= 1;
+        } else {
+            state._bitfield1 &= !1;
+        }
+        SHGetSetSettings(Some(&mut state), SSF_SHOWALLOBJECTS, TRUE);
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn shell_state_show_hidden() -> WindowsResult<bool> {
+    Err(WindowsError::unsupported("shell state"))
+}
+
+#[cfg(not(windows))]
+pub fn set_shell_state_show_hidden(_show: bool) -> WindowsResult<()> {
+    Err(WindowsError::unsupported("set shell state"))
+}
+
 /// タイトルに `needle` を含む Explorer ウィンドウを1つ探す。
 ///
 /// `FindWindowW` は最初に見つかったウィンドウを返すため、利用者が既に開いている
@@ -950,5 +994,74 @@ mod tests {
             (false, Some(false)) => println!("EVIDENCE: 新しく開いた窓にも反映されない"),
             (false, None) => println!("EVIDENCE: 開いている窓には反映されず、新窓の確認はできなかった"),
         }
+    }
+
+    /// 文書化API `SHGetSetSettings` なら、開いているExplorerへ反映されるか。
+    /// レジストリ直書きでは反映されなかったので、その差を確かめる。
+    #[test]
+    #[ignore = "実機のExplorerを一時的に開いて設定を変更する"]
+    fn documented_shell_api_reaches_the_open_explorer_window() {
+        use std::{thread::sleep, time::Duration};
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, SW_SHOWNORMAL, WM_CLOSE};
+
+        const PROBE_DIR: &str = "totonoe-api-probe-folder";
+        let dir = std::env::temp_dir().join(PROBE_DIR);
+        let _ = std::fs::create_dir_all(&dir);
+        let hidden = dir.join("zz-secret-item.txt");
+        std::fs::write(&hidden, b"probe").expect("create probe");
+        let _ = std::process::Command::new("attrib").arg("+h").arg(&hidden).output();
+
+        let original = shell_state_show_hidden().expect("read shell state");
+        println!("before: shell_state_show_hidden={original}");
+
+        let path = HSTRING::from(dir.as_os_str());
+        unsafe {
+            ShellExecuteW(None, windows::core::w!("open"), &path, None, None, SW_SHOWNORMAL);
+        }
+        sleep(Duration::from_millis(2500));
+
+        let window = match find_explorer_window_by_title(PROBE_DIR) {
+            Ok(handle) => handle,
+            Err(error) => {
+                println!("窓を特定できないためスキップ: {error:?}");
+                let _ = std::fs::remove_dir_all(&dir);
+                return;
+            }
+        };
+        let listed = |names: &[String]| names.iter().any(|n| n.contains("zz-secret-item"));
+        let before_listed = explorer_window_item_names(window).map(|n| listed(&n)).unwrap_or(false);
+        println!("before: hidden_listed={before_listed}");
+
+        set_shell_state_show_hidden(!original).expect("set via documented API");
+
+        let mut changed = false;
+        for _ in 0..30 {
+            sleep(Duration::from_millis(300));
+            if let Ok(names) = explorer_window_item_names(window) {
+                if listed(&names) != before_listed {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        set_shell_state_show_hidden(original).expect("restore via documented API");
+        sleep(Duration::from_millis(500));
+        unsafe {
+            let target = windows::Win32::Foundation::HWND(window as *mut core::ffi::c_void);
+            let _ = PostMessageW(target, WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+        sleep(Duration::from_millis(600));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let restored = shell_state_show_hidden().expect("read back");
+        assert_eq!(restored, original, "元の設定へ戻す");
+        println!(
+            "EVIDENCE: 文書化APIでの変更は開いているExplorerへ{}",
+            if changed { "反映される" } else { "反映されない" }
+        );
     }
 }

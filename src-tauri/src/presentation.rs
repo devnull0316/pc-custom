@@ -182,6 +182,21 @@ pub fn action_presentation(
             "外部変更を検出した場合は、自動で上書きしません。".to_owned(),
         ]
     };
+    // 実測（ui_probe）: 外部プロセスからの変更は、すでに開いているExplorerウィンドウを
+    // 更新しない。レジストリ直書きでも文書化APIでも同じだった。黙っていると
+    // 「適用したのに変わらない」と受け取られるため、先に伝える。
+    if matches!(
+        metadata.id,
+        ActionId::ExplorerShowExtensions
+            | ActionId::ExplorerShowHidden
+            | ActionId::ExplorerItemCheckboxes
+            | ActionId::ExplorerCompactView
+    ) {
+        detail_points.push(
+            "すでに開いているエクスプローラーの窓は自動で更新されません。窓を開き直すか、F5キーで更新してください。"
+                .to_owned(),
+        );
+    }
     if metadata.method_class == MethodClass::DocumentedRegistry
         && metadata.kind == ActionKind::Persistent
     {
