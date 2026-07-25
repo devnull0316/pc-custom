@@ -155,6 +155,26 @@ taskbar_left=0 width=1920 start_left=518 start_width=45 center_ratio=0.282
 
 → **実装済み**: `appearance.window_color`（`actions/window_color.rs`）。固定7色プリセットのみ、`ColorizationColor` と `ColorizationAfterglow` を1トランザクションで変更、片方だけ書けた場合は補償復元。実機往復も確認済み（#006FC4 → 橙 #F4B100 → 元の値へ正確に復元）。
 
+### 可変Actionの検証状況（残りが明確になった）
+
+降格後、実際に変更を行う Action は次の9件。うち**実UIへの反映を確認済みが4件、未確認が5件**。
+
+| Action | 反映の確認 | 観測方法 |
+| --- | --- | --- |
+| `explorer.show_extensions` | **確認済み** | 別プロセスのシェル表示名（`.txt` の出現/消失） |
+| `appearance.window_color` | **確認済み** | `DwmGetColorizationColor` の実効色 |
+| `session.prevent_sleep` | **確認済み** | 実機の通し経路テスト＋lease API |
+| `power.active_scheme_switch` | 公開APIで検証（この環境ではOSがcode 5で拒否） | `PowerGetActiveScheme` |
+| `explorer.show_hidden` | **未確認** | Explorerウィンドウの一覧をUIAで読む必要あり |
+| `explorer.item_checkboxes` | **未確認** | 同上 |
+| `explorer.compact_view` | **未確認** | 同上 |
+| `appearance.transparency` | **未確認** | 外から観測する手段が未特定 |
+| `theme.color_mode` | **未確認** | 外から観測する手段が未特定 |
+
+未確認の5件は、`show_extensions` と同じ Explorer 系（内容表示）に属するものが3件で、
+反映される見込みは高い。ただし**見込みで出荷したことが今回の3件の不具合を生んだ**ため、
+確認できるまでは「確認済み」とは書かない。次にやるのはこの5件の確認である。
+
 ### 観測方法を直したら、実害は3件だった
 
 最初の検査は要素名の**完全一致**で探していたが、タスクバーの要素名は
