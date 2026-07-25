@@ -839,6 +839,21 @@ const OBSERVATION_FALLBACKS = [
       "電源、表示、音声、通知を変更せず、ゲームへの注入も行いません。",
     ],
   },
+  {
+    id: "appearance.accent_color_check",
+    name: "いまのアクセントカラーを確認する",
+    description: "Windowsが現在使っている色を、公開APIで読み取るだけです。色の変更は行いません。",
+    audience: "いまWindowsが使っている色を、変更せずに確かめたい人向け",
+    category: "appearance",
+    tags: ["見た目", "アクセントカラー", "読み取り専用"],
+    methodSummary: "公開APIのDwmGetColorizationColorによる読み取り",
+    desiredState: "いまWindowsが使っている色を表示する（変更なし）",
+    detailPoints: [
+      "読み取り専用で、Windowsの設定や配色は変更しません。",
+      "取得できない場合は推測せず、不明として扱います。",
+      "アクセントカラーの変更は、setterの根拠が揃うまで行いません。",
+    ],
+  },
 ] as const satisfies readonly AdditionalFallbackDefinition[];
 
 function observationFallback(definition: AdditionalFallbackDefinition): ActionPresentation {
