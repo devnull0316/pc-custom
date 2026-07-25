@@ -29,13 +29,17 @@
       }
     ],
     "security": {
-      "capabilities": ["main-window"],
+      "capabilities": [
+        "main-window"
+      ],
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "category": "Utility",
     "shortDescription": "Windows を安全に整え、変更を元へ戻す",
     "longDescription": "Totonoe は、利用場面に合わせた Windows の設定変更を事前確認・記録し、項目ごとに元へ戻せる per-user アプリです。",
@@ -45,9 +49,8 @@
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
-        "silent": false
+        "silent": true
       }
     }
   }
 }
-
