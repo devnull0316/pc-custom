@@ -118,7 +118,30 @@ export function ActionBrowser({
               );
             })}
           </div>
-          <div aria-label="Action一覧" className="action-list">
+          <div
+            aria-label="Action一覧"
+            className="action-list"
+            onKeyDown={(event) => {
+              // Raycast や Linear と同じく、一覧は上下キーだけで辿れるようにする。
+              // 選択が動くと右の詳細も追従するので、手をキーボードから離さずに読める。
+              const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+              if (!keys.includes(event.key) || categoryActions.length === 0) return;
+              event.preventDefault();
+              const current = categoryActions.findIndex((item) => item.id === selected?.id);
+              const last = categoryActions.length - 1;
+              const next =
+                event.key === "Home" ? 0
+                : event.key === "End" ? last
+                : event.key === "ArrowDown" ? Math.min(current + 1, last)
+                : Math.max(current - 1, 0);
+              const target = categoryActions[next];
+              if (target === undefined || target.id === selected?.id) return;
+              onSelectAction(target.id);
+              const row = event.currentTarget.querySelectorAll<HTMLButtonElement>(".action-row")[next];
+              row?.focus();
+              row?.scrollIntoView({ block: "nearest" });
+            }}
+          >
             <p className="list-label">このカテゴリ</p>
             {categoryActions.length === 0 ? (
               <div className="inline-empty"><Icon name="action" /><p><strong>Actionはありません</strong>このカテゴリには登録済みActionがありません。</p></div>
