@@ -148,6 +148,13 @@ export function ProfilesView({
           }}
         >
           <h2>新しいプロファイル</h2>
+          {/* Apple Shortcuts の「〜のとき、〜する」。入力するとそのまま文章になり、
+              専門用語を読まなくても何が起きるか分かるようにする。 */}
+          <p className="automation-sentence">
+            <strong>{name.trim() || "このゲーム"}</strong> が始まったら、
+            {selected.size === 0 ? "選んだ準備" : <strong>{selected.size}件の準備</strong>}
+            をして、終わったら<strong>変更した分だけ元に戻します</strong>。
+          </p>
           <label className="field">
             <span>名前</span>
             <input

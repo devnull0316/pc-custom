@@ -518,3 +518,10 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   background: color-mix(in srgb, var(--text) 4%, transparent); }
 .readiness-panel__row--unknown { color: color-mix(in srgb, var(--text) 68%, transparent); }
 .readiness-panel__message { margin: 0; font-size: .85rem; color: var(--accent); }
+
+/* --- 自動化の内容を文章で示す（Apple Shortcuts の作法） --- */
+.automation-sentence { margin: 0 0 4px; padding: 10px 12px; border-radius: 8px;
+  font-size: 13px; line-height: 1.8;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+.automation-sentence strong { font-weight: 600; }
