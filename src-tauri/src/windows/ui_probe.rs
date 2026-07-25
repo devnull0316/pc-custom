@@ -96,10 +96,10 @@ pub fn observe_taskbar_layout() -> WindowsResult<TaskbarLayoutObservation> {
     }
 }
 
-/// タスクバー上に、指定した名前の要素が存在するか。表示切替の反映確認に使う。
+/// タスクバー上の全要素名。名前は「時計 11:15」のように付随情報を含むため、
+/// 判定は完全一致ではなく**部分一致**で行うこと（完全一致は取りこぼす）。
 #[cfg(windows)]
-pub fn observe_taskbar_element(names: &[&str]) -> WindowsResult<bool> {
-    use windows::core::BSTR;
+pub fn taskbar_element_names() -> WindowsResult<Vec<String>> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
@@ -107,7 +107,6 @@ pub fn observe_taskbar_element(names: &[&str]) -> WindowsResult<bool> {
     };
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
-        UIA_NamePropertyId,
     };
     use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
@@ -120,33 +119,69 @@ pub fn observe_taskbar_element(names: &[&str]) -> WindowsResult<bool> {
             .map_err(|_| fail("FindWindowW Shell_TrayWnd"))?;
         let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let owns_com = init.is_ok();
-        let result = (|| -> WindowsResult<bool> {
+        let result = (|| -> WindowsResult<Vec<String>> {
             let automation: IUIAutomation =
                 CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
                     .map_err(|_| fail("CoCreateInstance"))?;
             let root: IUIAutomationElement = automation
                 .ElementFromHandle(taskbar)
                 .map_err(|_| fail("ElementFromHandle"))?;
-            for name in names {
-                let condition = automation
-                    .CreatePropertyCondition(
-                        UIA_NamePropertyId,
-                        &windows::core::VARIANT::from(BSTR::from(*name)),
-                    )
-                    .map_err(|_| fail("CreatePropertyCondition"))?;
-                if let Ok(element) = root.FindFirst(TreeScope_Descendants, &condition) {
-                    if element.CurrentBoundingRectangle().is_ok() {
-                        return Ok(true);
+            let condition = automation
+                .CreateTrueCondition()
+                .map_err(|_| fail("CreateTrueCondition"))?;
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .map_err(|_| fail("FindAll"))?;
+            let count = all.Length().map_err(|_| fail("Length"))?;
+            let mut names = Vec::new();
+            for index in 0..count {
+                if let Ok(element) = all.GetElement(index) {
+                    if let Ok(name) = element.CurrentName() {
+                        let text = name.to_string();
+                        if !text.trim().is_empty() {
+                            names.push(text);
+                        }
                     }
                 }
             }
-            Ok(false)
+            Ok(names)
         })();
         if owns_com {
             CoUninitialize();
         }
         result
     }
+}
+
+#[cfg(not(windows))]
+pub fn taskbar_element_names() -> WindowsResult<Vec<String>> {
+    Err(WindowsError::unsupported("taskbar element names"))
+}
+
+/// タスクバーの時計が表示している文字列（例: 「時計 11:15」）。
+#[cfg(windows)]
+pub fn observe_taskbar_clock_text() -> WindowsResult<String> {
+    let names = taskbar_element_names()?;
+    names
+        .into_iter()
+        .find(|name| name.starts_with("時計") || name.starts_with("Clock"))
+        .ok_or_else(|| {
+            WindowsError::new(WindowsErrorKind::InvalidData, "clock element not found", None)
+        })
+}
+
+#[cfg(not(windows))]
+pub fn observe_taskbar_clock_text() -> WindowsResult<String> {
+    Err(WindowsError::unsupported("observe taskbar clock"))
+}
+
+/// タスクバー上に、指定した名前の要素が存在するか。表示切替の反映確認に使う。
+#[cfg(windows)]
+pub fn observe_taskbar_element(needles: &[&str]) -> WindowsResult<bool> {
+    let names = taskbar_element_names()?;
+    Ok(names
+        .iter()
+        .any(|name| needles.iter().any(|needle| name.contains(needle))))
 }
 
 #[cfg(not(windows))]
@@ -550,5 +585,100 @@ mod tests {
             Err(error) => println!("DISPLAY_ERR={error:?}"),
         }
         let _ = std::fs::remove_file(&probe);
+    }
+
+    /// 出荷中の `explorer.clock_seconds` が、実行中Explorerの時計へ実際に効いているか。
+    /// 観測点は自プロセスの外（Explorerが描いている文字列）。
+    #[test]
+    #[ignore = "実機の時計表示を一時的に変更する"]
+    fn shipped_clock_seconds_actually_changes_the_taskbar_clock() {
+        use crate::backup::{
+            prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryTarget,
+        };
+        use crate::windows::{notify_explorer_settings_changed, write_raw_value};
+        use std::{thread::sleep, time::Duration};
+
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+
+        fn separator_count(text: &str) -> usize {
+            text.chars().filter(|c| *c == ':' || *c == '：').count()
+        }
+
+        let before = match observe_taskbar_clock_text() {
+            Ok(text) => text,
+            Err(error) => {
+                println!("時計を観測できないためスキップ: {error:?}");
+                return;
+            }
+        };
+        let before_has_seconds = separator_count(&before) >= 2;
+        println!("before: clock=\"{before}\" has_seconds={before_has_seconds}");
+
+        let target = RegistryTarget::current_user_64(SUBKEY, "ShowSecondsInSystemClock");
+        let flipped: u32 = if before_has_seconds { 0 } else { 1 };
+        let backup = prepare_registry_backup(target, 4, flipped.to_le_bytes().to_vec(), 1, 26_200)
+            .expect("prepare backup");
+        if let Err(error) = write_raw_value(&backup.location, 4, &flipped.to_le_bytes()) {
+            println!("EVIDENCE: 秒表示の値への書き込みが拒否された: {error:?}");
+            return;
+        }
+        let _ = notify_explorer_settings_changed();
+
+        let mut changed = None;
+        for _ in 0..30 {
+            sleep(Duration::from_millis(300));
+            if let Ok(now) = observe_taskbar_clock_text() {
+                if (separator_count(&now) >= 2) != before_has_seconds {
+                    changed = Some(now);
+                    break;
+                }
+            }
+        }
+
+        restore_registry_backup(&backup).expect("restore");
+        let _ = notify_explorer_settings_changed();
+        sleep(Duration::from_millis(500));
+        let after = read_registry_state(&backup.location).expect("read back");
+        assert_eq!(after, backup.original, "元どおりに戻す");
+
+        match changed {
+            Some(text) => println!("EVIDENCE: 時計が \"{text}\" へ変化。秒表示は実際に効く"),
+            None => println!("EVIDENCE: 時計は変化せず。秒表示は実UIへ反映されない"),
+        }
+    }
+
+    /// 読み取り専用の診断。タスクバー上の要素名を列挙する。
+    #[test]
+    #[ignore = "調査用"]
+    fn dump_taskbar_element_names() {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED,
+        };
+        use windows::Win32::UI::Accessibility::{
+            CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+        unsafe {
+            let taskbar: HWND = FindWindowW(windows::core::w!("Shell_TrayWnd"), None).expect("taskbar");
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).expect("uia");
+            let root: IUIAutomationElement = automation.ElementFromHandle(taskbar).expect("root");
+            let condition = automation.CreateTrueCondition().expect("cond");
+            let all = root.FindAll(TreeScope_Descendants, &condition).expect("all");
+            let count = all.Length().unwrap_or(0);
+            println!("要素数: {count}");
+            for index in 0..count {
+                if let Ok(element) = all.GetElement(index) {
+                    let name = element.CurrentName().map(|n| n.to_string()).unwrap_or_default();
+                    if !name.trim().is_empty() {
+                        println!("[{index}] {name}");
+                    }
+                }
+            }
+            CoUninitialize();
+        }
     }
 }
