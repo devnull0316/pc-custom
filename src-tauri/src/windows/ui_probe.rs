@@ -159,6 +159,45 @@ pub fn observe_taskbar_layout() -> WindowsResult<TaskbarLayoutObservation> {
     Err(WindowsError::unsupported("observe taskbar layout"))
 }
 
+/// シェルが利用者へ見せるファイル表示名。拡張子を隠す設定を反映するため、
+/// 「拡張子表示」が実際に効いているかをウィンドウを開かずに判定できる。
+#[cfg(windows)]
+pub fn shell_display_name(path: &std::path::Path) -> WindowsResult<String> {
+    use windows::core::HSTRING;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_DISPLAYNAME};
+
+    let wide = HSTRING::from(path.as_os_str());
+    let mut info = SHFILEINFOW::default();
+    let ok = unsafe {
+        SHGetFileInfoW(
+            &wide,
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_DISPLAYNAME,
+        )
+    };
+    if ok == 0 {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "SHGetFileInfoW display name",
+            None,
+        ));
+    }
+    let end = info
+        .szDisplayName
+        .iter()
+        .position(|c| *c == 0)
+        .unwrap_or(info.szDisplayName.len());
+    Ok(String::from_utf16_lossy(&info.szDisplayName[..end]))
+}
+
+#[cfg(not(windows))]
+pub fn shell_display_name(_path: &std::path::Path) -> WindowsResult<String> {
+    Err(WindowsError::unsupported("shell display name"))
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -479,5 +518,37 @@ mod tests {
             "EVIDENCE: 出荷中のウィジェット切替は実UIへ{}",
             if changed { "反映される" } else { "反映されなかった" }
         );
+    }
+
+    /// 注意: シェルの表示名はプロセスごとにキャッシュされる。
+    /// 同一プロセス内で設定を変えても表示名は変わらないため、
+    /// 「拡張子表示」の反映は**別プロセス**で確認しなければならない。
+    ///
+    /// 実測（別プロセス起動で確認済み）:
+    ///   HideFileExt=0 -> "totonoe-extension-probe2.txt"
+    ///   HideFileExt=1 -> "totonoe-extension-probe2"
+    /// つまり `explorer.show_extensions` は実際に効いている。
+    /// この事実を、同一プロセス内の素朴な往復テストで否定してはいけない。
+    #[test]
+    #[ignore = "同一プロセスではキャッシュされるため、判定に使わないこと"]
+    fn show_extensions_needs_a_fresh_process_to_observe() {
+        let probe = std::env::temp_dir().join("totonoe-cache-note.txt");
+        std::fs::write(&probe, b"probe").expect("create");
+        let name = shell_display_name(&probe).expect("display name");
+        println!("このプロセスでの表示名: {name}（設定を変えてもここでは変わらない）");
+        let _ = std::fs::remove_file(&probe);
+    }
+
+    /// 読み取り専用。新しいプロセスでシェル表示名を1回だけ報告する（キャッシュ検証用）。
+    #[test]
+    #[ignore = "調査用の読み取り専用プローブ"]
+    fn reports_display_name_only() {
+        let probe = std::env::temp_dir().join("totonoe-extension-probe2.txt");
+        std::fs::write(&probe, b"probe").expect("create");
+        match shell_display_name(&probe) {
+            Ok(name) => println!("DISPLAY={name}"),
+            Err(error) => println!("DISPLAY_ERR={error:?}"),
+        }
+        let _ = std::fs::remove_file(&probe);
     }
 }
