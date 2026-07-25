@@ -67,5 +67,7 @@ tempfile = "3"
 codegen-units = 1
 lto = "thin"
 opt-level = "s"
-panic = "abort"
+# panic = "abort" にしてはいけない。game_profile::watcher が catch_unwind で
+# 監視スレッドのパニックを捕捉し、health へ記録して変更操作を fail-closed にする設計のため。
+# abort だと出荷ビルドでだけこの安全機構が働かず、パニックでアプリ全体が即死する。
 strip = "symbols"

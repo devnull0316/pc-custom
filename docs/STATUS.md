@@ -426,6 +426,26 @@ validateガードで変更経路を封鎖、`demoted_actions_refuse_to_mutate` �
 codexの環境では窓を取得できず `OBSERVATION_UNAVAILABLE` で終わったが、CCの環境では取得できた。
 **UI観測を伴う検証はCC側で実行する**という分担が明確になった（codexは測定コードを書き、CCが走らせる）。
 
+## リリースビルドで見つかった実バグ（2026-07-26）
+
+初めて `npx tauri build` を通した。生成物:
+
+- `src-tauri/target/release/totonoe.exe`（起動確認済み。窓生成、常駐 **34MB**、panicなし）
+- `src-tauri/target/release/bundle/nsis/Totonoe_0.1.0_x64-setup.exe`（1.97MB のインストーラー）
+
+そのうえで、**出荷ビルドでだけ安全機構が無効になっていた**ことが分かった。
+
+`game_profile/watcher.rs` は `catch_unwind` で監視スレッドのパニックを捕捉し、
+health へ sticky な異常として記録して以後の変更操作を fail-closed にする設計である。
+ところがリリースプロファイルに `panic = "abort"` が指定されていたため、
+**リリースビルドでは catch_unwind が働かず、パニックでプロセスごと即死する**。
+開発ビルドでは unwind なので設計どおりに動き、テストも通る。つまり
+**リリースビルドを一度も作っていなかったために気づけなかった**類の不具合だった。
+
+対応: リリースプロファイルから `panic = "abort"` を削除し、理由をコメントで残した。
+バイナリはわずかに大きくなるが、このプロダクトの中心的な約束（安全に倒す・復元できる）を
+出荷ビルドで成立させるほうが重要である。
+
 ## 未実装・CC確認が必要な項目
 
 1. 42レジストリ候補ごとの第三者setter契約となる一次資料、26100/26200 clean VMでの設定UI→detect→apply→UI確認→rollback→UI確認。承認後にのみstableへ個別昇格する。
