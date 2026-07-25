@@ -220,14 +220,14 @@ static TASK_VIEW_METADATA: ActionMetadata = ActionMetadata {
     ],
     minimumBuild: 26_100,
     maximumTestedBuild: 26_200,
-    riskLevel: ActionRiskLevel::Safe,
+    riskLevel: ActionRiskLevel::Caution,
     requiresAdmin: false,
     requiresRestart: false,
     requiresExplorerRestart: false,
     conflicts: &[],
     dependencies: &[],
     action_version: 1,
-    kind: ActionKind::Persistent,
+    kind: ActionKind::Guided,
     parameter_schema: r#"{"show":"boolean"}"#,
     resource_keys: &[
         "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:showtaskviewbutton",
@@ -239,7 +239,7 @@ static TASK_VIEW_METADATA: ActionMetadata = ActionMetadata {
     compatibility_key: "taskbar.task_view.v1",
     backup_codec_version: 1,
     rollback_decoder_versions: &[1],
-    auto_apply_eligible: true,
+    auto_apply_eligible: false,
     windows_update_impact: "中〜高。タスクバー系はWindows更新で挙動が変わり得るため、更新後に実機スモークを再実施します。",
 };
 
@@ -262,7 +262,7 @@ static WIDGETS_METADATA: ActionMetadata = ActionMetadata {
     conflicts: &[],
     dependencies: &[],
     action_version: 1,
-    kind: ActionKind::Persistent,
+    kind: ActionKind::Guided,
     parameter_schema: r#"{"show":"boolean"}"#,
     resource_keys: &[
         "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:taskbarda",
@@ -274,7 +274,7 @@ static WIDGETS_METADATA: ActionMetadata = ActionMetadata {
     compatibility_key: "taskbar.widgets.v1",
     backup_codec_version: 1,
     rollback_decoder_versions: &[1],
-    auto_apply_eligible: true,
+    auto_apply_eligible: false,
     windows_update_impact: "中〜高。ウィジェット系はWindows更新でキーや挙動が変わり得るため、更新後に実機スモークを再実施します。",
 };
 
@@ -547,6 +547,17 @@ macro_rules! impl_explorer_action {
                 context: &ActionContext<'_>,
                 parameters: &ActionParameters,
             ) -> ActionResult<ValidationReport> {
+                // 実測でWindows UIへ反映されないと分かった項目は Guided へ降格してある。
+                // 表示だけ変えて書き込めてしまうと「適用したのに何も変わらない」になるため、
+                // 変更経路そのものをここで止める。
+                if matches!($metadata.kind, ActionKind::Guided) {
+                    return Err(ActionError::new(
+                        ActionErrorCode::CompatibilityBlocked,
+                        ActionStage::Validate,
+                        false,
+                        "action.explorer_visibility.not_effective_on_this_build",
+                    ));
+                }
                 let report = validate_base(
                     &$metadata,
                     context,
@@ -1070,4 +1081,28 @@ mod compatibility_tests {
         assert_eq!(error.stage, ActionStage::Validate);
         assert_eq!(error.code.as_code(), "RECOVERY_REQUIRED");
     }
+
+#[cfg(all(test, windows))]
+mod demotion_tests {
+    use super::*;
+
+    /// 実測で「書いてもWindows UIが変わらない」と分かった項目は、
+    /// 表示だけでなく**変更経路も**閉じていること。
+    #[test]
+    fn demoted_actions_refuse_to_mutate() {
+        use crate::action::{ActionKind, ACTION_REGISTRY};
+        for id in [ActionId::TaskbarTaskView, ActionId::TaskbarWidgets] {
+            let action = ACTION_REGISTRY.get(id).expect("registered");
+            assert_eq!(
+                action.metadata().kind,
+                ActionKind::Guided,
+                "{id:?} は実測結果にもとづき変更しない扱い"
+            );
+            assert!(
+                !action.metadata().auto_apply_eligible,
+                "{id:?} は自動適用の対象にしない"
+            );
+        }
+    }
+}
 }

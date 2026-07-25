@@ -96,6 +96,64 @@ pub fn observe_taskbar_layout() -> WindowsResult<TaskbarLayoutObservation> {
     }
 }
 
+/// タスクバー上に、指定した名前の要素が存在するか。表示切替の反映確認に使う。
+#[cfg(windows)]
+pub fn observe_taskbar_element(names: &[&str]) -> WindowsResult<bool> {
+    use windows::core::BSTR;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+        UIA_NamePropertyId,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+
+    fn fail(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
+    unsafe {
+        let taskbar: HWND = FindWindowW(windows::core::w!("Shell_TrayWnd"), None)
+            .map_err(|_| fail("FindWindowW Shell_TrayWnd"))?;
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+        let result = (|| -> WindowsResult<bool> {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|_| fail("CoCreateInstance"))?;
+            let root: IUIAutomationElement = automation
+                .ElementFromHandle(taskbar)
+                .map_err(|_| fail("ElementFromHandle"))?;
+            for name in names {
+                let condition = automation
+                    .CreatePropertyCondition(
+                        UIA_NamePropertyId,
+                        &windows::core::VARIANT::from(BSTR::from(*name)),
+                    )
+                    .map_err(|_| fail("CreatePropertyCondition"))?;
+                if let Ok(element) = root.FindFirst(TreeScope_Descendants, &condition) {
+                    if element.CurrentBoundingRectangle().is_ok() {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        })();
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+#[cfg(not(windows))]
+pub fn observe_taskbar_element(_names: &[&str]) -> WindowsResult<bool> {
+    Err(WindowsError::unsupported("observe taskbar element"))
+}
+
 #[cfg(not(windows))]
 pub fn observe_taskbar_layout() -> WindowsResult<TaskbarLayoutObservation> {
     Err(WindowsError::unsupported("observe taskbar layout"))
@@ -312,5 +370,114 @@ mod tests {
 
         let final_state = read_registry_state(&backup.location).expect("read back");
         assert_eq!(final_state, backup.original, "値・型・有無まで元どおりに戻す");
+    }
+
+    /// すでに「変更可能」として出荷しているタスクバー系Actionが、本当に効いているか。
+    /// 効いていなければ、利用者は「適用した／戻した」と表示されるのに何も変わらない。
+    #[test]
+    #[ignore = "実機のタスクバー表示を一時的に変更する"]
+    fn shipped_task_view_toggle_actually_changes_the_taskbar() {
+        use crate::backup::{
+            prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryTarget,
+        };
+        use crate::windows::{notify_explorer_settings_changed, write_raw_value};
+        use std::{thread::sleep, time::Duration};
+
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const NAMES: &[&str] = &["タスク ビュー", "タスクビュー", "Task View"];
+
+        let target = RegistryTarget::current_user_64(SUBKEY, "ShowTaskViewButton");
+        let before_present = match observe_taskbar_element(NAMES) {
+            Ok(present) => present,
+            Err(error) => {
+                println!("観測できないためスキップ: {error:?}");
+                return;
+            }
+        };
+        let current = read_registry_state(&target.location()).expect("read ShowTaskViewButton");
+        println!("before: present={before_present} value_exists={}", current.value_existed);
+
+        let flipped: u32 = if before_present { 0 } else { 1 };
+        let backup = prepare_registry_backup(target, 4, flipped.to_le_bytes().to_vec(), 1, 26_200)
+            .expect("prepare backup");
+        write_raw_value(&backup.location, 4, &flipped.to_le_bytes()).expect("write");
+        let _ = notify_explorer_settings_changed();
+
+        let mut changed = false;
+        for _ in 0..25 {
+            sleep(Duration::from_millis(200));
+            if let Ok(now) = observe_taskbar_element(NAMES) {
+                if now != before_present {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        restore_registry_backup(&backup).expect("restore");
+        let _ = notify_explorer_settings_changed();
+        sleep(Duration::from_millis(400));
+
+        let after = read_registry_state(&backup.location).expect("read back");
+        assert_eq!(after, backup.original, "元どおりに戻す");
+
+        if changed {
+            println!("EVIDENCE: 出荷中のタスクビュー切替は実UIへ反映される");
+        } else {
+            println!(
+                "EVIDENCE: 出荷中のタスクビュー切替は実UIへ反映されなかった。可変扱いを見直す必要がある"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "実機のタスクバー表示を一時的に変更する"]
+    fn shipped_widgets_toggle_actually_changes_the_taskbar() {
+        use crate::backup::{
+            prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryTarget,
+        };
+        use crate::windows::{notify_explorer_settings_changed, write_raw_value};
+        use std::{thread::sleep, time::Duration};
+
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const NAMES: &[&str] = &["ウィジェット", "Widgets"];
+
+        let target = RegistryTarget::current_user_64(SUBKEY, "TaskbarDa");
+        let before = match observe_taskbar_element(NAMES) {
+            Ok(present) => present,
+            Err(error) => {
+                println!("観測できないためスキップ: {error:?}");
+                return;
+            }
+        };
+        println!("before: widgets_present={before}");
+        let flipped: u32 = if before { 0 } else { 1 };
+        let backup = prepare_registry_backup(target, 4, flipped.to_le_bytes().to_vec(), 1, 26_200)
+            .expect("prepare");
+        if let Err(error) = write_raw_value(&backup.location, 4, &flipped.to_le_bytes()) {
+            // 書き込み自体が拒否されるなら、利用者にはエラーとして見える（無言の無反応ではない）。
+            println!("EVIDENCE: ウィジェット値への書き込みが拒否された: {error:?}");
+            return;
+        }
+        let _ = notify_explorer_settings_changed();
+        let mut changed = false;
+        for _ in 0..25 {
+            sleep(Duration::from_millis(200));
+            if let Ok(now) = observe_taskbar_element(NAMES) {
+                if now != before {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        restore_registry_backup(&backup).expect("restore");
+        let _ = notify_explorer_settings_changed();
+        sleep(Duration::from_millis(400));
+        let after = read_registry_state(&backup.location).expect("read back");
+        assert_eq!(after, backup.original, "元どおりに戻す");
+        println!(
+            "EVIDENCE: 出荷中のウィジェット切替は実UIへ{}",
+            if changed { "反映される" } else { "反映されなかった" }
+        );
     }
 }
