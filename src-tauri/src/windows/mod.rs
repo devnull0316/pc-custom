@@ -8,6 +8,7 @@ mod process;
 mod readiness;
 mod registry;
 mod transaction_lock;
+mod ui_probe;
 mod window_effects;
 mod wmi_process;
 
@@ -83,3 +84,5 @@ impl WindowsError {
 }
 
 pub type WindowsResult<T> = Result<T, WindowsError>;
+
+pub use ui_probe::{observe_taskbar_layout, TaskbarLayoutObservation};
