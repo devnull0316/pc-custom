@@ -175,6 +175,69 @@ pub fn observe_taskbar_clock_text() -> WindowsResult<String> {
     Err(WindowsError::unsupported("observe taskbar clock"))
 }
 
+/// 開いているExplorerウィンドウが一覧表示している項目名。
+/// Explorerは別プロセスなので、自プロセスのキャッシュに影響されない観測点になる。
+#[cfg(windows)]
+pub fn explorer_window_item_names(title: &str) -> WindowsResult<Vec<String>> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+
+    fn fail(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
+    unsafe {
+        let wide_title = windows::core::HSTRING::from(title);
+        let window: HWND = FindWindowW(windows::core::w!("CabinetWClass"), &wide_title)
+            .map_err(|_| fail("FindWindowW CabinetWClass with title"))?;
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+        let result = (|| -> WindowsResult<Vec<String>> {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|_| fail("CoCreateInstance"))?;
+            let root: IUIAutomationElement = automation
+                .ElementFromHandle(window)
+                .map_err(|_| fail("ElementFromHandle explorer"))?;
+            let condition = automation
+                .CreateTrueCondition()
+                .map_err(|_| fail("CreateTrueCondition"))?;
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .map_err(|_| fail("FindAll"))?;
+            let count = all.Length().map_err(|_| fail("Length"))?;
+            let mut names = Vec::new();
+            for index in 0..count {
+                if let Ok(element) = all.GetElement(index) {
+                    if let Ok(name) = element.CurrentName() {
+                        let text = name.to_string();
+                        if !text.trim().is_empty() {
+                            names.push(text);
+                        }
+                    }
+                }
+            }
+            Ok(names)
+        })();
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+#[cfg(not(windows))]
+pub fn explorer_window_item_names(title: &str) -> WindowsResult<Vec<String>> {
+    Err(WindowsError::unsupported("explorer window items"))
+}
+
 /// タスクバー上に、指定した名前の要素が存在するか。表示切替の反映確認に使う。
 #[cfg(windows)]
 pub fn observe_taskbar_element(needles: &[&str]) -> WindowsResult<bool> {
@@ -680,5 +743,115 @@ mod tests {
             }
             CoUninitialize();
         }
+    }
+
+    /// 出荷中の `explorer.show_hidden` の検証（**未完成**）。
+    ///
+    /// 現状の問題:
+    /// 1. `FindWindowW` は最初に見つかった Explorer ウィンドウを返すため、
+    ///    利用者が既に開いている別のウィンドウを誤って観測・操作しうる。
+    ///    実際に最初の実行で、対象でないウィンドウを観測し（項目数101）、
+    ///    後片付けでそのウィンドウへ WM_CLOSE を送ってしまった。
+    /// 2. タイトル完全一致に変えたら、今度はウィンドウを見つけられなくなった。
+    ///
+    /// 正しくやるには `EnumWindows` で CabinetWClass を列挙し、
+    /// タイトルの**部分一致**で自分が開いたウィンドウだけを選び、
+    /// そのウィンドウにだけ操作を限定する必要がある。
+    /// それまでは走らせない。誤った結論は結論が無いより悪い。
+    #[test]
+    #[ignore = "未完成: 対象ウィンドウを特定できていないため実行しないこと"]
+    fn shipped_show_hidden_actually_changes_the_explorer_listing() {
+        use crate::backup::{
+            prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryTarget,
+        };
+        use crate::windows::{notify_explorer_settings_changed, write_raw_value};
+        use std::{thread::sleep, time::Duration};
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            FindWindowW, PostMessageW, SW_SHOWNORMAL, WM_CLOSE,
+        };
+
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const HIDDEN_NAME: &str = "totonoe-hidden-probe.txt";
+
+        // 隠し属性つきの検査用ファイルを作る。
+        let dir = std::env::temp_dir().join("totonoe-hidden-probe-dir");
+        let _ = std::fs::create_dir_all(&dir);
+        let hidden = dir.join(HIDDEN_NAME);
+        std::fs::write(&hidden, b"probe").expect("create probe");
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let _ = std::process::Command::new("attrib")
+                .arg("+h")
+                .arg(&hidden)
+                .output();
+            let _ = std::fs::OpenOptions::new().read(true).share_mode(3).open(&hidden);
+        }
+
+        // Explorerで開く。
+        let path = HSTRING::from(dir.as_os_str());
+        unsafe {
+            ShellExecuteW(None, windows::core::w!("open"), &path, None, None, SW_SHOWNORMAL);
+        }
+        sleep(Duration::from_millis(2500));
+
+        let listed = |names: &[String]| names.iter().any(|n| n.contains("totonoe-hidden-probe"));
+        const PROBE_DIR: &str = "totonoe-hidden-probe-dir";
+        let before_names = match explorer_window_item_names(PROBE_DIR) {
+            Ok(names) => names,
+            Err(error) => {
+                println!("Explorerを観測できないためスキップ: {error:?}");
+                let _ = std::fs::remove_dir_all(&dir);
+                return;
+            }
+        };
+        let before_visible = listed(&before_names);
+        println!("before: hidden_file_listed={before_visible} items={}", before_names.len());
+
+        let target = RegistryTarget::current_user_64(SUBKEY, "Hidden");
+        // 1 = 隠しファイルを表示, 2 = 表示しない。
+        let flipped: u32 = if before_visible { 2 } else { 1 };
+        let backup = prepare_registry_backup(target, 4, flipped.to_le_bytes().to_vec(), 1, 26_200)
+            .expect("prepare backup");
+        if let Err(error) = write_raw_value(&backup.location, 4, &flipped.to_le_bytes()) {
+            println!("EVIDENCE: 隠しファイル設定への書き込みが拒否された: {error:?}");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let _ = notify_explorer_settings_changed();
+
+        let mut changed = false;
+        for _ in 0..30 {
+            sleep(Duration::from_millis(300));
+            if let Ok(names) = explorer_window_item_names(PROBE_DIR) {
+                if listed(&names) != before_visible {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        restore_registry_backup(&backup).expect("restore");
+        let _ = notify_explorer_settings_changed();
+        sleep(Duration::from_millis(500));
+
+        // Explorerウィンドウを閉じ、検査用ファイルを片付ける。
+        unsafe {
+            let probe_title = HSTRING::from(PROBE_DIR);
+            if let Ok(window) = FindWindowW(windows::core::w!("CabinetWClass"), &probe_title) {
+                let _ = PostMessageW(window, WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+        }
+        sleep(Duration::from_millis(600));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let after = read_registry_state(&backup.location).expect("read back");
+        assert_eq!(after, backup.original, "元どおりに戻す");
+        println!(
+            "EVIDENCE: 隠しファイル表示は実Explorerへ{}",
+            if changed { "反映される" } else { "反映されない" }
+        );
     }
 }
