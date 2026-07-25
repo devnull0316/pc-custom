@@ -136,3 +136,59 @@ fn unknown_build_rejects_persistent_preview_without_registry_write() {
     assert_eq!(error.code, "RECOVERY_REQUIRED");
     assert_eq!(engine.list_timeline(10).expect("timeline remains readable").len(), 0);
 }
+
+/// 実機・実エンジンでの通し確認。利用者が画面で行う順番そのままを、
+/// preview → 適用 → タイムライン確認 → その1件だけ元へ戻す、まで通す。
+///
+/// 対象は `session.prevent_sleep`。OSの設定ファイルやレジストリを一切書かず、
+/// このプロセスのスリープ抑止要求だけを扱うため、実機で走らせても副作用が残らない。
+#[test]
+fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
+    let identity = match OsIdentity::load() {
+        Ok(identity) => identity,
+        Err(_) => return, // 実機以外では検出できないので何も主張しない
+    };
+    let journal = Arc::new(JournalDatabase::open_in_memory().expect("open journal"));
+    let engine = TotonoeEngine::new(journal, Some(identity)).expect("start engine");
+
+    // 1. 利用者が「適用プレビュー」を押す
+    let mut parameters = Map::new();
+    parameters.insert("keepDisplayOn".to_owned(), Value::Bool(false));
+    let preview = engine
+        .preview(PreviewActionsRequest {
+            actions: vec![PreviewActionRequest {
+                action_id: "session.prevent_sleep".to_owned(),
+                parameters,
+            }],
+        })
+        .expect("preview succeeds on a supported build");
+    assert_eq!(preview.changes.len(), 1, "変更内容が1件提示される");
+    assert!(!preview.changes[0].before.is_empty(), "現在の状態が示される");
+    assert!(!preview.changes[0].after.is_empty(), "適用後が示される");
+
+    // 2. 内容を確認して適用する
+    let commit = engine
+        .commit_preview(&preview.preview_token)
+        .expect("commit succeeds");
+    assert_eq!(commit.status, "succeeded", "適用が成功する: {}", commit.message);
+
+    // 3. タイムラインに1件残り、戻せる状態になっている
+    let timeline = engine.list_timeline(10).expect("timeline");
+    let item = timeline
+        .iter()
+        .find(|entry| entry.action_id == "session.prevent_sleep")
+        .expect("適用した項目が履歴に出る");
+    assert_eq!(item.status, "succeeded");
+    assert!(item.rollback_available, "この1件だけ戻せる");
+
+    // 4. その1件だけを元へ戻す
+    let rolled = engine.rollback_item(item.item_id).expect("rollback succeeds");
+    assert_eq!(rolled.status, "rolled_back", "復元が成功する: {}", rolled.message);
+
+    let after = engine.list_timeline(10).expect("timeline after rollback");
+    let restored = after
+        .iter()
+        .find(|entry| entry.item_id == item.item_id)
+        .expect("同じ項目が残る");
+    assert_eq!(restored.status, "rolled_back", "履歴に復元済みとして残る");
+}
