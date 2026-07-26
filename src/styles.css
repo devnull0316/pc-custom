@@ -391,10 +391,10 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 
 .field { display: flex; flex-direction: column; gap: .4rem; border: 0; margin: 0; padding: 0; }
 .field > span, .field > legend { font-weight: 600; font-size: .85rem; padding: 0; }
-.field input[type="text"] { padding: .55rem .7rem; border-radius: 8px; font: inherit; color: var(--text);
+.field input[type="text"], .field select { padding: .55rem .7rem; border-radius: 8px; font: inherit; color: var(--text);
   background: color-mix(in srgb, var(--text) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
-.field input[type="text"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.field input[type="text"]:focus-visible, .field select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .field small { color: color-mix(in srgb, var(--text) 58%, transparent); font-size: .78rem; line-height: 1.5; }
 
 .action-picker { display: flex; flex-direction: column; gap: .3rem; max-height: 280px; overflow-y: auto; padding-right: .2rem; }

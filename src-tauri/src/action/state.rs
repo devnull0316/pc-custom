@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backup::Fingerprint;
 
-use super::{ProcessFileIdentity, ThemeColorMode};
+use super::{AppLaunchBundle, ProcessFileIdentity, ThemeColorMode};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -159,6 +159,35 @@ pub struct GameReadinessObservation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum KnownAppState {
+    Running,
+    NotRunning,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnownAppObservation {
+    pub name: String,
+    pub state: KnownAppState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnownAppsObservation {
+    pub bundle: AppLaunchBundle,
+    pub apps: Vec<KnownAppObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowsUpdateStatusObservation {
+    /// WUA returns a local-time Automation date without a UTC offset.
+    pub last_checked_local: ReadinessComponent<String>,
+    pub restart_pending: ReadinessComponent<bool>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WindowColorPreset {
     WindowsBlue,
     Teal,
@@ -191,6 +220,8 @@ pub enum ObservedValue {
     SystemDriveSpace(SystemDriveSpaceObservation),
     TempFiles(TempFilesObservation),
     GameReadiness(GameReadinessObservation),
+    KnownApps(KnownAppsObservation),
+    WindowsUpdateStatus(WindowsUpdateStatusObservation),
     AccentColor {
         hex: String,
         opaque_blend: bool,

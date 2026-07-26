@@ -3,9 +3,7 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 
 /// Stable identifiers are never reused and are the only dispatch keys accepted by the core.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionId {
     #[serde(rename = "session.prevent_sleep")]
@@ -130,10 +128,14 @@ pub enum ActionId {
     AppearanceAccentColorCheck,
     #[serde(rename = "appearance.window_color")]
     AppearanceWindowColor,
+    #[serde(rename = "setup.launch_apps")]
+    SetupLaunchApps,
+    #[serde(rename = "setup.windows_update_status")]
+    SetupWindowsUpdateStatus,
 }
 
 impl ActionId {
-    pub const ALL: [Self; 61] = [
+    pub const ALL: [Self; 63] = [
         Self::SessionPreventSleep,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
@@ -195,6 +197,8 @@ impl ActionId {
         Self::StorageTempFilesCheck,
         Self::AppearanceAccentColorCheck,
         Self::AppearanceWindowColor,
+        Self::SetupLaunchApps,
+        Self::SetupWindowsUpdateStatus,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -260,6 +264,8 @@ impl ActionId {
             Self::StorageTempFilesCheck => "storage.temp_files_check",
             Self::AppearanceAccentColorCheck => "appearance.accent_color_check",
             Self::AppearanceWindowColor => "appearance.window_color",
+            Self::SetupLaunchApps => "setup.launch_apps",
+            Self::SetupWindowsUpdateStatus => "setup.windows_update_status",
         }
     }
 }
@@ -313,9 +319,7 @@ impl FromStr for ActionId {
             "search.recent_on_hover" => Ok(Self::SearchRecentOnHover),
             "taskbar.multi_monitor" => Ok(Self::TaskbarMultiMonitor),
             "taskbar.multi_monitor_mode" => Ok(Self::TaskbarMultiMonitorMode),
-            "taskbar.secondary_button_grouping" => {
-                Ok(Self::TaskbarSecondaryButtonGrouping)
-            }
+            "taskbar.secondary_button_grouping" => Ok(Self::TaskbarSecondaryButtonGrouping),
             "start.show_all_pins" => Ok(Self::StartShowAllPins),
             "start.recent_apps" => Ok(Self::StartRecentApps),
             "appearance.accent_start_taskbar" => Ok(Self::AppearanceAccentStartTaskbar),
@@ -349,6 +353,8 @@ impl FromStr for ActionId {
             "storage.temp_files_check" => Ok(Self::StorageTempFilesCheck),
             "appearance.accent_color_check" => Ok(Self::AppearanceAccentColorCheck),
             "appearance.window_color" => Ok(Self::AppearanceWindowColor),
+            "setup.launch_apps" => Ok(Self::SetupLaunchApps),
+            "setup.windows_update_status" => Ok(Self::SetupWindowsUpdateStatus),
             _ => Err(ParseActionIdError),
         }
     }

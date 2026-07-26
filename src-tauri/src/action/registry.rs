@@ -4,7 +4,7 @@ use crate::actions::*;
 
 use super::{Action, ActionError, ActionErrorCode, ActionId, ActionResult, ActionStage};
 
-static REGISTERED_ACTIONS: [&'static dyn Action; 61] = [
+static REGISTERED_ACTIONS: [&'static dyn Action; 63] = [
     &PREVENT_SLEEP_ACTION,
     &ACTIVE_SCHEME_CHECK_ACTION,
     &POWER_SCHEME_SWITCH_ACTION,
@@ -66,6 +66,8 @@ static REGISTERED_ACTIONS: [&'static dyn Action; 61] = [
     &TEMP_FILES_CHECK_ACTION,
     &ACCENT_COLOR_CHECK_ACTION,
     &WINDOW_COLOR_ACTION,
+    &LAUNCH_APPS_ACTION,
+    &WINDOWS_UPDATE_STATUS_ACTION,
 ];
 
 pub static ACTION_REGISTRY: ActionRegistry = ActionRegistry {
@@ -148,9 +150,9 @@ impl ActionRegistry {
             _ => {}
         }
         colors.insert(id, 1);
-        let action = self.get(id).ok_or_else(|| {
-            registry_error("Action missing during dependency validation")
-        })?;
+        let action = self
+            .get(id)
+            .ok_or_else(|| registry_error("Action missing during dependency validation"))?;
         for dependency in action.metadata().dependencies {
             self.visit_dependency(*dependency, colors)?;
         }

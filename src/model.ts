@@ -15,7 +15,7 @@ export type CategoryId =
 
 export type RiskLevel = "safe" | "caution" | "experimental";
 
-export type ActionKind = "persistent" | "session" | "observation" | "guided";
+export type ActionKind = "persistent" | "session" | "one_way" | "observation" | "guided";
 
 export type MethodClass =
   | "public_api"
@@ -88,9 +88,11 @@ export interface DetectionResponse {
   state: ActionState;
 }
 
+export type JsonValue = boolean | number | string | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
 export interface PreviewActionRequest {
   actionId: string;
-  parameters: Record<string, boolean | number | string>;
+  parameters: Record<string, JsonValue>;
 }
 
 export interface PreviewActionsRequest {
@@ -219,24 +221,36 @@ export interface StoredProfileAction {
   parameters?: unknown;
 }
 
+export interface ManualRunRecord {
+  transactionId: string;
+  reversibleItemIds: readonly string[];
+}
+
 export interface StoredProfile {
   id: string;
   name: string;
-  executablePath: string;
-  volumeSerialNumber: number;
-  fileIdHex: string;
+  executablePath?: string;
+  volumeSerialNumber?: number;
+  fileIdHex?: string;
   conflictPolicy: string;
   automationEnabled: boolean;
   actions: readonly StoredProfileAction[];
+  activeRun?: ManualRunRecord;
 }
 
 export interface CreateProfileRequest {
   name: string;
-  executablePath: string;
+  executablePath?: string;
   conflictPolicy?: string;
   actions: readonly StoredProfileAction[];
 }
 
+export interface ManualProfileResult {
+  transactionId: string;
+  status: "succeeded" | "rolled_back";
+  reversibleItemCount: number;
+  message: string;
+}
 export interface ImportPreviewItem {
   name: string;
   executablePath: string;

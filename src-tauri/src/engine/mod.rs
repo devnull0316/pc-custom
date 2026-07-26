@@ -1,8 +1,7 @@
 mod recovery;
-mod transaction;
 #[cfg(all(test, windows))]
 mod tests;
-
+mod transaction;
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -79,8 +78,7 @@ impl TotonoeEngine {
                 mode: "recovery_required".to_owned(),
                 os_label: "Windowsの情報を確認できません".to_owned(),
                 build: None,
-                message: "buildを一意に確認できないため、自動書き込みを停止しています。"
-                    .to_owned(),
+                message: "buildを一意に確認できないため、自動書き込みを停止しています。".to_owned(),
                 recovery_count,
             });
         };
@@ -92,18 +90,16 @@ impl TotonoeEngine {
             )
         } else {
             match decision.mode {
-                CompatibilityMode::TestedMutable => (
-                    "ready",
-                    "変更前を保存し、適用後と復元後を検証します。",
-                ),
+                CompatibilityMode::TestedMutable => {
+                    ("ready", "変更前を保存し、適用後と復元後を検証します。")
+                }
                 CompatibilityMode::TestedDetectOnly => (
                     "read_only",
                     "実機承認前のbuildのため、状態確認だけを利用できます。",
                 ),
-                CompatibilityMode::Unsupported => (
-                    "unsupported",
-                    "このWindows releaseは変更対象外です。",
-                ),
+                CompatibilityMode::Unsupported => {
+                    ("unsupported", "このWindows releaseは変更対象外です。")
+                }
                 CompatibilityMode::UnknownBuild => (
                     "recovery_required",
                     "未知buildのため、自動書き込みと自動復元を停止しています。",
@@ -132,12 +128,12 @@ impl TotonoeEngine {
                 let current_state = self.initial_identity.as_ref().and_then(|identity| {
                     listing_parameters(metadata.id).map(|parameters| {
                         let context = action_context(identity, Uuid::nil(), Uuid::nil());
-                        action.detect_current_state(&context, &parameters).unwrap_or_else(|error| {
-                            DetectedState::Error {
+                        action
+                            .detect_current_state(&context, &parameters)
+                            .unwrap_or_else(|error| DetectedState::Error {
                                 code: error.code.as_code().to_owned(),
                                 reason: "状態を安全に確認できませんでした。".to_owned(),
-                            }
-                        })
+                            })
                     })
                 });
                 action_presentation(metadata, compatibility, current_state)
@@ -188,7 +184,9 @@ impl TotonoeEngine {
         for parameters in &invocations {
             let action = registered_action(parameters.action_id())?;
             let context = action_context(&identity, Uuid::nil(), Uuid::new_v4());
-            action.validate(&context, parameters).map_err(CoreError::from)?;
+            action
+                .validate(&context, parameters)
+                .map_err(CoreError::from)?;
             let state = action
                 .detect_current_state(&context, parameters)
                 .map_err(CoreError::from)?;
@@ -235,7 +233,10 @@ impl TotonoeEngine {
                 if let Some(action) = ACTION_REGISTRY.get(action_id) {
                     item.title = action.metadata().name.to_owned();
                     item.summary = action.metadata().description.to_owned();
-                    if action.metadata().kind == ActionKind::Observation {
+                    if matches!(
+                        action.metadata().kind,
+                        ActionKind::Observation | ActionKind::OneWay
+                    ) {
                         item.rollback_available = false;
                     }
                 }
@@ -291,7 +292,9 @@ fn order_and_validate_requests(
         .map(ActionParameters::action_id)
         .collect::<BTreeSet<_>>();
     if ids.len() != invocations.len() {
-        return Err(CoreError::invalid_request("同じActionを重複指定できません。"));
+        return Err(CoreError::invalid_request(
+            "同じActionを重複指定できません。",
+        ));
     }
     for invocation in &invocations {
         let action = registered_action(invocation.action_id())?;
@@ -371,9 +374,6 @@ fn core_mutation_lock_error(error: crate::windows::WindowsError) -> CoreError {
     )
 }
 
-
-
-
 fn state_fingerprint(state: &DetectedState) -> CoreResult<Fingerprint> {
     state.stable_fingerprint().map_err(|_| {
         CoreError::new(
@@ -398,11 +398,7 @@ fn os_identity_fingerprint(identity: &OsIdentity) -> CoreResult<Fingerprint> {
     ))
 }
 
-fn action_context(
-    identity: &OsIdentity,
-    transaction_id: Uuid,
-    item_id: Uuid,
-) -> ActionContext<'_> {
+fn action_context(identity: &OsIdentity, transaction_id: Uuid, item_id: Uuid) -> ActionContext<'_> {
     ActionContext {
         os_identity: identity,
         transaction_id,
@@ -415,12 +411,14 @@ fn action_context(
 fn fingerprint_of<T: serde::Serialize>(value: &T) -> CoreResult<Fingerprint> {
     serde_json::to_vec(value)
         .map(|bytes| Fingerprint::of_bytes(&bytes))
-        .map_err(|_| CoreError::new(
-            "SERIALIZATION_FAILURE",
-            "VALIDATE",
-            false,
-            "状態のfingerprintを作成できませんでした。",
-        ))
+        .map_err(|_| {
+            CoreError::new(
+                "SERIALIZATION_FAILURE",
+                "VALIDATE",
+                false,
+                "状態のfingerprintを作成できませんでした。",
+            )
+        })
 }
 
 fn random_token() -> CoreResult<String> {

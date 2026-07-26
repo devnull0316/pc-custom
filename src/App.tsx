@@ -11,7 +11,9 @@ import {
   publicErrorCode,
   publicErrorMessage,
   reconcileNow,
+  restoreProfileNow,
   rollbackItem,
+  runProfileNow,
   setProfileEnabled,
 } from "./backend";
 import { STATIC_ACTIONS } from "./catalog";
@@ -30,6 +32,7 @@ import type {
   CategoryId,
   CreateProfileRequest,
   DataMode,
+  JsonValue,
   PreviewResponse,
   ProfileDraftItem,
   StoredProfile,
@@ -42,7 +45,7 @@ interface UiError {
   code: string;
 }
 
-function parametersForAction(actionId: string): Record<string, boolean | number | string> {
+function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "session.prevent_sleep") return { keepDisplayOn: false };
   if (actionId === "explorer.show_extensions") return { show: true };
   if (actionId === "explorer.show_hidden") return { show: true };
@@ -104,6 +107,8 @@ function parametersForAction(actionId: string): Record<string, boolean | number 
   if (actionId === "storage.temp_files_check") return {};
   if (actionId === "appearance.accent_color_check") return {};
   if (actionId === "appearance.window_color") return { color: "teal" };
+  if (actionId === "setup.launch_apps") return { bundle: "study" };
+  if (actionId === "setup.windows_update_status") return {};
   return {};
 }
 
@@ -223,7 +228,7 @@ export function App() {
     const navigation: PaletteCommand[] = [
       { id: "nav-home", label: "ホームを開く", description: "結果タイルへ移動", icon: "home", execute: () => setView("home") },
       { id: "nav-actions", label: "Actionを探す", description: "カテゴリと詳細を表示", icon: "action", execute: () => navigate("actions") },
-      { id: "nav-profiles", label: "ゲームプロファイル", description: "ゲーム別の準備を管理", icon: "game", execute: () => setView("profiles") },
+      { id: "nav-profiles", label: "モード", description: "ゲーム・勉強・作業の準備を管理", icon: "game", execute: () => setView("profiles") },
       { id: "nav-timeline", label: "変更を元へ戻す", description: "タイムラインへ移動", icon: "timeline", execute: () => setView("timeline") },
     ];
     const actionCommands: PaletteCommand[] = actions.map((action): PaletteCommand => ({
@@ -318,7 +323,7 @@ export function App() {
     setUiError(null);
     try {
       const created = await createProfile(request);
-      setNotice(`プロファイル「${created.name}」を作成しました。自動適用はまだオフです。`);
+      setNotice(created.executablePath === undefined ? `手動モード「${created.name}」を作成しました。「いま実行」を押すまで適用しません。` : `ゲームプロファイル「${created.name}」を作成しました。自動適用はまだオフです。`);
       await refreshProfiles();
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -341,6 +346,33 @@ export function App() {
     }
   }
 
+  async function handleRunProfile(id: string) {
+    setProfileBusy(true);
+    setUiError(null);
+    try {
+      const result = await runProfileNow(id);
+      setNotice(result.message);
+      await Promise.all([refreshProfiles(), refreshSnapshot(false)]);
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function handleRestoreProfile(id: string) {
+    setProfileBusy(true);
+    setUiError(null);
+    try {
+      const result = await restoreProfileNow(id);
+      setNotice(result.message);
+      await Promise.all([refreshProfiles(), refreshSnapshot(false)]);
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setProfileBusy(false);
+    }
+  }
   async function handleDeleteProfile(id: string) {
     setProfileBusy(true);
     setUiError(null);
@@ -384,7 +416,7 @@ export function App() {
           ) : view === "actions" ? (
             <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
           ) : view === "profiles" ? (
-            <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} profiles={profiles} />
+            <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} profiles={profiles} />
           ) : view === "setup" ? (
             <SetupView dataMode={dataMode} />
           ) : (

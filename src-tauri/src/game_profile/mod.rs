@@ -14,13 +14,16 @@ use uuid::Uuid;
 
 use crate::action::{ActionId, ProcessFileIdentity};
 
+pub mod manual;
+pub use manual::{restore_manual_profile, run_manual_profile, ManualProfileResult};
+
 pub mod observer;
 pub use observer::{ObservedProcess, ProcessMatcher};
 
 pub mod store;
 pub use store::{
-    CreateProfileRequest, ImportPreviewItem, ImportResult, ImportSkip, ProfileStore,
-    StoredProfile, StoredProfileAction,
+    CreateProfileRequest, ImportPreviewItem, ImportResult, ImportSkip, ManualRunRecord,
+    ProfileStore, StoredProfile, StoredProfileAction,
 };
 
 pub mod runtime;

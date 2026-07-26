@@ -13,22 +13,21 @@ pub use metadata::{
     ActionKind, ActionMetadata, ActionRiskLevel, MethodClass, WindowsReleaseFamily,
 };
 pub use parameters::{
-    ActionParameters, ExplorerLaunchTarget, PowerScheme, ProcessBindingParameters,
+    ActionParameters, AppLaunchBundle, ExplorerLaunchTarget, PowerScheme, ProcessBindingParameters,
     ProcessFileIdentity, StartLayout, TaskbarAlignment, TaskbarGroupingMode,
     TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode,
 };
 pub use registry::{ActionRegistry, ACTION_REGISTRY};
-pub use state::{WindowColorPreset, 
+pub use state::{
     AdvancedColorObservation, DefaultRenderAudioObservation, DetectedState,
-    GameReadinessObservation, ObservationWarning, ObservedProcess, ObservedValue,
-    PrimaryRefreshRateObservation, ReadinessComponent, StartupEntrySource,
-    StartupEntryStatus, StartupInventoryEntry, StartupInventoryObservation,
-    StateEvidence, SystemDriveSpaceObservation, TempFilesObservation,
-    ThemeObservation,
+    GameReadinessObservation, KnownAppObservation, KnownAppState, KnownAppsObservation,
+    ObservationWarning, ObservedProcess, ObservedValue, PrimaryRefreshRateObservation,
+    ReadinessComponent, StartupEntrySource, StartupEntryStatus, StartupInventoryEntry,
+    StartupInventoryObservation, StateEvidence, SystemDriveSpaceObservation, TempFilesObservation,
+    ThemeObservation, WindowColorPreset, WindowsUpdateStatusObservation,
 };
 pub use traits::Action;
 pub use types::{
-    ActionContext, ActionError, ActionErrorCode, ActionResult, ActionStage,
-    AppliedEvidence, ChangeExplanation, RollbackEvidence, TroubleshootingStep,
-    ValidationReport, Verification,
+    ActionContext, ActionError, ActionErrorCode, ActionResult, ActionStage, AppliedEvidence,
+    ChangeExplanation, RollbackEvidence, TroubleshootingStep, ValidationReport, Verification,
 };

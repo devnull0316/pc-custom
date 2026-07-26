@@ -38,14 +38,32 @@ pub struct StoredProfileAction {
 pub struct StoredProfile {
     pub id: String,
     pub name: String,
-    /// canonical 化済みの絶対パス。
-    pub executable_path: String,
-    pub volume_serial_number: u64,
+    /// None は実行ファイルに紐付かない手動モード。Some はcanonical化済み絶対パス。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume_serial_number: Option<u64>,
     /// 16 バイト file id の16進表現。
-    pub file_id_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id_hex: Option<String>,
     pub conflict_policy: String,
     pub automation_enabled: bool,
     pub actions: Vec<StoredProfileAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_run: Option<ManualRunRecord>,
+}
+
+impl StoredProfile {
+    pub fn is_manual(&self) -> bool {
+        self.executable_path.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManualRunRecord {
+    pub transaction_id: String,
+    pub reversible_item_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +79,8 @@ struct ProfilesFile {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateProfileRequest {
     pub name: String,
-    pub executable_path: String,
+    #[serde(default)]
+    pub executable_path: Option<String>,
     #[serde(default)]
     pub conflict_policy: Option<String>,
     #[serde(default)]
@@ -162,26 +181,40 @@ impl ProfileStore {
                 "1プロファイルのActionが多すぎます。",
             ));
         }
-        validate_automation_actions(&request.actions)?;
+        let manual = request.executable_path.is_none();
+        if manual {
+            validate_manual_actions(&request.actions)?;
+        } else {
+            validate_automation_actions(&request.actions)?;
+        }
         let conflict_policy = match request.conflict_policy.as_deref() {
             None | Some("abort_profile") => "abort_profile".to_owned(),
             Some("skip_conflicting") => "skip_conflicting".to_owned(),
             Some(_) => return Err(CoreError::invalid_request("競合方針の値が不正です。")),
         };
 
-        // 対象EXEを canonical 化し、ローカル固定ボリューム/通常ファイル/非reparse を検証する。
-        let (canonical_path, volume_serial_number, file_id) =
-            resolve_binding(&request.executable_path)?;
+        let (executable_path, volume_serial_number, file_id_hex) = match request.executable_path {
+            Some(path) => {
+                let (canonical_path, volume_serial_number, file_id) = resolve_binding(&path)?;
+                (
+                    Some(canonical_path),
+                    Some(volume_serial_number),
+                    Some(hex::encode(file_id)),
+                )
+            }
+            None => (None, None, None),
+        };
 
         let profile = StoredProfile {
             id: Uuid::new_v4().to_string(),
             name: name.to_owned(),
-            executable_path: canonical_path,
+            executable_path,
             volume_serial_number,
-            file_id_hex: hex::encode(file_id),
+            file_id_hex,
             conflict_policy,
-            automation_enabled: false, // 明示的に有効化するまで自動適用しない。
+            automation_enabled: false,
             actions: request.actions,
+            active_run: None,
         };
 
         let mut guard = self.profiles.lock();
@@ -204,6 +237,11 @@ impl ProfileStore {
             .position(|profile| profile.id == id)
             .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))?;
         if enabled {
+            if guard[index].is_manual() {
+                return Err(CoreError::invalid_request(
+                    "手動モードは自動適用を有効にできません。",
+                ));
+            }
             // 旧版で保存済みの定義や、将来の移行処理が混在しても、無人適用を
             // 許可していないActionを有効化の境界で必ず止める。
             validate_automation_actions(&guard[index].actions)?;
@@ -233,9 +271,7 @@ impl ProfileStore {
             CoreError::invalid_request("バックアップJSONを読めません。形式を確認してください。")
         })?;
         if parsed.version != PROFILES_FILE_VERSION {
-            return Err(CoreError::invalid_request(
-                "バックアップの版が対応外です。",
-            ));
+            return Err(CoreError::invalid_request("バックアップの版が対応外です。"));
         }
         if parsed.profiles.len() > MAX_PROFILES {
             return Err(CoreError::invalid_request(
@@ -251,13 +287,25 @@ impl ProfileStore {
         let mut items = Vec::with_capacity(profiles.len());
         for profile in profiles {
             // この機で実行ファイルが解決できるか(cross-PCは identity が変わる)。read-only。
-            let (resolvable, note) = match resolve_binding(&profile.executable_path) {
-                Ok(_) => (true, format!("{}件の準備を取り込みます", profile.actions.len())),
-                Err(error) => (false, error.user_message),
+            let (resolvable, note) = match profile.executable_path.as_deref() {
+                None => (
+                    true,
+                    format!(
+                        "手動モードとして{}件の準備を取り込みます",
+                        profile.actions.len()
+                    ),
+                ),
+                Some(path) => match resolve_binding(path) {
+                    Ok(_) => (
+                        true,
+                        format!("{}件の準備を取り込みます", profile.actions.len()),
+                    ),
+                    Err(error) => (false, error.user_message),
+                },
             };
             items.push(ImportPreviewItem {
                 name: profile.name,
-                executable_path: profile.executable_path,
+                executable_path: profile.executable_path.unwrap_or_default(),
                 action_count: profile.actions.len(),
                 resolvable,
                 note,
@@ -289,11 +337,88 @@ impl ProfileStore {
         Ok(ImportResult { imported, skipped })
     }
 
+    pub fn get(&self, id: &str) -> CoreResult<StoredProfile> {
+        self.profiles
+            .lock()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+            .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))
+    }
+
+    pub fn set_active_run(&self, id: &str, run: ManualRunRecord) -> CoreResult<()> {
+        let mut guard = self.profiles.lock();
+        let index = guard
+            .iter()
+            .position(|profile| profile.id == id)
+            .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))?;
+        if !guard[index].is_manual() || guard[index].active_run.is_some() {
+            return Err(CoreError::invalid_request(
+                "この手動モードは現在実行できません。",
+            ));
+        }
+        let mut next = guard.clone();
+        next[index].active_run = Some(run);
+        Self::persist(&self.path, &next)?;
+        *guard = next;
+        Ok(())
+    }
+
+    pub fn update_active_run_items(
+        &self,
+        id: &str,
+        transaction_id: &str,
+        item_ids: Vec<String>,
+    ) -> CoreResult<()> {
+        let mut guard = self.profiles.lock();
+        let index = guard
+            .iter()
+            .position(|profile| profile.id == id)
+            .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))?;
+        let Some(active) = guard[index].active_run.as_ref() else {
+            return Err(CoreError::invalid_request(
+                "この手動モードは実行中ではありません。",
+            ));
+        };
+        if active.transaction_id != transaction_id {
+            return Err(CoreError::recovery_required(
+                "手動モードの復元記録が一致しません。",
+            ));
+        }
+        let mut next = guard.clone();
+        next[index].active_run = (!item_ids.is_empty()).then(|| ManualRunRecord {
+            transaction_id: transaction_id.to_owned(),
+            reversible_item_ids: item_ids,
+        });
+        Self::persist(&self.path, &next)?;
+        *guard = next;
+        Ok(())
+    }
+    pub fn clear_active_run(&self, id: &str) -> CoreResult<()> {
+        let mut guard = self.profiles.lock();
+        let index = guard
+            .iter()
+            .position(|profile| profile.id == id)
+            .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))?;
+        let mut next = guard.clone();
+        next[index].active_run = None;
+        Self::persist(&self.path, &next)?;
+        *guard = next;
+        Ok(())
+    }
     pub fn delete(&self, id: &str) -> CoreResult<()> {
         let mut guard = self.profiles.lock();
         if !guard.iter().any(|profile| profile.id == id) {
             return Err(CoreError::invalid_request(
                 "対象のプロファイルがありません。",
+            ));
+        }
+        if guard
+            .iter()
+            .any(|profile| profile.id == id && profile.active_run.is_some())
+        {
+            return Err(CoreError::invalid_request(
+                "実行中の手動モードは、先に実行した分を復元してください。",
             ));
         }
         let mut next = guard.clone();
@@ -350,24 +475,46 @@ fn validate_loaded_profiles(profiles: &[StoredProfile]) -> CoreResult<()> {
         ) {
             return Err(profiles_file_corrupt());
         }
-        if profile.executable_path.is_empty()
-            || profile.executable_path.chars().count() > MAX_EXECUTABLE_PATH_CHARS
-            || !Path::new(&profile.executable_path).is_absolute()
-            || !profile
-                .executable_path
-                .to_ascii_lowercase()
-                .ends_with(".exe")
-        {
-            return Err(profiles_file_corrupt());
+        match (
+            profile.executable_path.as_deref(),
+            profile.volume_serial_number,
+            profile.file_id_hex.as_deref(),
+        ) {
+            (Some(path), Some(_), Some(file_id_hex)) => {
+                if path.is_empty()
+                    || path.chars().count() > MAX_EXECUTABLE_PATH_CHARS
+                    || !Path::new(path).is_absolute()
+                    || !path.to_ascii_lowercase().ends_with(".exe")
+                    || hex::decode(file_id_hex)
+                        .ok()
+                        .filter(|bytes| bytes.len() == 16)
+                        .is_none()
+                    || profile.active_run.is_some()
+                {
+                    return Err(profiles_file_corrupt());
+                }
+                validate_automation_actions(&profile.actions)
+                    .map_err(|_| profiles_file_corrupt())?;
+            }
+            (None, None, None) => {
+                if profile.automation_enabled {
+                    return Err(profiles_file_corrupt());
+                }
+                validate_manual_actions(&profile.actions).map_err(|_| profiles_file_corrupt())?;
+                if let Some(run) = &profile.active_run {
+                    if Uuid::parse_str(&run.transaction_id).is_err()
+                        || run.reversible_item_ids.len() > MAX_ACTIONS_PER_PROFILE
+                        || run
+                            .reversible_item_ids
+                            .iter()
+                            .any(|id| Uuid::parse_str(id).is_err())
+                    {
+                        return Err(profiles_file_corrupt());
+                    }
+                }
+            }
+            _ => return Err(profiles_file_corrupt()),
         }
-        if hex::decode(&profile.file_id_hex)
-            .ok()
-            .filter(|bytes| bytes.len() == 16)
-            .is_none()
-        {
-            return Err(profiles_file_corrupt());
-        }
-        validate_automation_actions(&profile.actions).map_err(|_| profiles_file_corrupt())?;
     }
     Ok(())
 }
@@ -404,6 +551,30 @@ fn validate_automation_actions(actions: &[StoredProfileAction]) -> CoreResult<()
     Ok(())
 }
 
+fn validate_manual_actions(actions: &[StoredProfileAction]) -> CoreResult<()> {
+    if actions.is_empty() {
+        return Err(CoreError::invalid_request(
+            "手動モードには1件以上のActionを選んでください。",
+        ));
+    }
+    for stored in actions {
+        let parameters = parse_stored_profile_action(stored)?;
+        let action = crate::action::ACTION_REGISTRY
+            .get(parameters.action_id())
+            .ok_or_else(|| CoreError::invalid_request("登録済みActionを解決できませんでした。"))?;
+        if !matches!(
+            action.metadata().kind,
+            crate::action::ActionKind::Persistent
+                | crate::action::ActionKind::Session
+                | crate::action::ActionKind::OneWay
+        ) {
+            return Err(CoreError::invalid_request(
+                "読み取り専用または案内専用Actionは手動モードの実行対象にできません。",
+            ));
+        }
+    }
+    Ok(())
+}
 pub(crate) fn parse_stored_profile_action(
     stored: &StoredProfileAction,
 ) -> CoreResult<crate::action::ActionParameters> {
@@ -411,17 +582,15 @@ pub(crate) fn parse_stored_profile_action(
         .action_id
         .parse::<crate::action::ActionId>()
         .map_err(|_| CoreError::invalid_request("登録されていないActionは登録できません。"))?;
-    let parameters = stored
-        .parameters
-        .as_object()
-        .cloned()
-        .ok_or_else(|| CoreError::invalid_request("Actionの設定値はobjectで指定してください。"))?;
-    let parsed = crate::presentation::parse_action_request(
-        crate::presentation::PreviewActionRequest {
+    let parameters =
+        stored.parameters.as_object().cloned().ok_or_else(|| {
+            CoreError::invalid_request("Actionの設定値はobjectで指定してください。")
+        })?;
+    let parsed =
+        crate::presentation::parse_action_request(crate::presentation::PreviewActionRequest {
             action_id: stored.action_id.clone(),
             parameters,
-        },
-    )?;
+        })?;
     if parsed.action_id() != action_id {
         return Err(CoreError::invalid_request(
             "Action IDと設定値の組み合わせが一致しません。",
@@ -475,7 +644,7 @@ mod tests {
     fn eligible_request(name: &str) -> CreateProfileRequest {
         CreateProfileRequest {
             name: name.to_owned(),
-            executable_path: notepad(),
+            executable_path: Some(notepad()),
             conflict_policy: None,
             actions: vec![StoredProfileAction {
                 action_id: "theme.color_mode".to_owned(),
@@ -488,15 +657,16 @@ mod tests {
         StoredProfile {
             id: id.to_string(),
             name: "保存済みテスト".to_owned(),
-            executable_path: notepad(),
-            volume_serial_number: 1,
-            file_id_hex: "000102030405060708090a0b0c0d0e0f".to_owned(),
+            executable_path: Some(notepad()),
+            volume_serial_number: Some(1),
+            file_id_hex: Some("000102030405060708090a0b0c0d0e0f".to_owned()),
             conflict_policy: "abort_profile".to_owned(),
             automation_enabled: false,
             actions: vec![StoredProfileAction {
                 action_id: "theme.color_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "dark" }),
             }],
+            active_run: None,
         }
     }
 
@@ -506,7 +676,7 @@ mod tests {
         let created = store
             .create(CreateProfileRequest {
                 name: "  テストゲーム  ".to_owned(),
-                executable_path: notepad(),
+                executable_path: Some(notepad()),
                 conflict_policy: None,
                 actions: vec![StoredProfileAction {
                     action_id: "theme.color_mode".to_owned(),
@@ -518,9 +688,14 @@ mod tests {
         assert!(!created.automation_enabled); // 既定は無効
         assert!(created
             .executable_path
+            .as_ref()
+            .expect("game binding")
             .to_lowercase()
             .ends_with("notepad.exe"));
-        assert_eq!(created.file_id_hex.len(), 32);
+        assert_eq!(
+            created.file_id_hex.as_ref().expect("game file id").len(),
+            32
+        );
 
         // 別インスタンスで開き直しても永続化されている。
         let reopened = ProfileStore::open(store.path.clone()).expect("reopen");
@@ -542,7 +717,7 @@ mod tests {
         let (store, _dir) = temp_store();
         let result = store.create(CreateProfileRequest {
             name: "x".to_owned(),
-            executable_path: notepad(),
+            executable_path: Some(notepad()),
             conflict_policy: None,
             actions: vec![StoredProfileAction {
                 action_id: "totally.unknown".to_owned(),
@@ -557,7 +732,7 @@ mod tests {
         let (store, _dir) = temp_store();
         let result = store.create(CreateProfileRequest {
             name: "x".to_owned(),
-            executable_path: notepad(),
+            executable_path: Some(notepad()),
             conflict_policy: None,
             actions: vec![StoredProfileAction {
                 action_id: "taskbar.search_mode".to_owned(),
@@ -575,7 +750,7 @@ mod tests {
         let (store, _dir) = temp_store();
         let result = store.create(CreateProfileRequest {
             name: "x".to_owned(),
-            executable_path: notepad(),
+            executable_path: Some(notepad()),
             conflict_policy: None,
             actions: vec![StoredProfileAction {
                 action_id: "power.active_scheme_check".to_owned(),
@@ -593,7 +768,7 @@ mod tests {
         let (store, _dir) = temp_store();
         let result = store.create(CreateProfileRequest {
             name: "x".to_owned(),
-            executable_path: notepad(),
+            executable_path: Some(notepad()),
             conflict_policy: None,
             actions: vec![StoredProfileAction {
                 action_id: "theme.color_mode".to_owned(),
@@ -611,7 +786,7 @@ mod tests {
         let created = store
             .create(CreateProfileRequest {
                 name: "x".to_owned(),
-                executable_path: notepad(),
+                executable_path: Some(notepad()),
                 conflict_policy: None,
                 actions: vec![StoredProfileAction {
                     action_id: "theme.color_mode".to_owned(),
@@ -639,7 +814,7 @@ mod tests {
         let (store, _dir) = temp_store();
         let result = store.create(CreateProfileRequest {
             name: "x".to_owned(),
-            executable_path: r"C:\definitely\not\here\ghost.exe".to_owned(),
+            executable_path: Some(r"C:\definitely\not\here\ghost.exe".to_owned()),
             conflict_policy: None,
             actions: vec![],
         });
@@ -652,7 +827,7 @@ mod tests {
         store
             .create(CreateProfileRequest {
                 name: "ゲームA".to_owned(),
-                executable_path: notepad(),
+                executable_path: Some(notepad()),
                 conflict_policy: None,
                 actions: vec![],
             })
@@ -837,5 +1012,89 @@ mod tests {
                 .code,
             "PROFILES_FILE_CORRUPT"
         );
+    }
+    #[test]
+    fn legacy_game_json_without_manual_fields_remains_readable() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("profiles.json");
+        let json = serde_json::json!({
+            "version": 1,
+            "profiles": [{
+                "id": Uuid::from_u128(100).to_string(),
+                "name": "旧ゲーム",
+                "executablePath": notepad(),
+                "volumeSerialNumber": 1,
+                "fileIdHex": "000102030405060708090a0b0c0d0e0f",
+                "conflictPolicy": "abort_profile",
+                "automationEnabled": false,
+                "actions": [{"actionId": "theme.color_mode", "parameters": {"mode": "dark"}}]
+            }]
+        });
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        let loaded = ProfileStore::open(path)
+            .expect("legacy version 1 game profile")
+            .list();
+        assert_eq!(loaded.len(), 1);
+        assert!(!loaded[0].is_manual());
+        assert!(loaded[0].active_run.is_none());
+    }
+
+    #[test]
+    fn empty_manual_profile_is_rejected() {
+        let (store, _dir) = temp_store();
+        let error = store
+            .create(CreateProfileRequest {
+                name: "empty".to_owned(),
+                executable_path: None,
+                conflict_policy: None,
+                actions: Vec::new(),
+            })
+            .expect_err("manual mode must contain an Action");
+        assert_eq!(error.code, "INVALID_REQUEST");
+    }
+
+    #[test]
+    fn manual_profile_has_no_executable_and_can_never_enable_automation() {
+        let (store, _dir) = temp_store();
+        let profile = store
+            .create(CreateProfileRequest {
+                name: "勉強".to_owned(),
+                executable_path: None,
+                conflict_policy: None,
+                actions: vec![StoredProfileAction {
+                    action_id: "setup.launch_apps".to_owned(),
+                    parameters: serde_json::json!({"bundle": "study"}),
+                }],
+            })
+            .expect("create manual mode with one-way action");
+        assert!(profile.is_manual());
+        assert_eq!(profile.volume_serial_number, None);
+        assert_eq!(profile.file_id_hex, None);
+        let error = store
+            .set_enabled(&profile.id, true)
+            .expect_err("manual mode must stay manual");
+        assert_eq!(error.code, "INVALID_REQUEST");
+
+        let exported = store.export_json().unwrap();
+        assert!(!exported.contains("executablePath"));
+        assert!(!exported.contains("volumeSerialNumber"));
+        assert!(!exported.contains("fileIdHex"));
+    }
+
+    #[test]
+    fn one_way_launch_action_is_rejected_for_automatic_game_profile() {
+        let (store, _dir) = temp_store();
+        let error = store
+            .create(CreateProfileRequest {
+                name: "ゲーム".to_owned(),
+                executable_path: Some(notepad()),
+                conflict_policy: None,
+                actions: vec![StoredProfileAction {
+                    action_id: "setup.launch_apps".to_owned(),
+                    parameters: serde_json::json!({"bundle": "study"}),
+                }],
+            })
+            .expect_err("one-way app launch must not enter automatic profile");
+        assert_eq!(error.code, "INVALID_REQUEST");
     }
 }

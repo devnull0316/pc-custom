@@ -62,7 +62,17 @@ pub fn to_planned_action(stored: &StoredProfileAction) -> CoreResult<PlannedActi
 pub fn to_game_profile(stored: &StoredProfile) -> CoreResult<GameProfile> {
     let id = Uuid::parse_str(&stored.id)
         .map_err(|_| CoreError::invalid_request("プロファイルIDが不正です。"))?;
-    let file_id_bytes = hex::decode(&stored.file_id_hex)
+    let executable_path = stored.executable_path.as_ref().ok_or_else(|| {
+        CoreError::invalid_request("手動モードはプロセス監視の対象ではありません。")
+    })?;
+    let volume_serial_number = stored
+        .volume_serial_number
+        .ok_or_else(|| CoreError::invalid_request("プロファイルの本人性情報が不正です。"))?;
+    let file_id_hex = stored
+        .file_id_hex
+        .as_ref()
+        .ok_or_else(|| CoreError::invalid_request("プロファイルの本人性情報が不正です。"))?;
+    let file_id_bytes = hex::decode(file_id_hex)
         .ok()
         .filter(|bytes| bytes.len() == 16)
         .ok_or_else(|| CoreError::invalid_request("プロファイルの本人性情報が不正です。"))?;
@@ -89,9 +99,9 @@ pub fn to_game_profile(stored: &StoredProfile) -> CoreResult<GameProfile> {
         id: GameProfileId(id),
         name: stored.name.clone(),
         binding: ProfileBinding {
-            canonical_path: stored.executable_path.clone(),
+            canonical_path: executable_path.clone(),
             file_identity: ProcessFileIdentity {
-                volume_serial_number: stored.volume_serial_number,
+                volume_serial_number,
                 file_id,
             },
             tracking: TrackingMode::ExactExecutable,
@@ -285,15 +295,16 @@ mod tests {
         StoredProfile {
             id: Uuid::from_u128(42).to_string(),
             name: "テスト".to_owned(),
-            executable_path: r"C:\Games\Example\game.exe".to_owned(),
-            volume_serial_number: 7,
-            file_id_hex: "0102030405060708090a0b0c0d0e0f10".to_owned(),
+            executable_path: Some(r"C:\Games\Example\game.exe".to_owned()),
+            volume_serial_number: Some(7),
+            file_id_hex: Some("0102030405060708090a0b0c0d0e0f10".to_owned()),
             conflict_policy: "abort_profile".to_owned(),
             automation_enabled: enabled,
             actions: vec![StoredProfileAction {
                 action_id: "theme.color_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "dark" }),
             }],
+            active_run: None,
         }
     }
 
@@ -433,7 +444,7 @@ mod tests {
         };
         let mut runtime = ProfileRuntime::new(sink);
         let mut bad = stored(true);
-        bad.file_id_hex = "zz".to_owned(); // 不正な本人性
+        bad.file_id_hex = Some("zz".to_owned()); // 不正な本人性
         let skipped = runtime.sync(&[bad]);
         assert_eq!(skipped.len(), 1);
     }

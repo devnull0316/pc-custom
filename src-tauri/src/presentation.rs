@@ -7,11 +7,12 @@ use uuid::Uuid;
 
 use crate::{
     action::{
-        ActionId, ActionKind, ActionMetadata, ActionParameters, ActionRiskLevel,
+        ActionId, ActionKind, ActionMetadata, ActionParameters, ActionRiskLevel, AppLaunchBundle,
         ChangeExplanation, DetectedState, ExplorerLaunchTarget, GameReadinessObservation,
-        MethodClass, ObservedValue, PowerScheme, ReadinessComponent, StartLayout, StartupEntrySource,
-        StartupEntryStatus, StartupInventoryObservation, TaskbarAlignment, TaskbarGroupingMode,
-        TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode, ThemeObservation,
+        MethodClass, ObservedValue, PowerScheme, ReadinessComponent, StartLayout,
+        StartupEntrySource, StartupEntryStatus, StartupInventoryObservation, TaskbarAlignment,
+        TaskbarGroupingMode, TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode,
+        ThemeObservation,
     },
     compatibility::{CompatibilityDecision, CompatibilityMode, OsIdentity},
     error::{CoreError, CoreResult},
@@ -142,12 +143,16 @@ pub fn action_presentation(
     let kind = match metadata.kind {
         ActionKind::Persistent => "persistent",
         ActionKind::Session => "session",
+        ActionKind::OneWay => "one_way",
         ActionKind::Observation => "observation",
         ActionKind::Guided => "guided",
     };
     let availability = match compatibility.mode {
         CompatibilityMode::TestedMutable
-            if matches!(metadata.kind, ActionKind::Persistent | ActionKind::Session) =>
+            if matches!(
+                metadata.kind,
+                ActionKind::Persistent | ActionKind::Session | ActionKind::OneWay
+            ) =>
         {
             "mutable"
         }
@@ -156,16 +161,23 @@ pub fn action_presentation(
         {
             "read_only"
         }
-        CompatibilityMode::TestedDetectOnly | CompatibilityMode::UnknownBuild => {
-            "detect_only"
-        }
+        CompatibilityMode::TestedDetectOnly | CompatibilityMode::UnknownBuild => "detect_only",
         CompatibilityMode::Unsupported => "blocked",
         _ => "blocked",
     };
-    let mut detail_points = if metadata.kind == ActionKind::Guided {
+    let mut detail_points = if metadata.kind == ActionKind::OneWay {
         vec![
-            "setterの一次資料と対象buildの実機UI試験が未承認のため、変更処理を実行しません。".to_owned(),
-            "表示するのは固定HKCU DWORDの保存値であり、Windows UIの有効状態を示しません。".to_owned(),
+            "固定allowlistの既知アプリだけを、シェルを介さず直接起動します。".to_owned(),
+            "既に起動中のアプリは二重起動しません。".to_owned(),
+            "起動したアプリを勝手に終了しないため、このActionは元に戻せません。".to_owned(),
+            "ゲームプロファイルの自動適用対象にはしません。".to_owned(),
+        ]
+    } else if metadata.kind == ActionKind::Guided {
+        vec![
+            "setterの一次資料と対象buildの実機UI試験が未承認のため、変更処理を実行しません。"
+                .to_owned(),
+            "表示するのは固定HKCU DWORDの保存値であり、Windows UIの有効状態を示しません。"
+                .to_owned(),
             "validate・backup・applyの各handlerで明示的に変更を拒否します。".to_owned(),
             "ゲームプロファイルの自動適用対象にはしません。".to_owned(),
         ]
@@ -200,9 +212,8 @@ pub fn action_presentation(
     if metadata.method_class == MethodClass::DocumentedRegistry
         && metadata.kind == ActionKind::Persistent
     {
-        detail_points.push(
-            "対象key自体が存在しない場合は、新しく作らず変更を停止します。".to_owned(),
-        );
+        detail_points
+            .push("対象key自体が存在しない場合は、新しく作らず変更を停止します。".to_owned());
         if !metadata.auto_apply_eligible {
             detail_points.push(
                 "自動検証の対象は固定HKCU値です。Windows UIへの反映は別途実機確認が必要です。"
@@ -283,8 +294,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
         DetectedState::NeedsRestart { value, evidence } => UiActionState {
             kind: "known".to_owned(),
             label: observed_label(action_id, &value),
-            detail: "設定値は確認できました。反映にはアプリ側の再読込が必要です。"
-                .to_owned(),
+            detail: "設定値は確認できました。反映にはアプリ側の再読込が必要です。".to_owned(),
             items: observed_items(&value),
             observed_at: Some(format_timestamp(evidence.observed_at_unix_ms)),
         },
@@ -314,8 +324,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
         DetectedState::Conflict { .. } => UiActionState {
             kind: "unknown".to_owned(),
             label: "別の変更を検出しました".to_owned(),
-            detail: "保存した適用値と現在値が異なるため、自動操作を止めています。"
-                .to_owned(),
+            detail: "保存した適用値と現在値が異なるため、自動操作を止めています。".to_owned(),
             items: Vec::new(),
             observed_at: None,
         },
@@ -346,12 +355,9 @@ pub fn preview_change(
     }
 }
 
-pub fn parse_action_request(
-    request: PreviewActionRequest,
-) -> CoreResult<ActionParameters> {
-    let action_id = ActionId::from_str(&request.action_id).map_err(|_| {
-        CoreError::invalid_request("登録されていないAction IDは実行できません。")
-    })?;
+pub fn parse_action_request(request: PreviewActionRequest) -> CoreResult<ActionParameters> {
+    let action_id = ActionId::from_str(&request.action_id)
+        .map_err(|_| CoreError::invalid_request("登録されていないAction IDは実行できません。"))?;
     let mut parameters = request.parameters;
     if let Some(value) = parameters.remove("keepDisplayOn") {
         if parameters
@@ -367,9 +373,8 @@ pub fn parse_action_request(
         "action_id": action_id.as_str(),
         "parameters": Value::Object(parameters),
     });
-    serde_json::from_value(tagged).map_err(|_| {
-        CoreError::invalid_request("Actionの指定内容がschemaに一致しません。")
-    })
+    serde_json::from_value(tagged)
+        .map_err(|_| CoreError::invalid_request("Actionの指定内容がschemaに一致しません。"))
 }
 
 pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
@@ -381,26 +386,16 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::PowerActiveSchemeSwitch => ActionParameters::PowerActiveSchemeSwitch {
             scheme: PowerScheme::Balanced,
         },
-        ActionId::ExplorerShowExtensions => {
-            ActionParameters::ExplorerShowExtensions { show: true }
-        }
-        ActionId::ExplorerShowHidden => {
-            ActionParameters::ExplorerShowHidden { show: true }
-        }
-        ActionId::ExplorerClockSeconds => {
-            ActionParameters::ExplorerClockSeconds { show: true }
-        }
+        ActionId::ExplorerShowExtensions => ActionParameters::ExplorerShowExtensions { show: true },
+        ActionId::ExplorerShowHidden => ActionParameters::ExplorerShowHidden { show: true },
+        ActionId::ExplorerClockSeconds => ActionParameters::ExplorerClockSeconds { show: true },
         ActionId::AppearanceTransparency => {
             ActionParameters::AppearanceTransparency { enabled: true }
         }
         ActionId::TaskbarTaskView => ActionParameters::TaskbarTaskView { show: true },
         ActionId::TaskbarWidgets => ActionParameters::TaskbarWidgets { show: true },
-        ActionId::ExplorerItemCheckboxes => {
-            ActionParameters::ExplorerItemCheckboxes { show: true }
-        }
-        ActionId::ExplorerCompactView => {
-            ActionParameters::ExplorerCompactView { enabled: true }
-        }
+        ActionId::ExplorerItemCheckboxes => ActionParameters::ExplorerItemCheckboxes { show: true },
+        ActionId::ExplorerCompactView => ActionParameters::ExplorerCompactView { enabled: true },
         ActionId::ThemeColorMode => ActionParameters::ThemeColorMode {
             mode: ThemeColorMode::Dark,
         },
@@ -415,31 +410,19 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::StartLayout => ActionParameters::StartLayout {
             layout: StartLayout::MorePins,
         },
-        ActionId::StartRecommendations => {
-            ActionParameters::StartRecommendations { enabled: false }
-        }
+        ActionId::StartRecommendations => ActionParameters::StartRecommendations { enabled: false },
         ActionId::ExplorerLaunchTarget => ActionParameters::ExplorerLaunchTarget {
             target: ExplorerLaunchTarget::ThisPc,
         },
-        ActionId::ExplorerRecentFiles => {
-            ActionParameters::ExplorerRecentFiles { show: true }
-        }
+        ActionId::ExplorerRecentFiles => ActionParameters::ExplorerRecentFiles { show: true },
         ActionId::TaskbarButtonGrouping => ActionParameters::TaskbarButtonGrouping {
             mode: TaskbarGroupingMode::WhenFull,
         },
         ActionId::TaskbarFlashing => ActionParameters::TaskbarFlashing { enabled: true },
-        ActionId::TaskbarShareWindow => {
-            ActionParameters::TaskbarShareWindow { enabled: true }
-        }
-        ActionId::TaskbarShowDesktop => {
-            ActionParameters::TaskbarShowDesktop { enabled: true }
-        }
-        ActionId::SearchRecentOnHover => {
-            ActionParameters::SearchRecentOnHover { enabled: false }
-        }
-        ActionId::TaskbarMultiMonitor => {
-            ActionParameters::TaskbarMultiMonitor { enabled: true }
-        }
+        ActionId::TaskbarShareWindow => ActionParameters::TaskbarShareWindow { enabled: true },
+        ActionId::TaskbarShowDesktop => ActionParameters::TaskbarShowDesktop { enabled: true },
+        ActionId::SearchRecentOnHover => ActionParameters::SearchRecentOnHover { enabled: false },
+        ActionId::TaskbarMultiMonitor => ActionParameters::TaskbarMultiMonitor { enabled: true },
         ActionId::TaskbarMultiMonitorMode => ActionParameters::TaskbarMultiMonitorMode {
             mode: TaskbarMultiMonitorMode::WindowMonitor,
         },
@@ -448,9 +431,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
                 mode: TaskbarGroupingMode::WhenFull,
             }
         }
-        ActionId::StartShowAllPins => {
-            ActionParameters::StartShowAllPins { enabled: true }
-        }
+        ActionId::StartShowAllPins => ActionParameters::StartShowAllPins { enabled: true },
         ActionId::StartRecentApps => ActionParameters::StartRecentApps { show: true },
         ActionId::AppearanceAccentStartTaskbar => {
             ActionParameters::AppearanceAccentStartTaskbar { enabled: true }
@@ -458,9 +439,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::AppearanceAccentTitleBars => {
             ActionParameters::AppearanceAccentTitleBars { enabled: true }
         }
-        ActionId::AppearanceAutoAccent => {
-            ActionParameters::AppearanceAutoAccent { enabled: true }
-        }
+        ActionId::AppearanceAutoAccent => ActionParameters::AppearanceAutoAccent { enabled: true },
         ActionId::GamesGameMode => ActionParameters::GamesGameMode { enabled: true },
         ActionId::GamesControllerGameBar => {
             ActionParameters::GamesControllerGameBar { enabled: false }
@@ -472,16 +451,12 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::NotificationsWeakCharger => {
             ActionParameters::NotificationsWeakCharger { enabled: true }
         }
-        ActionId::InputAutocorrect => {
-            ActionParameters::InputAutocorrect { enabled: true }
-        }
+        ActionId::InputAutocorrect => ActionParameters::InputAutocorrect { enabled: true },
         ActionId::InputDoubleSpacePeriod => {
             ActionParameters::InputDoubleSpacePeriod { enabled: true }
         }
         ActionId::InputAutoShift => ActionParameters::InputAutoShift { enabled: true },
-        ActionId::InputVoiceTypingKey => {
-            ActionParameters::InputVoiceTypingKey { enabled: true }
-        }
+        ActionId::InputVoiceTypingKey => ActionParameters::InputVoiceTypingKey { enabled: true },
         ActionId::InputMultilingualSuggestions => {
             ActionParameters::InputMultilingualSuggestions { enabled: true }
         }
@@ -493,18 +468,12 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::ExplorerNavExpandCurrent => {
             ActionParameters::ExplorerNavExpandCurrent { enabled: true }
         }
-        ActionId::ExplorerNavShowAll => {
-            ActionParameters::ExplorerNavShowAll { enabled: true }
-        }
+        ActionId::ExplorerNavShowAll => ActionParameters::ExplorerNavShowAll { enabled: true },
         ActionId::ExplorerSeparateProcess => {
             ActionParameters::ExplorerSeparateProcess { enabled: true }
         }
-        ActionId::ExplorerIconsOnly => {
-            ActionParameters::ExplorerIconsOnly { enabled: false }
-        }
-        ActionId::ExplorerDriveLetters => {
-            ActionParameters::ExplorerDriveLetters { show: true }
-        }
+        ActionId::ExplorerIconsOnly => ActionParameters::ExplorerIconsOnly { enabled: false },
+        ActionId::ExplorerDriveLetters => ActionParameters::ExplorerDriveLetters { show: true },
         ActionId::ExplorerPreviewHandlers => {
             ActionParameters::ExplorerPreviewHandlers { enabled: true }
         }
@@ -527,6 +496,10 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::AppearanceWindowColor => ActionParameters::AppearanceWindowColor {
             color: crate::action::WindowColorPreset::WindowsBlue,
         },
+        ActionId::SetupLaunchApps => ActionParameters::SetupLaunchApps {
+            bundle: AppLaunchBundle::Study,
+        },
+        ActionId::SetupWindowsUpdateStatus => ActionParameters::SetupWindowsUpdateStatus {},
     })
 }
 
@@ -541,6 +514,7 @@ pub fn listing_parameters(action_id: ActionId) -> Option<ActionParameters> {
             | ActionId::StorageTempFilesCheck
             | ActionId::AppearanceAccentColorCheck
             | ActionId::GamesReadinessCheck
+            | ActionId::SetupWindowsUpdateStatus
     ) {
         None
     } else {
@@ -613,7 +587,10 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::GamesReadinessCheck
         | ActionId::GamesGameMode
         | ActionId::GamesControllerGameBar => "games",
-        ActionId::DevicesAutoplay | ActionId::SetupStartupInventory => "setup",
+        ActionId::DevicesAutoplay
+        | ActionId::SetupStartupInventory
+        | ActionId::SetupLaunchApps
+        | ActionId::SetupWindowsUpdateStatus => "setup",
         ActionId::StorageFreeSpaceCheck | ActionId::StorageTempFilesCheck => "storage",
         ActionId::AppearanceAccentColorCheck | ActionId::AppearanceWindowColor => "appearance",
         ActionId::NotificationsUsbErrors
@@ -629,54 +606,36 @@ fn category_for(action_id: ActionId) -> &'static str {
 
 fn audience_for(action_id: ActionId) -> &'static str {
     match action_id {
-        ActionId::SessionPreventSleep => {
-            "長い作業やゲーム中に、自動スリープを避けたい人向け"
-        }
+        ActionId::SessionPreventSleep => "長い作業やゲーム中に、自動スリープを避けたい人向け",
         ActionId::PowerActiveSchemeCheck => "現在の電源構成を変更せず確認したい人向け",
         ActionId::PowerActiveSchemeSwitch => {
             "Windows公開Power APIで電源プランを明示的に選びたい人向け"
         }
-        ActionId::ExplorerShowExtensions => {
-            "ファイルの種類を見分け、誤操作を減らしたい人向け"
-        }
+        ActionId::ExplorerShowExtensions => "ファイルの種類を見分け、誤操作を減らしたい人向け",
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
         ActionId::ExplorerClockSeconds => "タスクバーの時計で秒まで確認したい人向け",
         ActionId::AppearanceTransparency => "透明効果のオン・オフを切り替えたい人向け",
         ActionId::TaskbarTaskView => "タスクビューボタンの表示を切り替えたい人向け",
         ActionId::TaskbarWidgets => "ウィジェットボタンの表示を切り替えたい人向け",
-        ActionId::ExplorerItemCheckboxes => {
-            "チェックボックスでの複数選択を切り替えたい人向け"
-        }
-        ActionId::ExplorerCompactView => {
-            "一覧の行間（コンパクト表示）を切り替えたい人向け"
-        }
+        ActionId::ExplorerItemCheckboxes => "チェックボックスでの複数選択を切り替えたい人向け",
+        ActionId::ExplorerCompactView => "一覧の行間（コンパクト表示）を切り替えたい人向け",
         ActionId::ThemeColorMode => "Windowsとアプリの明暗を揃えたい人向け",
-        ActionId::GamesProcessWatch => {
-            "登録したゲームの起動と終了だけを安全に検知したい人向け"
-        }
+        ActionId::GamesProcessWatch => "登録したゲームの起動と終了だけを安全に検知したい人向け",
         ActionId::GamesReadinessCheck => {
             "ゲーム前の表示・電源・容量・音声と設定値の目安を変更せず確認したい人向け"
         }
-        ActionId::TaskbarSearchMode => {
-            "タスクバーの検索表示を自分の使い方に合わせたい人向け"
-        }
+        ActionId::TaskbarSearchMode => "タスクバーの検索表示を自分の使い方に合わせたい人向け",
         ActionId::TaskbarAlignment => "タスクバーの配置を左または中央から選びたい人向け",
         ActionId::StartLayout => "スタートのピンとおすすめの比率を調整したい人向け",
         ActionId::StartRecommendations => "スタートのおすすめ表示を減らしたい人向け",
         ActionId::ExplorerLaunchTarget => "Explorerを開いた直後の場所を選びたい人向け",
-        ActionId::ExplorerRecentFiles => {
-            "Explorerの最近使ったファイル表示を管理したい人向け"
-        }
+        ActionId::ExplorerRecentFiles => "Explorerの最近使ったファイル表示を管理したい人向け",
         ActionId::TaskbarButtonGrouping | ActionId::TaskbarSecondaryButtonGrouping => {
             "タスクバーボタンの結合方法を選びたい人向け"
         }
         ActionId::TaskbarFlashing => "タスクバーアプリの点滅表示を調整したい人向け",
-        ActionId::TaskbarShareWindow => {
-            "対応アプリのウィンドウ共有導線を管理したい人向け"
-        }
-        ActionId::TaskbarShowDesktop => {
-            "タスクバー右端のデスクトップ表示操作を管理したい人向け"
-        }
+        ActionId::TaskbarShareWindow => "対応アプリのウィンドウ共有導線を管理したい人向け",
+        ActionId::TaskbarShowDesktop => "タスクバー右端のデスクトップ表示操作を管理したい人向け",
         ActionId::SearchRecentOnHover => "検索アイコンに触れたときの動作を選びたい人向け",
         ActionId::TaskbarMultiMonitor | ActionId::TaskbarMultiMonitorMode => {
             "複数モニターのタスクバー表示を整えたい人向け"
@@ -685,9 +644,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::StartRecentApps => "スタートの最近追加したアプリ表示を管理したい人向け",
         ActionId::AppearanceAccentStartTaskbar
         | ActionId::AppearanceAccentTitleBars
-        | ActionId::AppearanceAutoAccent => {
-            "Windowsのアクセント色の使われ方を整えたい人向け"
-        }
+        | ActionId::AppearanceAutoAccent => "Windowsのアクセント色の使われ方を整えたい人向け",
         ActionId::GamesGameMode => "Windows標準のGame Modeを明示的に管理したい人向け",
         ActionId::GamesControllerGameBar => {
             "コントローラーからGame Barを開く操作を管理したい人向け"
@@ -700,9 +657,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
         | ActionId::InputDoubleSpacePeriod
         | ActionId::InputAutoShift
         | ActionId::InputVoiceTypingKey
-        | ActionId::InputMultilingualSuggestions => {
-            "タッチキーボードや入力候補を整えたい人向け"
-        }
+        | ActionId::InputMultilingualSuggestions => "タッチキーボードや入力候補を整えたい人向け",
         ActionId::ExplorerStatusBar
         | ActionId::ExplorerInfoTips
         | ActionId::ExplorerHideEmptyDrives
@@ -713,29 +668,23 @@ fn audience_for(action_id: ActionId) -> &'static str {
         | ActionId::ExplorerDriveLetters
         | ActionId::ExplorerPreviewHandlers
         | ActionId::ExplorerSharingWizard
-        | ActionId::ExplorerAlwaysShowMenus => {
-            "Explorerの表示や操作を細かく整えたい人向け"
-        }
-        ActionId::AppearanceTaskbarAnimations => {
-            "タスクバーの視覚アニメーションを選びたい人向け"
-        }
-        ActionId::NotificationsToastBanners => {
-            "Windowsの通知バナー表示を管理したい人向け"
-        }
+        | ActionId::ExplorerAlwaysShowMenus => "Explorerの表示や操作を細かく整えたい人向け",
+        ActionId::AppearanceTaskbarAnimations => "タスクバーの視覚アニメーションを選びたい人向け",
+        ActionId::NotificationsToastBanners => "Windowsの通知バナー表示を管理したい人向け",
         ActionId::SetupStartupInventory => {
             "固定RunキーとStartupフォルダーの登録項目を変更せず把握したい人向け"
         }
-        ActionId::StorageFreeSpaceCheck => {
-            "システムドライブの空き容量を変更せず確認したい人向け"
-        }
-        ActionId::StorageTempFilesCheck => {
-            "削除前にユーザー一時ファイルの規模だけ確認したい人向け"
-        }
+        ActionId::StorageFreeSpaceCheck => "システムドライブの空き容量を変更せず確認したい人向け",
+        ActionId::StorageTempFilesCheck => "削除前にユーザー一時ファイルの規模だけ確認したい人向け",
         ActionId::AppearanceAccentColorCheck => {
             "いまWindowsが使っている色を、変更せずに確かめたい人向け"
         }
         ActionId::AppearanceWindowColor => {
             "タイトルバーなどの色を、決められた色から選んで変えたい人向け"
+        }
+        ActionId::SetupLaunchApps => "勉強や作業を始めるアプリを一度に開きたい人向け",
+        ActionId::SetupWindowsUpdateStatus => {
+            "更新確認日時と再起動保留だけを変更せず確認したい人向け"
         }
     }
 }
@@ -773,9 +722,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::TaskbarMultiMonitorMode => "選択した複数モニターのアプリボタン表示先",
         ActionId::StartShowAllPins => "選択したすべてのピンの初期表示",
         ActionId::StartRecentApps => "選択した最近追加したアプリ表示",
-        ActionId::AppearanceAccentStartTaskbar => {
-            "選択したスタートとタスクバーのアクセント表示"
-        }
+        ActionId::AppearanceAccentStartTaskbar => "選択したスタートとタスクバーのアクセント表示",
         ActionId::AppearanceAccentTitleBars => "選択したタイトルバーと枠のアクセント表示",
         ActionId::AppearanceAutoAccent => "選択した背景からのアクセント自動選択",
         ActionId::GamesGameMode => "選択したWindows Game Modeの状態",
@@ -806,6 +753,8 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::StorageTempFilesCheck => "削除せず、ユーザー一時ファイルを上限付き集計",
         ActionId::AppearanceAccentColorCheck => "公開APIで現在の配色を読み取り（変更なし）",
         ActionId::AppearanceWindowColor => "HKCU DWMの色2値を1トランザクションで変更",
+        ActionId::SetupLaunchApps => "固定allowlistのアプリを、起動中でなければ直接開く",
+        ActionId::SetupWindowsUpdateStatus => "Windows Update Agentの状態を変更せず確認",
     }
 }
 
@@ -852,15 +801,15 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::StorageFreeSpaceCheck => {
             "GetWindowsDirectoryWとGetDiskFreeSpaceExWによる読み取り"
         }
-        ActionId::StorageTempFilesCheck => {
-            "GetTempPath2Wとreparse非追跡・上限付きmetadata走査"
-        }
-        ActionId::AppearanceAccentColorCheck => {
-            "公開APIのDwmGetColorizationColorによる読み取り"
-        }
+        ActionId::StorageTempFilesCheck => "GetTempPath2Wとreparse非追跡・上限付きmetadata走査",
+        ActionId::AppearanceAccentColorCheck => "公開APIのDwmGetColorizationColorによる読み取り",
         ActionId::GamesReadinessCheck => {
             "Windows公開APIと登録済み固定HKCU設定値による7項目の読み取り"
         }
+        ActionId::SetupLaunchApps => {
+            "App Pathsと固定System32候補を検証し、Command::spawnで直接起動"
+        }
+        ActionId::SetupWindowsUpdateStatus => "Windows Update Agent公開COMプロパティの読み取り",
         _ => method_name(method),
     }
 }
@@ -875,9 +824,7 @@ fn update_impact(value: &str) -> &'static str {
 
 fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
     match value {
-        ObservedValue::RegistryDword { configured } => {
-            registry_dword_label(action_id, *configured)
-        }
+        ObservedValue::RegistryDword { configured } => registry_dword_label(action_id, *configured),
         ObservedValue::Theme(theme) => match theme {
             ThemeObservation::Light => "ライト表示".to_owned(),
             ThemeObservation::Dark => "ダーク表示".to_owned(),
@@ -908,7 +855,11 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
         ObservedValue::StartupInventory(inventory) => format!(
             "確認対象のスタートアップ {}件{}",
             inventory.entries.len(),
-            if inventory.truncated { "（上限到達）" } else { "" }
+            if inventory.truncated {
+                "（上限到達）"
+            } else {
+                ""
+            }
         ),
         ObservedValue::SystemDriveSpace(space) => format!(
             "{} 利用可能 {} / 総容量 {}",
@@ -920,7 +871,11 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             "一時ファイル {}件・{}{}",
             temp.file_count,
             format_bytes(temp.total_bytes),
-            if temp.truncated { "（部分集計）" } else { "" }
+            if temp.truncated {
+                "（部分集計）"
+            } else {
+                ""
+            }
         ),
         ObservedValue::GameReadiness(readiness) => {
             let statuses = [
@@ -935,9 +890,25 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             let known = statuses.iter().filter(|status| **status == 0).count();
             let unknown = statuses.iter().filter(|status| **status == 1).count();
             let unconfigured = statuses.iter().filter(|status| **status == 2).count();
-            format!(
-                "ゲーム準備: 確認 {known} / 不明 {unknown} / 未設定 {unconfigured}"
-            )
+            format!("ゲーム準備: 確認 {known} / 不明 {unknown} / 未設定 {unconfigured}")
+        }
+        ObservedValue::KnownApps(value) => {
+            let running = value
+                .apps
+                .iter()
+                .filter(|app| app.state == crate::action::KnownAppState::Running)
+                .count();
+            format!("アプリ {running} / {} 起動中", value.apps.len())
+        }
+        ObservedValue::WindowsUpdateStatus(value) => {
+            let known = usize::from(matches!(
+                value.last_checked_local,
+                ReadinessComponent::Known { .. }
+            )) + usize::from(matches!(
+                value.restart_pending,
+                ReadinessComponent::Known { .. }
+            ));
+            format!("Windows Update: {known} / 2項目を確認")
         }
         ObservedValue::AccentColor { hex, .. } => format!("アクセントカラー {hex}"),
         ObservedValue::NoOsChange => "OS設定の変更なし".to_owned(),
@@ -968,24 +939,17 @@ fn registry_dword_label(action_id: ActionId, configured: Option<u32>) -> String 
         (ActionId::StartLayout, Some(1)) => "スタートのピンを多く表示".to_owned(),
         (ActionId::StartLayout, Some(2)) => "スタートのおすすめを多く表示".to_owned(),
         (ActionId::ExplorerLaunchTarget, Some(1)) => "ExplorerはPCから開始".to_owned(),
-        (ActionId::ExplorerLaunchTarget, Some(2)) => {
-            "Explorerはホームから開始".to_owned()
+        (ActionId::ExplorerLaunchTarget, Some(2)) => "Explorerはホームから開始".to_owned(),
+        (ActionId::ExplorerLaunchTarget, Some(3)) => "Explorerはダウンロードから開始".to_owned(),
+        (ActionId::TaskbarButtonGrouping | ActionId::TaskbarSecondaryButtonGrouping, Some(0)) => {
+            "タスクバーボタンを常に結合".to_owned()
         }
-        (ActionId::ExplorerLaunchTarget, Some(3)) => {
-            "Explorerはダウンロードから開始".to_owned()
+        (ActionId::TaskbarButtonGrouping | ActionId::TaskbarSecondaryButtonGrouping, Some(1)) => {
+            "いっぱいのときにタスクバーボタンを結合".to_owned()
         }
-        (
-            ActionId::TaskbarButtonGrouping | ActionId::TaskbarSecondaryButtonGrouping,
-            Some(0),
-        ) => "タスクバーボタンを常に結合".to_owned(),
-        (
-            ActionId::TaskbarButtonGrouping | ActionId::TaskbarSecondaryButtonGrouping,
-            Some(1),
-        ) => "いっぱいのときにタスクバーボタンを結合".to_owned(),
-        (
-            ActionId::TaskbarButtonGrouping | ActionId::TaskbarSecondaryButtonGrouping,
-            Some(2),
-        ) => "タスクバーボタンを結合しない".to_owned(),
+        (ActionId::TaskbarButtonGrouping | ActionId::TaskbarSecondaryButtonGrouping, Some(2)) => {
+            "タスクバーボタンを結合しない".to_owned()
+        }
         (ActionId::TaskbarMultiMonitorMode, Some(0)) => {
             "すべてのタスクバーにアプリボタンを表示".to_owned()
         }
@@ -1031,6 +995,8 @@ fn observed_detail(value: &ObservedValue) -> String {
             temp.skipped_reparse_points, temp.unreadable_entries
         ),
         ObservedValue::GameReadiness(readiness) => game_readiness_detail(readiness),
+        ObservedValue::KnownApps(_) => "固定allowlistの既知アプリについて、App Paths解決可否とプロセス名だけを確認します。".to_owned(),
+        ObservedValue::WindowsUpdateStatus(_) => "Windows Update Agentの読み取り専用プロパティです。Updateの停止・変更・検索開始は行いません。".to_owned(),
         ObservedValue::AccentColor { hex, opaque_blend } => format!(
             "Windowsが現在使っている色は {hex} です。透明の混ぜ方: {}。この値は読み取るだけで変更しません。",
             if *opaque_blend { "不透明" } else { "半透明" }
@@ -1060,15 +1026,59 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
             })
             .collect(),
         // ゲーム準備チェックは1行の要約ではなく、項目ごとに並べて見せる（BRIEF §4 の準備確認画面）。
+        ObservedValue::KnownApps(value) => value
+            .apps
+            .iter()
+            .map(|app| {
+                let state = match app.state {
+                    crate::action::KnownAppState::Running => "起動中",
+                    crate::action::KnownAppState::NotRunning => "未起動",
+                    crate::action::KnownAppState::Unavailable => "利用不可",
+                };
+                format!("{} — {state}", app.name)
+            })
+            .collect(),
+        ObservedValue::WindowsUpdateStatus(value) => vec![
+            format!(
+                "最後に更新を確認した日時 — {}",
+                match &value.last_checked_local {
+                    ReadinessComponent::Known { value } => format!("{value}（ローカル時刻）"),
+                    _ => "不明".to_owned(),
+                }
+            ),
+            format!(
+                "再起動保留 — {}",
+                match &value.restart_pending {
+                    ReadinessComponent::Known { value: true } => "あり",
+                    ReadinessComponent::Known { value: false } => "なし",
+                    _ => "不明",
+                }
+            ),
+        ],
         ObservedValue::GameReadiness(readiness) => {
             vec![
-                format!("画面のリフレッシュレート — {}", readiness_line_refresh(readiness)),
-                format!("HDR（Advanced Color） — {}", readiness_line_advanced_color(readiness)),
-                format!("ゲームモードの設定値 — {}", configured_toggle_hint_label(&readiness.game_mode)),
+                format!(
+                    "画面のリフレッシュレート — {}",
+                    readiness_line_refresh(readiness)
+                ),
+                format!(
+                    "HDR（Advanced Color） — {}",
+                    readiness_line_advanced_color(readiness)
+                ),
+                format!(
+                    "ゲームモードの設定値 — {}",
+                    configured_toggle_hint_label(&readiness.game_mode)
+                ),
                 format!("電源プラン — {}", readiness_line_power(readiness)),
-                format!("システムドライブの空き — {}", readiness_line_space(readiness)),
+                format!(
+                    "システムドライブの空き — {}",
+                    readiness_line_space(readiness)
+                ),
                 format!("既定の音声出力 — {}", readiness_line_audio(readiness)),
-                format!("通知の設定値 — {}", configured_toggle_hint_label(&readiness.toast_notifications)),
+                format!(
+                    "通知の設定値 — {}",
+                    configured_toggle_hint_label(&readiness.toast_notifications)
+                ),
             ]
         }
         _ => Vec::new(),
@@ -1098,7 +1108,11 @@ fn readiness_line_advanced_color(r: &GameReadinessObservation) -> String {
 /// このプロダクトは専門用語を見せない方針なので、生のGUIDを画面に出さない。
 /// OEM独自プランなど未知のGUIDは、推測せず「その他のプラン」と表示する。
 pub fn power_scheme_display_name(guid: &str) -> String {
-    let normalized = guid.trim().trim_start_matches('{').trim_end_matches('}').to_ascii_lowercase();
+    let normalized = guid
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .to_ascii_lowercase();
     match normalized.as_str() {
         "381b4222-f694-41f0-9685-ff5bb260df2e" => "バランス".to_owned(),
         "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c" => "高パフォーマンス".to_owned(),
@@ -1443,12 +1457,58 @@ mod tests {
     }
 
     #[test]
+    fn launch_apps_schema_and_presentation_are_fail_closed_and_one_way() {
+        let valid = parse_action_request(PreviewActionRequest {
+            action_id: "setup.launch_apps".to_owned(),
+            parameters: serde_json::from_value(serde_json::json!({ "bundle": "study" }))
+                .expect("parameter object"),
+        })
+        .expect("fixed bundle");
+        assert!(matches!(
+            valid,
+            ActionParameters::SetupLaunchApps {
+                bundle: AppLaunchBundle::Study
+            }
+        ));
+
+        for parameters in [
+            serde_json::json!({ "bundle": "unknown" }),
+            serde_json::json!({ "bundle": "study", "path": "C:\\arbitrary.exe" }),
+            serde_json::json!({ "bundle": "study", "arguments": ["user-value"] }),
+        ] {
+            let error = parse_action_request(PreviewActionRequest {
+                action_id: "setup.launch_apps".to_owned(),
+                parameters: serde_json::from_value(parameters).expect("parameter object"),
+            })
+            .expect_err("unknown bundle, path, or arguments must fail closed");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
+
+        let metadata = ACTION_REGISTRY
+            .get(ActionId::SetupLaunchApps)
+            .expect("launch action registered")
+            .metadata();
+        let ui = action_presentation(
+            metadata,
+            CompatibilityCatalog::decision_for_build(26_200),
+            None,
+        );
+        assert_eq!(ui.category, "setup");
+        assert_eq!(ui.kind, "one_way");
+        assert_eq!(ui.availability, "mutable");
+        assert!(!ui.auto_apply_eligible);
+        assert!(!ui.reversible);
+        assert!(!ui.requires_admin);
+        assert!(!ui.requires_restart);
+    }
+    #[test]
     fn expensive_observations_are_explicit_only_in_catalog_snapshots() {
         for id in [
             ActionId::SetupStartupInventory,
             ActionId::StorageFreeSpaceCheck,
             ActionId::StorageTempFilesCheck,
             ActionId::GamesReadinessCheck,
+            ActionId::SetupWindowsUpdateStatus,
         ] {
             assert!(listing_parameters(id).is_none());
             assert!(default_parameters(id).is_some());

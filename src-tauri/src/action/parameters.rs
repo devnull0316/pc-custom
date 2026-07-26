@@ -19,6 +19,14 @@ pub enum PowerScheme {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum AppLaunchBundle {
+    Study,
+    Work,
+    Creative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskbarSearchMode {
     Hidden,
     Icon,
@@ -209,6 +217,10 @@ pub enum ActionParameters {
     AppearanceAccentColorCheck {},
     #[serde(rename = "appearance.window_color")]
     AppearanceWindowColor { color: WindowColorPreset },
+    #[serde(rename = "setup.launch_apps")]
+    SetupLaunchApps { bundle: AppLaunchBundle },
+    #[serde(rename = "setup.windows_update_status")]
+    SetupWindowsUpdateStatus {},
 }
 
 impl ActionParameters {
@@ -241,14 +253,10 @@ impl ActionParameters {
             Self::SearchRecentOnHover { .. } => ActionId::SearchRecentOnHover,
             Self::TaskbarMultiMonitor { .. } => ActionId::TaskbarMultiMonitor,
             Self::TaskbarMultiMonitorMode { .. } => ActionId::TaskbarMultiMonitorMode,
-            Self::TaskbarSecondaryButtonGrouping { .. } => {
-                ActionId::TaskbarSecondaryButtonGrouping
-            }
+            Self::TaskbarSecondaryButtonGrouping { .. } => ActionId::TaskbarSecondaryButtonGrouping,
             Self::StartShowAllPins { .. } => ActionId::StartShowAllPins,
             Self::StartRecentApps { .. } => ActionId::StartRecentApps,
-            Self::AppearanceAccentStartTaskbar { .. } => {
-                ActionId::AppearanceAccentStartTaskbar
-            }
+            Self::AppearanceAccentStartTaskbar { .. } => ActionId::AppearanceAccentStartTaskbar,
             Self::AppearanceAccentTitleBars { .. } => ActionId::AppearanceAccentTitleBars,
             Self::AppearanceAutoAccent { .. } => ActionId::AppearanceAutoAccent,
             Self::GamesGameMode { .. } => ActionId::GamesGameMode,
@@ -260,9 +268,7 @@ impl ActionParameters {
             Self::InputDoubleSpacePeriod { .. } => ActionId::InputDoubleSpacePeriod,
             Self::InputAutoShift { .. } => ActionId::InputAutoShift,
             Self::InputVoiceTypingKey { .. } => ActionId::InputVoiceTypingKey,
-            Self::InputMultilingualSuggestions { .. } => {
-                ActionId::InputMultilingualSuggestions
-            }
+            Self::InputMultilingualSuggestions { .. } => ActionId::InputMultilingualSuggestions,
             Self::ExplorerStatusBar { .. } => ActionId::ExplorerStatusBar,
             Self::ExplorerInfoTips { .. } => ActionId::ExplorerInfoTips,
             Self::ExplorerHideEmptyDrives { .. } => ActionId::ExplorerHideEmptyDrives,
@@ -274,15 +280,15 @@ impl ActionParameters {
             Self::ExplorerPreviewHandlers { .. } => ActionId::ExplorerPreviewHandlers,
             Self::ExplorerSharingWizard { .. } => ActionId::ExplorerSharingWizard,
             Self::ExplorerAlwaysShowMenus { .. } => ActionId::ExplorerAlwaysShowMenus,
-            Self::AppearanceTaskbarAnimations { .. } => {
-                ActionId::AppearanceTaskbarAnimations
-            }
+            Self::AppearanceTaskbarAnimations { .. } => ActionId::AppearanceTaskbarAnimations,
             Self::NotificationsToastBanners { .. } => ActionId::NotificationsToastBanners,
             Self::SetupStartupInventory { .. } => ActionId::SetupStartupInventory,
             Self::StorageFreeSpaceCheck { .. } => ActionId::StorageFreeSpaceCheck,
             Self::StorageTempFilesCheck { .. } => ActionId::StorageTempFilesCheck,
             Self::AppearanceAccentColorCheck { .. } => ActionId::AppearanceAccentColorCheck,
             Self::AppearanceWindowColor { .. } => ActionId::AppearanceWindowColor,
+            Self::SetupLaunchApps { .. } => ActionId::SetupLaunchApps,
+            Self::SetupWindowsUpdateStatus { .. } => ActionId::SetupWindowsUpdateStatus,
         }
     }
 }

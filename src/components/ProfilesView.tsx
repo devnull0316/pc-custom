@@ -6,6 +6,7 @@ import type {
   CreateProfileRequest,
   DataMode,
   ImportPreviewItem,
+  JsonValue,
   StoredProfile,
 } from "../model";
 import { GameReadinessPanel } from "./GameReadinessPanel";
@@ -17,6 +18,9 @@ interface ProfilesViewProps {
   actions: readonly ActionPresentation[];
   busy: boolean;
   onCreate: (request: CreateProfileRequest) => void;
+  onParametersForAction: (actionId: string) => Record<string, JsonValue>;
+  onRun: (id: string) => void;
+  onRestore: (id: string) => void;
   onSetEnabled: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onOpenActions: () => void;
@@ -29,14 +33,19 @@ export function ProfilesView({
   actions,
   busy,
   onCreate,
+  onParametersForAction,
+  onRun,
+  onRestore,
   onSetEnabled,
   onDelete,
   onOpenActions,
   onChanged,
 }: ProfilesViewProps) {
+  const [mode, setMode] = useState<"game" | "manual">("game");
   const [name, setName] = useState("");
   const [exePath, setExePath] = useState("");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [launchBundle, setLaunchBundle] = useState<"study" | "work" | "creative">("study");
   const [exportedJson, setExportedJson] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
   const [previewItems, setPreviewItems] = useState<readonly ImportPreviewItem[] | null>(null);
@@ -88,17 +97,20 @@ export function ProfilesView({
   }
 
   const live = dataMode === "live";
-  // core metadataが明示的に許可したActionだけを自動適用候補へ出す。
   const selectable = useMemo(
-    () => actions.filter(
-      (action) => action.autoApplyEligible === true
-        && (action.kind === "persistent" || action.kind === "session"),
-    ),
-    [actions],
+    () => actions.filter((action) => {
+      if (action.availability !== "mutable") return false;
+      if (mode === "game") {
+        return action.autoApplyEligible === true
+          && (action.kind === "persistent" || action.kind === "session");
+      }
+      return action.kind === "persistent" || action.kind === "session" || action.kind === "one_way";
+    }),
+    [actions, mode],
   );
 
-  const canSubmit =
-    live && !busy && name.trim().length > 0 && exePath.trim().length > 0;
+  const canSubmit = live && !busy && name.trim().length > 0
+    && (mode === "manual" ? selected.size > 0 : exePath.trim().length > 0);
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -111,11 +123,17 @@ export function ProfilesView({
 
   function submit() {
     if (!canSubmit) return;
-    onCreate({
+    const request: CreateProfileRequest = {
       name: name.trim(),
-      executablePath: exePath.trim(),
-      actions: [...selected].map((actionId) => ({ actionId })),
-    });
+      actions: [...selected].map((actionId) => ({
+        actionId,
+        parameters: actionId === "setup.launch_apps"
+          ? { bundle: launchBundle }
+          : onParametersForAction(actionId),
+      })),
+    };
+    if (mode === "game") request.executablePath = exePath.trim();
+    onCreate(request);
     setName("");
     setExePath("");
     setSelected(new Set());
@@ -124,11 +142,11 @@ export function ProfilesView({
   return (
     <section className="profiles-view">
       <header className="view-header">
-        <span className="eyebrow">ゲームを快適にする</span>
-        <h1>ゲームプロファイル</h1>
+        <span className="eyebrow">利用場面を整える</span>
+        <h1>モード</h1>
         <p>
-          登録したゲームの起動を検知したら、選んだ準備を自動でまとめ、終了したら変更した項目だけを元へ戻します。
-          ゲームを速くする機能ではなく、通知やスリープなどの<strong>邪魔と設定ミスを減らす</strong>ためのものです。
+          ゲームは実行ファイルの起動・終了に合わせて自動実行できます。勉強・作業などは手動モードとして、
+          <strong>「いま実行」したときだけ</strong>選んだ準備をまとめ、実行した可逆項目だけを元へ戻せます。
         </p>
       </header>
 
@@ -150,10 +168,29 @@ export function ProfilesView({
           <h2>新しいプロファイル</h2>
           {/* Apple Shortcuts の「〜のとき、〜する」。入力するとそのまま文章になり、
               専門用語を読まなくても何が起きるか分かるようにする。 */}
+          <fieldset className="field">
+            <legend>モードの動かし方</legend>
+            <div className="action-picker">
+              <label className="action-pick">
+                <input checked={mode === "game"} disabled={!live || busy} name="profile-mode" onChange={() => { setMode("game"); setSelected(new Set()); }} type="radio" />
+                <span><strong>ゲーム（自動）</strong><small>登録した.exeの起動で適用し、終了で復元します。</small></span>
+              </label>
+              <label className="action-pick">
+                <input checked={mode === "manual"} disabled={!live || busy} name="profile-mode" onChange={() => { setMode("manual"); setSelected(new Set()); }} type="radio" />
+                <span><strong>勉強・作業など（手動）</strong><small>実行ファイルとは紐付けず、「いま実行」のときだけ適用します。</small></span>
+              </label>
+            </div>
+          </fieldset>
           <p className="automation-sentence">
-            <strong>{name.trim() || "このゲーム"}</strong> が始まったら、
-            {selected.size === 0 ? "選んだ準備" : <strong>{selected.size}件の準備</strong>}
-            をして、終わったら<strong>変更した分だけ元に戻します</strong>。
+            {mode === "game" ? <>
+              <strong>{name.trim() || "このゲーム"}</strong> が始まったら、
+              {selected.size === 0 ? "選んだ準備" : <strong>{selected.size}件の準備</strong>}
+              をして、終わったら<strong>変更した分だけ元に戻します</strong>。
+            </> : <>
+              <strong>{name.trim() || "このモード"}</strong>を「いま実行」したら、
+              {selected.size === 0 ? "選んだ準備" : <strong>{selected.size}件の準備</strong>}
+              をします。アプリ起動は<strong>元に戻しても終了しません</strong>。
+            </>}
           </p>
           <label className="field">
             <span>名前</span>
@@ -166,21 +203,23 @@ export function ProfilesView({
               value={name}
             />
           </label>
-          <label className="field">
-            <span>ゲームの実行ファイル（.exe のフルパス）</span>
-            <input
-              disabled={!live || busy}
-              onChange={(event) => setExePath(event.target.value)}
-              placeholder={String.raw`例: C:\Riot Games\VALORANT\live\VALORANT.exe`}
-              spellCheck={false}
-              type="text"
-              value={exePath}
-            />
-            <small>ローカルドライブ上の実在する実行ファイルだけを登録できます。本人性（ファイル識別子）も記録します。</small>
-          </label>
+          {mode === "game" ? (
+            <label className="field">
+              <span>ゲームの実行ファイル（.exe のフルパス）</span>
+              <input
+                disabled={!live || busy}
+                onChange={(event) => setExePath(event.target.value)}
+                placeholder={String.raw`例: C:\Riot Games\VALORANT\live\VALORANT.exe`}
+                spellCheck={false}
+                type="text"
+                value={exePath}
+              />
+              <small>ローカルドライブ上の実在する実行ファイルだけを登録できます。本人性（ファイル識別子）も記録します。</small>
+            </label>
+          ) : null}
 
           <fieldset className="field">
-            <legend>起動時にまとめる準備</legend>
+            <legend>{mode === "game" ? "起動時にまとめる準備" : "いま実行する準備"}</legend>
             {selectable.length === 0 ? (
               <p className="muted">
                 選べるActionがありません。<button className="link-button" onClick={onOpenActions} type="button">Action一覧</button>を確認してください。
@@ -203,6 +242,17 @@ export function ProfilesView({
                 ))}
               </div>
             )}
+              {mode === "manual" && selected.has("setup.launch_apps") ? (
+                <label className="field">
+                  <span>まとめて開くアプリ</span>
+                  <select disabled={!live || busy} onChange={(event) => setLaunchBundle(event.target.value as "study" | "work" | "creative")} value={launchBundle}>
+                    <option value="study">勉強: Microsoft Edge＋メモ帳</option>
+                    <option value="work">作業: Microsoft Edge＋メモ帳＋電卓</option>
+                    <option value="creative">制作: ペイント＋メモ帳</option>
+                  </select>
+                  <small>コード内固定リストのみ。任意のパス・アプリID・引数は受け付けません。</small>
+                </label>
+              ) : null}
           </fieldset>
 
           <button className="primary-button" disabled={!canSubmit} type="submit">
@@ -210,7 +260,7 @@ export function ProfilesView({
             プロファイルを作成
           </button>
           <p className="muted small">
-            作成しても自動適用はまだ開始しません。各プロファイルの「自動適用」を有効にしたときだけ働きます。
+            {mode === "game" ? "作成しても自動適用はまだ開始しません。各プロファイルの「自動適用」を有効にしたときだけ働きます。" : "手動モードは自動適用されません。カードの「いま実行」を押したときだけ働きます。"}
           </p>
         </form>
 
@@ -220,7 +270,7 @@ export function ProfilesView({
             <div className="empty-block">
               <Icon name="game" />
               <strong>まだプロファイルはありません</strong>
-              <span>左のフォームから、よく遊ぶゲームを登録してみましょう。</span>
+              <span>左のフォームから、ゲーム・勉強・作業などのモードを登録できます。</span>
             </div>
           ) : (
             <ul className="profile-list">
@@ -229,14 +279,18 @@ export function ProfilesView({
                   <div className="profile-card__head">
                     <div>
                       <strong>{profile.name}</strong>
-                      <code title={profile.executablePath}>{fileName(profile.executablePath)}</code>
+                      <code title={profile.executablePath}>{profile.executablePath === undefined ? "実行ファイルなし（手動）" : fileName(profile.executablePath)}</code>
                     </div>
                     <span
                       className={`profile-state profile-state--${
-                        profile.automationEnabled ? "on" : "off"
+                        profile.executablePath === undefined
+                          ? (profile.activeRun === undefined ? "off" : "on")
+                          : (profile.automationEnabled ? "on" : "off")
                       }`}
                     >
-                      {profile.automationEnabled ? "自動適用オン" : "自動適用オフ"}
+                      {profile.executablePath === undefined
+                        ? (profile.activeRun === undefined ? "手動・待機中" : "手動・実行中")
+                        : (profile.automationEnabled ? "自動適用オン" : "自動適用オフ")}
                     </span>
                   </div>
                   <div className="profile-card__actions-count">
@@ -244,18 +298,29 @@ export function ProfilesView({
                     <span>{profile.actions.length}件の準備</span>
                   </div>
                   <div className="profile-card__controls">
-                    <button
-                      className="secondary-button"
-                      disabled={!live || busy}
-                      onClick={() => onSetEnabled(profile.id, !profile.automationEnabled)}
-                      type="button"
-                    >
-                      {profile.automationEnabled ? "自動適用を止める" : "自動適用を有効にする"}
-                    </button>
+                    {profile.executablePath === undefined ? (
+                      <button
+                        className="secondary-button"
+                        disabled={!live || busy}
+                        onClick={() => profile.activeRun === undefined ? onRun(profile.id) : onRestore(profile.id)}
+                        type="button"
+                      >
+                        {profile.activeRun === undefined ? "いま実行" : "実行した分を戻す"}
+                      </button>
+                    ) : (
+                      <button
+                        className="secondary-button"
+                        disabled={!live || busy}
+                        onClick={() => onSetEnabled(profile.id, !profile.automationEnabled)}
+                        type="button"
+                      >
+                        {profile.automationEnabled ? "自動適用を止める" : "自動適用を有効にする"}
+                      </button>
+                    )}
                     <button
                       aria-label={`${profile.name}を削除`}
                       className="icon-button"
-                      disabled={!live || busy}
+                      disabled={!live || busy || profile.activeRun !== undefined}
                       onClick={() => onDelete(profile.id)}
                       type="button"
                     >
@@ -275,7 +340,7 @@ export function ProfilesView({
         <h2>設定のバックアップ・移行</h2>
         <p className="muted small">
           登録したプロファイル定義だけをJSONとして書き出し・取り込みます。任意コードやスクリプトは含みません。
-          別PCへ移すときは、その端末で実行ファイルを再確認してから取り込みます。
+          ゲーム用は別PCで実行ファイルを再確認します。手動モードは実行ファイルなしのまま取り込みます。
         </p>
         <div className="config-io__row">
           <button className="secondary-button" disabled={!live || ioBusy} onClick={() => void doExport()} type="button">

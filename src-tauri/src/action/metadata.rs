@@ -15,6 +15,8 @@ pub enum ActionRiskLevel {
 pub enum ActionKind {
     Persistent,
     Session,
+    /// Starts an allowlisted external application. It cannot be reversed safely.
+    OneWay,
     Observation,
     Guided,
 }
@@ -89,21 +91,19 @@ impl ActionMetadata {
         if self.requiresExplorerRestart {
             return Err("stable MVP Actions may not force-restart Explorer");
         }
-        if matches!(self.kind, ActionKind::Observation | ActionKind::Guided)
-            && self.auto_apply_eligible
+        if matches!(
+            self.kind,
+            ActionKind::OneWay | ActionKind::Observation | ActionKind::Guided
+        ) && self.auto_apply_eligible
         {
-            return Err("observation and guided Actions may not be auto-applied");
+            return Err("one-way, observation and guided Actions may not be auto-applied");
         }
         if self.method_class == MethodClass::UnverifiedStorage
             && (self.kind != ActionKind::Guided || self.maximumTestedBuild != 0)
         {
-            return Err(
-                "unverified storage must be guided and use the untested build sentinel",
-            );
+            return Err("unverified storage must be guided and use the untested build sentinel");
         }
-        if self.maximumTestedBuild == 0
-            && self.method_class != MethodClass::UnverifiedStorage
-        {
+        if self.maximumTestedBuild == 0 && self.method_class != MethodClass::UnverifiedStorage {
             return Err("only unverified storage may use the untested build sentinel");
         }
         if self.maximumTestedBuild != 0 && self.maximumTestedBuild < self.minimumBuild {

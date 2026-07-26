@@ -9,8 +9,8 @@ use crate::{
     game_profile::{CreateProfileRequest, StoredProfile},
     journal::{ReconcileResult, TimelineItem},
     presentation::{
-        ActionPresentation, BootstrapStatus, CommitPreviewRequest, CommitResult,
-        DetectionResponse, PreviewActionsRequest, PreviewResponse, RollbackItemRequest,
+        ActionPresentation, BootstrapStatus, CommitPreviewRequest, CommitResult, DetectionResponse,
+        PreviewActionsRequest, PreviewResponse, RollbackItemRequest,
     },
 };
 
@@ -20,9 +20,7 @@ pub fn get_bootstrap_status(state: State<'_, ApplicationState>) -> BootstrapStat
 }
 
 #[tauri::command]
-pub fn list_actions(
-    state: State<'_, ApplicationState>,
-) -> CoreResult<Vec<ActionPresentation>> {
+pub fn list_actions(state: State<'_, ApplicationState>) -> CoreResult<Vec<ActionPresentation>> {
     Ok(state.engine()?.list_actions())
 }
 
@@ -53,9 +51,7 @@ pub fn commit_preview(
 }
 
 #[tauri::command]
-pub fn list_timeline(
-    state: State<'_, ApplicationState>,
-) -> CoreResult<Vec<TimelineItem>> {
+pub fn list_timeline(state: State<'_, ApplicationState>) -> CoreResult<Vec<TimelineItem>> {
     state.engine()?.list_timeline(250)
 }
 
@@ -68,9 +64,7 @@ pub fn rollback_item(
 }
 
 #[tauri::command]
-pub fn reconcile_now(
-    state: State<'_, ApplicationState>,
-) -> CoreResult<ReconcileResult> {
+pub fn reconcile_now(state: State<'_, ApplicationState>) -> CoreResult<ReconcileResult> {
     state.engine()?.reconcile_now()
 }
 
@@ -96,6 +90,21 @@ pub fn profile_set_enabled(
     state.profile_store()?.set_enabled(&id, enabled)
 }
 
+#[tauri::command]
+pub fn profile_run_now(
+    state: State<'_, ApplicationState>,
+    id: String,
+) -> CoreResult<crate::game_profile::ManualProfileResult> {
+    crate::game_profile::run_manual_profile(state.engine()?, state.profile_store()?, &id)
+}
+
+#[tauri::command]
+pub fn profile_restore_now(
+    state: State<'_, ApplicationState>,
+    id: String,
+) -> CoreResult<crate::game_profile::ManualProfileResult> {
+    crate::game_profile::restore_manual_profile(state.engine()?, state.profile_store()?, &id)
+}
 #[tauri::command]
 pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreResult<()> {
     state.profile_store()?.delete(&id)

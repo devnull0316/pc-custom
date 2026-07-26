@@ -12,6 +12,7 @@ import type {
   ImportPreviewItem,
   ImportResult,
   InstallOutcome,
+  ManualProfileResult,
   SetupAppDto,
   TempCleanupOutcome,
   TempCleanupPlan,
@@ -90,6 +91,8 @@ const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "appearance.taskbar_animations": "appearance",
   "notifications.toast_banners": "notifications",
   "setup.startup_inventory": "setup",
+  "setup.launch_apps": "setup",
+  "setup.windows_update_status": "setup",
   "storage.free_space_check": "storage",
   "storage.temp_files_check": "storage",
   "appearance.accent_color_check": "appearance",
@@ -204,6 +207,13 @@ export function setProfileEnabled(id: string, enabled: boolean): Promise<void> {
   return call<void>("profile_set_enabled", { id, enabled });
 }
 
+export function runProfileNow(id: string): Promise<ManualProfileResult> {
+  return call<ManualProfileResult>("profile_run_now", { id });
+}
+
+export function restoreProfileNow(id: string): Promise<ManualProfileResult> {
+  return call<ManualProfileResult>("profile_restore_now", { id });
+}
 export function deleteProfile(id: string): Promise<void> {
   return call<void>("profile_delete", { id });
 }

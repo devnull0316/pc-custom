@@ -247,7 +247,57 @@ pub static ACCENT_COLOR_CHECK_ACTION: SystemObservationAction = SystemObservatio
     method: "公開APIのDwmGetColorizationColor",
 };
 
+static WINDOWS_UPDATE_STATUS_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::SetupWindowsUpdateStatus,
+    name: "Windows Updateの確認状況を見る",
+    description: "Windows Update Agentの公開COM APIで、最後に更新を確認できた日時と再起動保留だけを読み取ります。Updateの設定・サービス・動作は変更しません。",
+    category: "setup",
+    tags: &["windows-update", "status", "read-only"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+        WindowsReleaseFamily::Windows11_26H1,
+    ],
+    minimumBuild: 22_631,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Observation,
+    parameter_schema: "{}",
+    resource_keys: &["windows-update:wua-status:observation"],
+    method_class: MethodClass::PublicApi,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/win32/api/wuapi/nn-wuapi-iautomaticupdatesresults",
+        "https://learn.microsoft.com/windows/win32/api/wuapi/nn-wuapi-isysteminformation",
+    ],
+    compatibility_key: "setup.windows_update_status.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: false,
+    windows_update_impact: "なし。Windows Update Agentの読み取り専用プロパティだけを確認します。",
+};
 
+fn detect_windows_update_status() -> WindowsResult<ObservedValue> {
+    crate::windows::read_windows_update_status().map(ObservedValue::WindowsUpdateStatus)
+}
+
+fn is_windows_update_status(value: &ObservedValue) -> bool {
+    matches!(value, ObservedValue::WindowsUpdateStatus(_))
+}
+
+pub static WINDOWS_UPDATE_STATUS_ACTION: SystemObservationAction = SystemObservationAction {
+    metadata: &WINDOWS_UPDATE_STATUS_METADATA,
+    backup_source: "Windows Update Agent read-only COM properties",
+    detect: detect_windows_update_status,
+    expected: is_windows_update_status,
+    result: "最後に更新を確認できたローカル日時と、Windows Update Agentが返す再起動保留状態を表示します。取得できない項目は不明と表示します。",
+    method: "IAutomaticUpdatesResults::LastSearchSuccessDate と ISystemInformation::RebootRequired（読み取り専用）",
+};
 impl Action for SystemObservationAction {
     fn metadata(&self) -> &'static ActionMetadata {
         self.metadata
@@ -506,6 +556,15 @@ mod tests {
             is_temp_files,
         );
     }
+
+    #[test]
+    fn windows_update_status_apply_detect_rollback_detect_is_read_only() {
+        assert_read_only_round_trip(
+            &WINDOWS_UPDATE_STATUS_ACTION,
+            ActionParameters::SetupWindowsUpdateStatus {},
+            is_windows_update_status,
+        );
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -515,7 +574,8 @@ mod accent_color_tests {
     #[test]
     fn accent_color_reads_a_valid_hex_on_this_machine() {
         // 実機の公開APIから読み取れること。値は環境依存なので形式だけ検証する。
-        let observed = detect_accent_color().expect("read accent color via DwmGetColorizationColor");
+        let observed =
+            detect_accent_color().expect("read accent color via DwmGetColorizationColor");
         let ObservedValue::AccentColor { hex, .. } = &observed else {
             panic!("accent color observation expected");
         };

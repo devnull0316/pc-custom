@@ -1,5 +1,6 @@
 //! Narrow Windows primitives. No function accepts a shell command or user-selected registry path.
 
+mod app_launch;
 mod broadcast;
 mod execution_state;
 mod observations;
@@ -9,9 +10,13 @@ mod readiness;
 mod registry;
 mod transaction_lock;
 mod ui_probe;
+mod update_status;
 mod window_effects;
 mod wmi_process;
 
+pub use app_launch::{
+    apps_for_bundle, launch_known_apps, observe_known_apps, resolve_known_app, KnownApp,
+};
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
 pub use observations::{
@@ -35,6 +40,7 @@ pub use registry::{
 pub use transaction_lock::{
     acquire_app_instance_lock, acquire_core_mutation_lock, AppInstanceGuard, CoreMutationGuard,
 };
+pub use update_status::read_windows_update_status;
 pub use window_effects::{apply_mica_backdrop, system_accent_color, AccentColor};
 pub use wmi_process::wmi_process_ids;
 

@@ -4,8 +4,8 @@ use crate::journal::{ItemState, TransactionState};
 impl TotonoeEngine {
     pub fn rollback_item(&self, item_id: Uuid) -> CoreResult<CommitResult> {
         let _mutation_guard = self.mutation_gate.lock();
-        let _process_guard = crate::windows::acquire_core_mutation_lock()
-            .map_err(core_mutation_lock_error)?;
+        let _process_guard =
+            crate::windows::acquire_core_mutation_lock().map_err(core_mutation_lock_error)?;
         let item = self
             .journal
             .load_item(item_id)?
@@ -17,27 +17,24 @@ impl TotonoeEngine {
         }
         let identity = self.identity_for_commit()?;
         let action = registered_action(item.action_id)?;
-        if action.metadata().kind == ActionKind::Observation {
+        if matches!(
+            action.metadata().kind,
+            ActionKind::Observation | ActionKind::OneWay
+        ) {
             return Err(CoreError::invalid_request(
-                "読み取り専用ActionはWindows設定を変更していません。",
+                "読み取り専用または元に戻せないActionは、この履歴から復元できません。",
             ));
         }
         let context = action_context(&identity, item.transaction_id, item.item_id);
         match classify_action(action, &context, &item.parameters, &item.backup) {
             RecoveryClassification::Original => {
-                self.journal.mark_item_rolled_back(
-                    item.transaction_id,
-                    item.item_id,
-                    now_ms(),
-                )?;
+                self.journal
+                    .mark_item_rolled_back(item.transaction_id, item.item_id, now_ms())?;
             }
             RecoveryClassification::Applied => {
                 ensure_backup_mutation_allowed(&identity, action, &item.backup)?;
-                self.journal.mark_item_rolling_back(
-                    item.transaction_id,
-                    item.item_id,
-                    now_ms(),
-                )?;
+                self.journal
+                    .mark_item_rolling_back(item.transaction_id, item.item_id, now_ms())?;
                 let verification = action
                     .rollback(&context, &item.parameters, &item.backup)
                     .and_then(|_| {
@@ -101,8 +98,8 @@ impl TotonoeEngine {
 
     pub fn reconcile_now(&self) -> CoreResult<ReconcileResult> {
         let _mutation_guard = self.mutation_gate.lock();
-        let _process_guard = crate::windows::acquire_core_mutation_lock()
-            .map_err(core_mutation_lock_error)?;
+        let _process_guard =
+            crate::windows::acquire_core_mutation_lock().map_err(core_mutation_lock_error)?;
         let transactions = self.journal.load_recovery_transactions()?;
         if transactions.is_empty() {
             return Ok(ReconcileResult {
@@ -206,11 +203,7 @@ impl TotonoeEngine {
                         let result = action
                             .rollback(&context, &item.parameters, &item.backup)
                             .and_then(|_| {
-                                action.verify_rolled_back(
-                                    &context,
-                                    &item.parameters,
-                                    &item.backup,
-                                )
+                                action.verify_rolled_back(&context, &item.parameters, &item.backup)
                             });
                         match result {
                             Ok(Verification { verified: true, .. }) => {
@@ -228,20 +221,12 @@ impl TotonoeEngine {
                                     false,
                                     "recovery.verify_rolled_back.mismatch",
                                 );
-                                self.record_rollback_failure(
-                                    &transaction,
-                                    item,
-                                    &error,
-                                )?;
+                                self.record_rollback_failure(&transaction, item, &error)?;
                                 rollback_failure = true;
                                 remaining = remaining.saturating_add(1);
                             }
                             Err(error) => {
-                                self.record_rollback_failure(
-                                    &transaction,
-                                    item,
-                                    &error,
-                                )?;
+                                self.record_rollback_failure(&transaction, item, &error)?;
                                 rollback_failure = true;
                                 remaining = remaining.saturating_add(1);
                             }
@@ -265,7 +250,6 @@ impl TotonoeEngine {
             let state = if transaction.state == TransactionState::Succeeded {
                 TransactionState::Succeeded
             } else if rollback_failure {
-
                 TransactionState::RollbackFailed
             } else if recovery_failure {
                 TransactionState::RecoveryRequired
@@ -275,7 +259,10 @@ impl TotonoeEngine {
             self.journal.set_transaction_state(
                 transaction.transaction_id,
                 state,
-                matches!(state, TransactionState::RolledBack | TransactionState::Succeeded),
+                matches!(
+                    state,
+                    TransactionState::RolledBack | TransactionState::Succeeded
+                ),
                 now_ms(),
             )?;
         }
@@ -291,8 +278,7 @@ impl TotonoeEngine {
             message: if remaining == 0 {
                 "未完了の変更を確認し、変更直前へ戻しました。".to_owned()
             } else {
-                "自動で上書きできない項目があります。タイムラインを確認してください。"
-                    .to_owned()
+                "自動で上書きできない項目があります。タイムラインを確認してください。".to_owned()
             },
         })
     }
