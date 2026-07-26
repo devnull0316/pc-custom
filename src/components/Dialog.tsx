@@ -35,13 +35,22 @@ export function Dialog({
     const previous = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    const frame = window.requestAnimationFrame(() => {
-      const preferred = panelRef.current?.querySelector<HTMLElement>("[data-dialog-autofocus]");
-      (preferred ?? panelRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR))?.focus();
-    });
+    // requestAnimationFrame は文書が非表示のあいだ発火しない。ウィンドウが隠れている
+    // 間にダイアログが開くと、Tab はこの中に閉じ込めるのにフォーカスは外に残ったままになり、
+    // キーボードだけの操作が行き止まりになる。タイマーは可視状態に関係なく走るので併用する。
+    // 先に入った側が勝ち、もう一方は「すでに中にいる」ので何もしない。
+    const focusInside = () => {
+      const panel = panelRef.current;
+      if (panel === null || panel.contains(document.activeElement)) return;
+      const preferred = panel.querySelector<HTMLElement>("[data-dialog-autofocus]");
+      (preferred ?? panel.querySelector<HTMLElement>(FOCUSABLE_SELECTOR))?.focus();
+    };
+    const frame = window.requestAnimationFrame(focusInside);
+    const timer = window.setTimeout(focusInside, 0);
 
     return () => {
       window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
       previous?.focus();
     };
   }, []);
