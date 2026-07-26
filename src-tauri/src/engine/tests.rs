@@ -14,7 +14,7 @@ use crate::{
     presentation::{PreviewActionRequest, PreviewActionsRequest},
 };
 
-use super::TotonoeEngine;
+use super::PcCustomEngine;
 
 fn power_observation_item(transaction_id: Uuid, item_id: Uuid) -> PreparedItem {
     let before = Fingerprint::of_bytes(b"power-before");
@@ -72,7 +72,7 @@ fn kill_after_item_applying_is_reconciled_on_reopen() {
     }
 
     let reopened = Arc::new(JournalDatabase::open(&database_path).expect("reopen journal"));
-    let engine = TotonoeEngine::new(
+    let engine = PcCustomEngine::new(
         Arc::clone(&reopened),
         Some(OsIdentity::from_test_build(26_100)),
     )
@@ -121,7 +121,7 @@ fn journal_items_are_reversed_from_durable_apply_order() {
 #[test]
 fn unknown_build_rejects_persistent_preview_without_registry_write() {
     let journal = Arc::new(JournalDatabase::open_in_memory().expect("open journal"));
-    let engine = TotonoeEngine::new(journal, Some(OsIdentity::from_test_build(99_999)))
+    let engine = PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(99_999)))
         .expect("start fail-closed engine");
     let mut parameters = Map::new();
     parameters.insert("show".to_owned(), Value::Bool(true));
@@ -149,7 +149,7 @@ fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
         Err(_) => return, // 実機以外では検出できないので何も主張しない
     };
     let journal = Arc::new(JournalDatabase::open_in_memory().expect("open journal"));
-    let engine = TotonoeEngine::new(journal, Some(identity)).expect("start engine");
+    let engine = PcCustomEngine::new(journal, Some(identity)).expect("start engine");
 
     // 1. 利用者が「適用プレビュー」を押す
     let mut parameters = Map::new();

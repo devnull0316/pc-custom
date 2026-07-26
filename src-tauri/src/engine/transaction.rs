@@ -1,7 +1,7 @@
 use super::*;
 use crate::journal::{PreparedItem, TransactionState};
 
-impl TotonoeEngine {
+impl PcCustomEngine {
     pub fn commit_preview(&self, preview_token: &str) -> CoreResult<CommitResult> {
         let preview = self
             .previews

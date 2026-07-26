@@ -142,7 +142,7 @@ export function ProfilesView({
   return (
     <section className="profiles-view">
       <header className="view-header">
-        <span className="eyebrow">利用場面を整える</span>
+        <span className="eyebrow">利用場面ごとの設定</span>
         <h1>モード</h1>
         <p>
           ゲームは実行ファイルの起動・終了に合わせて自動実行できます。勉強・作業などは手動モードとして、

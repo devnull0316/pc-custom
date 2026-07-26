@@ -286,7 +286,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         ) : null}
       </div>
       {action.settingsPage && action.availability !== "mutable" ? (
-        <p className="blocked-reason"><Icon name="info" size={15} />この項目はWindowsの設定画面から変更できます。Totonoeは現在値の表示だけを行います。</p>
+        <p className="blocked-reason"><Icon name="info" size={15} />この項目はWindowsの設定画面から変更できます。PCカスタムは現在値の表示だけを行います。</p>
       ) : null}
     </div>
   );

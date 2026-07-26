@@ -875,7 +875,7 @@ mod tests {
     fn unique_target(value_name: &'static str) -> RegistryTarget {
         let key = Box::leak(
             format!(
-                r"Software\Totonoe\IntegrationTests\Explorer\{}",
+                r"Software\PCカスタム\IntegrationTests\Explorer\{}",
                 Uuid::new_v4()
             )
             .into_boxed_str(),

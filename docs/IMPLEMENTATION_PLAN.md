@@ -135,7 +135,7 @@ A/B最終gateでは、同じwatcher workload、同じUI idle/closed条件、同�
 - `登録 → 待機 → 起動検知 → 適用中 → プレイ中 → 終了検知 → 復元中 → 待機`
 - session journal、resource lock/lease、idempotency key
 - 同desired state共有、反対desired state競合停止、最後のownerだけrollback
-- game crashはprocess終了として即時復元。Totonoe/OS停止で未復元なら次回coreをrecovery-firstで起動
+- game crashはprocess終了として即時復元。PCカスタム/OS停止で未復元なら次回coreをrecovery-firstで起動
 
 ### 3.3 profile UX
 

@@ -34,28 +34,28 @@
 候補A、UI表示中:
 
 ```powershell
-$rootProcess = Get-Process -Name 'totonoe' | Sort-Object StartTime -Descending | Select-Object -First 1
+$rootProcess = Get-Process -Name 'pc-custom' | Sort-Object StartTime -Descending | Select-Object -First 1
 powershell.exe -NoProfile -File .\scripts\measure-private-working-set.ps1 -Variant A-Tauri -Scenario ui-open -RootProcessId $rootProcess.Id -WarmupSeconds 60 -SampleSeconds 120 -IntervalMilliseconds 1000
 ```
 
 候補A、UIを破棄したnative coreのみ:
 
 ```powershell
-$rootProcess = Get-Process -Name 'totonoe' | Sort-Object StartTime -Descending | Select-Object -First 1
+$rootProcess = Get-Process -Name 'pc-custom' | Sort-Object StartTime -Descending | Select-Object -First 1
 powershell.exe -NoProfile -File .\scripts\measure-private-working-set.ps1 -Variant A-Tauri -Scenario ui-closed-native-core -RootProcessId $rootProcess.Id -WarmupSeconds 60 -SampleSeconds 120 -IntervalMilliseconds 1000
 ```
 
 候補B、Electron UI表示中（fixtureのprocess名はCCが実artifactに合わせて置き換える）:
 
 ```powershell
-$rootProcess = Get-Process -Name 'totonoe-electron-fixture' | Sort-Object StartTime -Descending | Select-Object -First 1
+$rootProcess = Get-Process -Name 'pc-custom-electron-fixture' | Sort-Object StartTime -Descending | Select-Object -First 1
 powershell.exe -NoProfile -File .\scripts\measure-private-working-set.ps1 -Variant B-Electron-main -Scenario ui-open -RootProcessId $rootProcess.Id -WarmupSeconds 60 -SampleSeconds 120 -IntervalMilliseconds 1000
 ```
 
 候補B、Electronを完全終了したnative watcherのみ:
 
 ```powershell
-$rootProcess = Get-Process -Name 'totonoe-native-watcher-fixture' | Sort-Object StartTime -Descending | Select-Object -First 1
+$rootProcess = Get-Process -Name 'pc-custom-native-watcher-fixture' | Sort-Object StartTime -Descending | Select-Object -First 1
 powershell.exe -NoProfile -File .\scripts\measure-private-working-set.ps1 -Variant B-Native-watcher -Scenario ui-closed-native-core -RootProcessId $rootProcess.Id -WarmupSeconds 60 -SampleSeconds 120 -IntervalMilliseconds 1000
 ```
 

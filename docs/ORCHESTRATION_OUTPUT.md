@@ -1,4 +1,4 @@
-# Totonoe Task 1 オーケストレーション出力
+# PCカスタム Task 1 オーケストレーション出力
 
 ## 1. リポジトリ調査結果
 
@@ -10,14 +10,14 @@
 - OS操作はcompile-time登録済みAction IDと型付きparameterだけから到達可能にする。
 - registryはkey/valueの存在、型、raw元値、適用値を保存し、「既定値」ではなく直前状態へ戻す。
 - profile、共有、AI、pluginから任意code、script、binary、shell、registry pathを実行できない。
-- Windows build差異を一箇所で管理し、Microsoft support中とTotonoe実機試験済みを区別する。
+- Windows build差異を一箇所で管理し、Microsoft support中とPCカスタム実機試験済みを区別する。
 - 不明なAPIや効果を断定せず、read-only/guided/`未検証・要CC確認`へ落とす。
 
 ## 2. 推奨技術構成
 
 **候補A: Tauri 2 + React + TypeScript + Rust + windows-rs + SQLiteを推奨する。CCの暫定推奨に賛成する。**
 
-0〜5点を付け、`重み × 評点 ÷ 5`で加重した。BRIEFが示すのは優先順で数値そのものではないため、本設計でその順を`30 / 25 / 20 / 15 / 10`へ数値化した。memoryはTotonoe実測前の構造評価である。
+0〜5点を付け、`重み × 評点 ÷ 5`で加重した。BRIEFが示すのは優先順で数値そのものではないため、本設計でその順を`30 / 25 / 20 / 15 / 10`へ数値化した。memoryはPCカスタム実測前の構造評価である。
 
 | 要件 | 重み | A 評点 / 加重点 | B: Electron + helper 評点 / 加重点 | 判断 |
 | --- | ---: | ---: | ---: | --- |
@@ -34,7 +34,7 @@ CC記載のElectron常駐100〜200MB級は本アプリでは未計測なので�
 
 ## 3. 競合との差別化整理
 
-Totonoeの差別化は機能数ではなく、次の8点を同時に守ることにある。
+PCカスタムの差別化は機能数ではなく、次の8点を同時に守ることにある。
 
 1. Windows知識ゼロでも使える。
 2. 設定名でなく、得たい結果から選ぶ。
@@ -45,7 +45,7 @@ Totonoeの差別化は機能数ではなく、次の8点を同時に守ること
 7. 共有profileに任意code実行能力を持たせない。
 8. AIは登録済みActionとparameterだけを提案する。
 
-| 参考競合 | 学ぶ点 | Totonoeが別に担う点 |
+| 参考競合 | 学ぶ点 | PCカスタムが別に担う点 |
 | --- | --- | --- |
 | PowerToys | Microsoft公式の安全な便利機能 | mode、条件適用、Action単位journal/rollback。重複機能は再実装より導入・公式設定導線を優先 |
 | WinUtil | 多くの設定をまとめる体験 | 初心者向け結果表示、変更前backup、build gate、危険機能の隔離 |
@@ -67,7 +67,7 @@ Totonoeの差別化は機能数ではなく、次の8点を同時に守ること
 | P4 | data-only共有、AI候補提示 | stable Action schema固定後 |
 | P5 | experimental機能 | stable binary/DB/allowlistから隔離し、既定無効 |
 
-`power.user_mode`のユーザーが明示する一回変更は公開APIのstable候補だが、game起動連動の自動電源変更は副作用・競合評価が済むまで後回しにする。MicrosoftがOSをsupport中でもTotonoeのtest evidenceが無ければ自動適用しない。
+`power.user_mode`のユーザーが明示する一回変更は公開APIのstable候補だが、game起動連動の自動電源変更は副作用・競合評価が済むまで後回しにする。MicrosoftがOSをsupport中でもPCカスタムのtest evidenceが無ければ自動適用しない。
 
 ## 5. 初期実装 Action 10〜15
 
@@ -82,7 +82,7 @@ Totonoeの差別化は機能数ではなく、次の8点を同時に守ること
 | `theme.color_mode` / dark/light | Microsoft状態資料の2 HKCU値。contrast/policyをpreflightしwrite gate | 両値のkey/value有無、type、raw元値、適用値 | transaction逆順復元、第三状態は止める | 注意・検証まで自動無効 | 不要 | OS不要、一部app再起動 | 中 | configured可、effectiveは部分的 |
 | `theme.transparency` / 透明効果 | Microsoft状態資料のHKCU値。write契約/contrast gate | 完全registry snapshot | 元値または元の欠如へ復元 | 注意・検証まで自動無効 | 不要 | OS不要 | 中 | configured可、effective要試験 |
 | `gaming.game_mode` / Game Mode切替 | 状態資料のHKCU値。third-party write契約未確認 | 完全registry snapshot | 元状態へ復元し再検出 | 注意・自動無効 | 不要 | 反映条件未検証 | 中〜高 | 設定値可、実効状態と分離 |
-| `session.prevent_sleep` / mode中sleep防止 | 公開`SetThreadExecutionState`、画面点灯は既定OFF | owner、flag、開始、API結果、thread | 最後のleaseで要求解除。process終了時OS解放 | 安全 | 不要 | 不要 | 低 | Totonoe lease可 |
+| `session.prevent_sleep` / mode中sleep防止 | 公開`SetThreadExecutionState`、画面点灯は既定OFF | owner、flag、開始、API結果、thread | 最後のleaseで要求解除。process終了時OS解放 | 安全 | 不要 | 不要 | 低 | PCカスタム lease可 |
 | `apps.launch_set` / 必要appをまとめて起動 | shellなし。端末上のopaque app ID、known host/launcher拒否。MVPは引数なし、共有/AIからpath指定不可 | 既存process、作成PID/時刻/file identity、local登録ID、終了方針 | 既定は追跡解除。明示時のみ同一性確認後に通常終了要求、強制終了なし | 注意 | 不要 | 不要 | 低 | 可、access deniedは不明 |
 | `games.process_watch` / game開始終了を検知 | Toolhelp/WMI、full path、creation time、handle wait。注入なし | file identity、canonical path、instance key、世代 | observer/lease解除。OS変更なし | 安全 | 不要 | 不要 | 低 | 可、access deniedは不明 |
 | `startup.inventory` / 自動起動app確認 | baselineはHKCU Run/RunOnceとuser Startup folder。WMI/HKLM等はprivilege差によりbest-effort | source、取得可否、項目、時刻のみ | no-op、MVPは削除/無効化なし | 安全 | baseline不要 | 不要 | 中 | 部分的。source別unknown、完全性を主張しない |
@@ -155,7 +155,7 @@ rollback前に現在状態を`original / applied / third / unknown`へ分類す�
 
 startup snapshot、WMI event、canonical full path、file identity、PID+creation time、process handle wait、低頻度補正を組み合わせる。同一event/instanceはidempotency keyで重複排除する。launcher/childは自動推測せず、exact executableまたは明示process groupを使う。
 
-複数profileが同じresourceへ同じdesired stateを要求すればleaseを共有し、最後のowner終了時だけ最初のbackupへ戻す。反対desired stateなら後発を競合停止し、先行を上書きしない。gameだけがcrashした場合はprocess終了として即時に通常復元する。Totonoe/OS停止で未復元になった場合は、次回core起動時に新規監視よりjournalを先にreconcile/rollbackする。ゲームがまだ動いていても旧sessionを暗黙再開せず、一度安全に戻した後、許可時だけ新sessionで再適用する。
+複数profileが同じresourceへ同じdesired stateを要求すればleaseを共有し、最後のowner終了時だけ最初のbackupへ戻す。反対desired stateなら後発を競合停止し、先行を上書きしない。gameだけがcrashした場合はprocess終了として即時に通常復元する。PCカスタム/OS停止で未復元になった場合は、次回core起動時に新規監視よりjournalを先にreconcile/rollbackする。ゲームがまだ動いていても旧sessionを暗黙再開せず、一度安全に戻した後、許可時だけ新sessionで再適用する。
 
 ## 10. セキュリティ上のリスク
 

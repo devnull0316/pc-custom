@@ -460,7 +460,7 @@ export function App() {
       )}
       {rollbackTarget === null ? null : (
         <Dialog
-          description="現在の状態がTotonoeの適用値と一致する場合だけ、保存済みの変更前状態へ戻します。"
+          description="現在の状態がPCカスタムの適用値と一致する場合だけ、保存済みの変更前状態へ戻します。"
           footer={<><button className="secondary-button" disabled={rollbackPendingId !== null} onClick={() => setRollbackTarget(null)} type="button">キャンセル</button><button className="danger-button" disabled={rollbackPendingId !== null} onClick={() => void confirmRollback()} type="button">{rollbackPendingId !== null ? <Icon className="spin" name="spinner" /> : <Icon name="undo" />}この変更だけ戻す</button></>}
           onClose={() => { if (rollbackPendingId === null) setRollbackTarget(null); }}
           title="変更を元へ戻しますか"

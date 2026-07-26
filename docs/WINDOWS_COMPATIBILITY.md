@@ -2,12 +2,12 @@
 
 ## 1. 調査条件
 
-調査基準日は **2026-07-24**。Microsoft Learn、Windows release health、Windows API documentationを一次情報として優先した。本書の「資料確認済み」はAPIや記載の存在を確認したという意味であり、Totonoeの実装・実機・driver構成で動作確認済みという意味ではない。実機確認前の項目は明示的に`未検証・要CC確認`とする。
+調査基準日は **2026-07-24**。Microsoft Learn、Windows release health、Windows API documentationを一次情報として優先した。本書の「資料確認済み」はAPIや記載の存在を確認したという意味であり、PCカスタムの実装・実機・driver構成で動作確認済みという意味ではない。実機確認前の項目は明示的に`未検証・要CC確認`とする。
 
 互換性は次の三層を分ける。
 
 1. **Microsoft support**: OS edition/versionがMicrosoftのservicing期間内か。
-2. **Totonoe tested**: そのbuild・architecture・代表hardwareでActionのdetect/apply/rollback試験が合格したか。
+2. **PCカスタム tested**: そのbuild・architecture・代表hardwareでActionのdetect/apply/rollback試験が合格したか。
 3. **runtime available**: その端末でAPI、setting、device、policyが実際に利用可能か。
 
 Microsoftがsupport中でも、2または3を満たさなければ自動変更を有効にしない。
@@ -16,12 +16,12 @@ Microsoftがsupport中でも、2または3を満たさなければ自動変更�
 
 Microsoftのrelease information/lifecycleを2026-07-24に確認した時点の判断である。latest revisionは毎月変わるため、製品へ固定値として埋め込まない。
 
-| Version | Base build | Home/Pro support end | Totonoe MVP方針 |
+| Version | Base build | Home/Pro support end | PCカスタム MVP方針 |
 | --- | ---: | --- | --- |
 | Windows 11 24H2 | 26100 | 2026-10-13 | 初期test matrix対象。ただし出荷日が終了日に近いため、出荷時に再判定する |
 | Windows 11 25H2 | 26200 | 2027-10-12 | 初期test matrixの主対象 |
 | Windows 11 26H1 | 28000 | 2028-03-14 | OSは検出するが、対応実機matrixが揃うまで自動変更は無効。24H2/25H2からのin-place updateではなく新hardware向け |
-| Windows 11 23H2 | 22631 | Home/Proは終了 | MVP対象外。Enterprise/Educationがsupport中でもTotonoe未試験としてread-only案内 |
+| Windows 11 23H2 | 22631 | Home/Proは終了 | MVP対象外。Enterprise/Educationがsupport中でもPCカスタム未試験としてread-only案内 |
 
 26H1が既存端末への通常のfeature updateではないことはMicrosoft release informationに明記されている。したがって「buildが大きいから25H2と同等」と推測せず、hardware/driverを含む独立行として試験する。
 
@@ -92,7 +92,7 @@ catalogは機能を狭める更新だけを即時適用できる。未知build�
 
 ## 5. BRIEF §8 調査結果
 
-| 調査項目 | 一次情報で確認できたこと | Totonoeでの決定 | 状態 |
+| 調査項目 | 一次情報で確認できたこと | PCカスタムでの決定 | 状態 |
 | --- | --- | --- | --- |
 | ビルド番号取得 | WMI `Win32_OperatingSystem`はVersion/BuildNumber/SKU等を公開する。Intune資料にCurrentBuildNumber/UBRの使用例がある | WMIを主、64-bit registryのUBRを補助、feature probeを併用 | 資料確認済み、実装未着手 |
 | レジストリ操作 | `RegOpenKeyEx`、`RegQueryValueEx`、`RegSetValueEx`、`RegDeleteValue`等は公開API。WOW64 view指定がある | key/value存在、type、length、raw bytes、view、適用値をlossless保存。最小accessで開く | API確認済み、全対象build実機未検証 |
@@ -117,7 +117,7 @@ catalogは機能を狭める更新だけを即時適用できる。未知build�
 
 ### 6.1 レジストリ
 
-`RegQueryValueEx`でtypeとsizeを先に取得し、raw bytesを欠落なく保存する。string terminatorの扱いを型ごとに検証し、32/64-bit viewを明示する。rollbackは元valueが無かった場合に、現在値がTotonoeの適用値と一致するときだけvalueを削除する。原子的なempty-key compare-deleteが無いため、新規mutationは元keyが無い場合にfail-closedとし、key全体を自動削除しない。既存keyやsibling valueは消さない。
+`RegQueryValueEx`でtypeとsizeを先に取得し、raw bytesを欠落なく保存する。string terminatorの扱いを型ごとに検証し、32/64-bit viewを明示する。rollbackは元valueが無かった場合に、現在値がPCカスタムの適用値と一致するときだけvalueを削除する。原子的なempty-key compare-deleteが無いため、新規mutationは元keyが無い場合にfail-closedとし、key全体を自動削除しない。既存keyやsibling valueは消さない。
 
 MicrosoftのSettings status pageに載るregistry pathは、設定状態を読むためのreferenceであって、すべてがthird-party write contractであるとは解釈しない。Actionごとに公開setterの有無とbuild別evidenceをcatalogへ残す。
 
@@ -197,7 +197,7 @@ Task 2ではnamed pipe案を攻撃testし、必要なら`ncalrpc`を比較spike�
 6. mutable Actionはbuild/revisionごとの自動test evidenceと実機承認があるものだけ再有効化する。
 7. 失敗Actionだけをquarantineし、他Actionと原因を切り分けて表示する。
 
-Windows release healthの最新buildを自動的に「安全」と解釈しない。release情報は候補buildを知る入力であり、Totonoe固有のapply/rollback合格を代替しない。
+Windows release healthの最新buildを自動的に「安全」と解釈しない。release情報は候補buildを知る入力であり、PCカスタム固有のapply/rollback合格を代替しない。
 
 ## 8. Test matrix
 

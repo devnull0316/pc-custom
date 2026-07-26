@@ -2,7 +2,7 @@
 //!
 //! `ProcessMatcher`(検知) → `ProfileSupervisor`(適用/復元) を束ね、外からは
 //! 「有効なプロファイル一覧を同期する」「プロセススナップショットを 1 tick 流す」の
-//! 2 操作だけを見せる。実際のプロセス列挙(WMI/Toolhelp)と実適用(TotonoeEngine)は
+//! 2 操作だけを見せる。実際のプロセス列挙(WMI/Toolhelp)と実適用(PcCustomEngine)は
 //! `ObservedProcess` の供給と `ProfileActionSink` 実装という薄い I/O シムに閉じ込める。
 
 use std::collections::{BTreeSet, HashSet};

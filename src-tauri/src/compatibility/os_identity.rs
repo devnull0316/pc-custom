@@ -111,7 +111,7 @@ impl OsIdentity {
     pub fn load() -> Result<Self, OsIdentityError> {
         Err(OsIdentityError::new(
             OsIdentityErrorKind::UnsupportedPlatform,
-            "Totonoe Windows Actions are unavailable on this platform",
+            "PCカスタム Windows Actions are unavailable on this platform",
         ))
     }
 

@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-rollback は「既定値を入れる」操作ではない。Totonoe が変更する直前の状態へ、値の欠如、型、複数resourceの組合せを含めて正確に戻す。Windows のシステム復元は補助にもできるが、通常の復元根拠にはしない。
+rollback は「既定値を入れる」操作ではない。PCカスタム が変更する直前の状態へ、値の欠如、型、複数resourceの組合せを含めて正確に戻す。Windows のシステム復元は補助にもできるが、通常の復元根拠にはしない。
 
 ## 2. 不変条件
 
@@ -58,7 +58,7 @@ BRIEF の必須5項目を包含する。
 復元:
 
 - 元valueあり: 元type/raw bytesをそのまま設定する。
-- 元valueなし・元keyあり: Totonoeの適用値と一致する場合だけvalueを削除し、既存keyは残す。
+- 元valueなし・元keyあり: PCカスタムの適用値と一致する場合だけvalueを削除し、既存keyは残す。
 - 元keyなし: 新規preview/backupをfail-closedにして書き込まない。旧版backupの復旧では対象valueだけを削除し、key全体は削除せず`RECOVERY_REQUIRED`を残す。
 
 この制約は、空確認とkey削除の間に第三者がvalueを書いた場合に、そのvalueごとkeyを消すTOCTOUを避けるためである。target valueの比較と書込/削除の間に残る狭いraceも、適用直後・復元直後の再検出と競合表示で検知し、無条件の成功扱いにはしない。
@@ -67,12 +67,12 @@ BRIEF の必須5項目を包含する。
 
 - AC configured GUID、DC configured GUIDを別々に保存する。
 - effective modeは診断用観測値であり、OEM/policy/battery saverで変わるため復元値にしない。
-- rollbackは現在configured GUIDがTotonoe適用GUIDと一致する側だけを元GUIDへ戻す。片側競合は部分復元として明示する。
+- rollbackは現在configured GUIDがPCカスタム適用GUIDと一致する側だけを元GUIDへ戻す。片側競合は部分復元として明示する。
 
 ### Session/API payload
 
 - sleep prevention: lease owner、flags、開始時刻、owner thread/process、API結果。
-- process launch: 起動前に存在したinstance、Totonoeが起動したPID、creation time、file identity、終了方針。
+- process launch: 起動前に存在したinstance、PCカスタムが起動したPID、creation time、file identity、終了方針。
 - observation/guided Action: OS変更payloadを持たず、rollbackはno-opであることを明示する。
 
 ### Composite payload
@@ -103,7 +103,7 @@ itemは各stageの `startedAt`, `finishedAt`, `attempt`, result を持つ。`APP
 | 現在状態 | 処理 |
 | --- | --- |
 | original | 外部変更は残っていない。itemを未適用または復元済みとしてjournal整合 |
-| applied | Totonoeの変更が残っている。自動rollback可能 |
+| applied | PCカスタムの変更が残っている。自動rollback可能 |
 | third | ユーザー、GPO、他アプリが変更。自動上書きせずconflict |
 | unknown | API失敗、device不在、unsupported build。`RECOVERY_REQUIRED` |
 
@@ -133,7 +133,7 @@ Windows Application Recovery and Restart は早期再起動の補助として評
 - 最後のownerが外れた時だけpre-stateへrollbackする。
 - 異なるdesired stateとの競合は適用時に止め、既存profileの状態を上書きしない。
 - gameがcrashしてhandleがsignaledになった場合も通常終了と同じ復元経路を使う。
-- Totonoeがcrashした場合は次回起動時にまず全未復元を戻し、gameがまだ動いていても古いsessionを暗黙再開しない。ユーザーが望む場合は復旧完了後に新しいpreviewから再適用する。
+- PCカスタムがcrashした場合は次回起動時にまず全未復元を戻し、gameがまだ動いていても古いsessionを暗黙再開しない。ユーザーが望む場合は復旧完了後に新しいpreviewから再適用する。
 
 session API がprocess終了でOSにより自動解除される場合も、journalをreconcileし「OS側で解除済み」と記録する。永続Actionが残っている可能性とは分ける。
 
@@ -218,7 +218,7 @@ session API がprocess終了でOSにより自動解除される場合も、journ
 
 ## 12. 手動救済
 
-自動復元できない場合も、Totonoeは任意scriptを生成・実行しない。画面には次を示す。
+自動復元できない場合も、PCカスタムは任意scriptを生成・実行しない。画面には次を示す。
 
 - 何を変更したか
 - 保存済みの元状態を人が読める範囲で説明

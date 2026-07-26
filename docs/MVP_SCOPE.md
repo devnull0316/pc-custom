@@ -4,7 +4,7 @@
 
 MVP は「多機能」より、変更の検出・保存・適用・検証・復元という一連の信頼性を完成させる。Windows 11 の公開 API、公式 CLI、または Microsoft が文書化した設定を優先し、書き込み契約が明確でない項目は Action の型だけを用意しても、自動適用を互換性ゲートで止める。
 
-2026-07-24 時点の対象候補は、サポート期間内の Windows 11 24H2、25H2、26H1 である。ただし「Microsoft がサポート中」と「Totonoe が試験済み」は別であり、実機試験が終わるまでは `未検証・要CC確認` と表示する。26H1 は既存 24H2/25H2 機への通常の機能更新ではないため、独立した試験行として扱う。
+2026-07-24 時点の対象候補は、サポート期間内の Windows 11 24H2、25H2、26H1 である。ただし「Microsoft がサポート中」と「PCカスタム が試験済み」は別であり、実機試験が終わるまでは `未検証・要CC確認` と表示する。26H1 は既存 24H2/25H2 機への通常の機能更新ではないため、独立した試験行として扱う。
 
 既定editionは**per-user・helperなし・admin Actionなし・`asInvoker`**とする。昇格helperはmachine-scopeのopt-in editionで将来提供する境界であり、今回のMVP実行体には含めない。
 
@@ -31,7 +31,7 @@ MVP は「多機能」より、変更の検出・保存・適用・検証・復�
 - Action の一時適用、所有権付き lease、終了時の逆順復元
 - 同一 Action の多重適用防止
 - 複数ゲーム同時起動時の同値共有と競合停止
-- Totonoe またはゲームのクラッシュ後の復旧
+- PCカスタム またはゲームのクラッシュ後の復旧
 
 ## 3. 初期実装 Action 14件
 
@@ -46,7 +46,7 @@ MVP は「多機能」より、変更の検出・保存・適用・検証・復�
 | `theme.color_mode` / Windows とアプリをダーク・ライト表示にする | CC監査P3承認済みのHKCU `Themes\Personalize`の`AppsUseLightTheme` / `SystemUsesLightTheme`限定setter（`0=dark, 1=light`） | 2値それぞれのキー/値有無、型、元rawデータ、適用type/bytes、configured/effective観測 | 2値を逆順復元しbounded `WM_SETTINGCHANGE`等で通知。片方失敗時もtransaction rollback。policy/第三状態では自動writeしない | 安全。contrast themeと対象buildの実機smokeが出荷条件 | 不要 | OS不要。一部app再起動 | 中 | configuredは可。effective反映は部分的 |
 | `theme.transparency` / Windows の透明効果を切り替える | CC監査P3承認済みのHKCU `Themes\Personalize\EnableTransparency`限定setter | 完全registry snapshot、configured/effective観測、contrast/policy状態 | applied値一致時だけ元値または元の欠如状態へ復元。policy/第三状態では停止 | 安全。実機smokeが出荷条件 | 不要 | OS不要 | 中 | configuredは可。effectiveは要試験。今回Task 2の実装対象外 |
 | `gaming.game_mode` / Windows のゲームモードを切り替える | Microsoft が状態参照用に記載する HKCU `Software\Microsoft\GameBar\AutoGameModeEnabled`。第三者の書込契約は未確認 | 完全なレジストリ snapshot | 元状態へ復元し、次回ゲーム起動前に検証 | 注意。自動適用は実機検証まで無効。性能向上は保証しない | 不要 | 反映条件は未検証 | 中〜高 | 設定値は可。実効状態とは分ける |
-| `session.prevent_sleep` / このモード中は自動スリープを防ぐ | 公開 Win32 API `SetThreadExecutionState`。画面常時点灯は別パラメータで既定OFF | lease 所有者、開始時刻、使用フラグ、API結果、実行スレッド識別子 | 最後の lease 解放時に `ES_CONTINUOUS` で要求を解除。プロセス終了時はOSが自動解除 | 安全 | 不要 | 不要 | 低 | Totonoe の lease は可。OS全体の全要求一覧ではない |
+| `session.prevent_sleep` / このモード中は自動スリープを防ぐ | 公開 Win32 API `SetThreadExecutionState`。画面常時点灯は別パラメータで既定OFF | lease 所有者、開始時刻、使用フラグ、API結果、実行スレッド識別子 | 最後の lease 解放時に `ES_CONTINUOUS` で要求を解除。プロセス終了時はOSが自動解除 | 安全 | 不要 | 不要 | 低 | PCカスタム の lease は可。OS全体の全要求一覧ではない |
 | `apps.launch_set` / 必要なアプリをまとめて起動する | 端末上でユーザーが明示登録したopaque app IDだけを参照。MVPは引数なし、shell/file associationなし、known script host/LOLBins拒否。検証済み絶対EXEを`CreateProcessW`のapplication nameへ明示し、handle継承を無効化 | 起動前に存在したprocess、作成PID・時刻・file identity、local registration ID、終了方針 | 既定は追跡解除のみ。明示的`closeOnRollback`時だけ同一processを確認して通常終了要求。強制終了しない | 注意。未保存dataの可能性 | 不要 | 不要 | 低 | 可。ただしprotected processは不明 |
 | `games.process_watch` / 登録したゲームの起動・終了を検知する | 公開 Tool Help API のプロセス snapshot と `QueryFullProcessImageName`。注入・ゲーム改変なし | 登録ファイルID、正規化パス、検知PID・作成時刻、監視世代 | 監視登録と lease を解除。OS変更なし | 安全 | 不要 | 不要 | 低 | 可。アクセス拒否時は不明 |
 | `startup.inventory` / 自動起動するアプリを確認する | baselineは標準権限で読めるHKCU Run/RunOnceとuser Startup folder。WMI/HKLM/common sourceはprivilege差があるためbest-effort | 読取時刻、情報源、取得可否、正規化した項目。復元用変更dataなし | no-op。MVPでは無効化・削除しない | 安全 | baseline不要。追加sourceは制限あり | 不要 | 中。起動元追加に追従が必要 | 部分的。sourceごとのunknownを表示し、網羅を主張しない |

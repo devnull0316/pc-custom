@@ -622,7 +622,7 @@ mod attack_spike_tests {
             logon_sid: vec![2; 12],
             integrity_level: IntegrityLevel::Medium,
             elevated: false,
-            normalized_image_path: r"\\?\C:\Program Files\Totonoe\totonoe.exe".to_owned(),
+            normalized_image_path: r"\\?\C:\Program Files\PCカスタム\totonoe.exe".to_owned(),
             file_identity: FileIdentity {
                 volume_serial_number: 9,
                 file_id: [3; 16],

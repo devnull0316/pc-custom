@@ -6,18 +6,18 @@
 
 use std::sync::Arc;
 
-use crate::engine::TotonoeEngine;
+use crate::engine::PcCustomEngine;
 use crate::error::CoreError;
 use crate::presentation::{PreviewActionRequest, PreviewActionsRequest};
 
 use super::{AppliedAction, PlannedAction, ProfileActionSink, ProfileError, ProfileSessionId};
 
 pub struct EngineProfileSink {
-    engine: Arc<TotonoeEngine>,
+    engine: Arc<PcCustomEngine>,
 }
 
 impl EngineProfileSink {
-    pub fn new(engine: Arc<TotonoeEngine>) -> Self {
+    pub fn new(engine: Arc<PcCustomEngine>) -> Self {
         Self { engine }
     }
 }
@@ -105,7 +105,7 @@ mod smoke {
     use crate::action::ActionId;
     use crate::backup::{read_registry_state, RegistryLocation, RegistryTarget, RegistryValueState};
     use crate::compatibility::OsIdentity;
-    use crate::engine::TotonoeEngine;
+    use crate::engine::PcCustomEngine;
     use crate::game_profile::{PlannedAction, ProfileActionSink, ProfileSessionId};
     use crate::journal::JournalDatabase;
 
@@ -160,7 +160,7 @@ mod smoke {
 
         let journal = Arc::new(JournalDatabase::open_in_memory().expect("in-memory journal"));
         let engine = Arc::new(
-            TotonoeEngine::new(journal, Some(OsIdentity::from_test_build(26_200)))
+            PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200)))
                 .expect("engine with a TestedMutable build"),
         );
         let mut sink = EngineProfileSink::new(engine);

@@ -332,7 +332,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             label: "組織のポリシーで管理されています".to_owned(),
             detail: authority
                 .map(bounded)
-                .unwrap_or_else(|| "Totonoeからは上書きしません。".to_owned()),
+                .unwrap_or_else(|| "PCカスタムからは上書きしません。".to_owned()),
             items: Vec::new(),
             observed_at: None,
             integration: None,
@@ -669,13 +669,13 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::TaskbarShowDesktop => "タスクバー右端のデスクトップ表示操作を管理したい人向け",
         ActionId::SearchRecentOnHover => "検索アイコンに触れたときの動作を選びたい人向け",
         ActionId::TaskbarMultiMonitor | ActionId::TaskbarMultiMonitorMode => {
-            "複数モニターのタスクバー表示を整えたい人向け"
+            "複数モニターのタスクバー表示を変えたい人向け"
         }
         ActionId::StartShowAllPins => "スタートですべてのピンを先に見たい人向け",
         ActionId::StartRecentApps => "スタートの最近追加したアプリ表示を管理したい人向け",
         ActionId::AppearanceAccentStartTaskbar
         | ActionId::AppearanceAccentTitleBars
-        | ActionId::AppearanceAutoAccent => "Windowsのアクセント色の使われ方を整えたい人向け",
+        | ActionId::AppearanceAutoAccent => "Windowsのアクセント色の使われ方を変えたい人向け",
         ActionId::GamesGameMode => "Windows標準のGame Modeを明示的に管理したい人向け",
         ActionId::GamesControllerGameBar => {
             "コントローラーからGame Barを開く操作を管理したい人向け"
@@ -688,7 +688,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
         | ActionId::InputDoubleSpacePeriod
         | ActionId::InputAutoShift
         | ActionId::InputVoiceTypingKey
-        | ActionId::InputMultilingualSuggestions => "タッチキーボードや入力候補を整えたい人向け",
+        | ActionId::InputMultilingualSuggestions => "タッチキーボードや入力候補を変えたい人向け",
         ActionId::ExplorerStatusBar
         | ActionId::ExplorerInfoTips
         | ActionId::ExplorerHideEmptyDrives
@@ -699,7 +699,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
         | ActionId::ExplorerDriveLetters
         | ActionId::ExplorerPreviewHandlers
         | ActionId::ExplorerSharingWizard
-        | ActionId::ExplorerAlwaysShowMenus => "Explorerの表示や操作を細かく整えたい人向け",
+        | ActionId::ExplorerAlwaysShowMenus => "Explorerの表示や操作を細かく変えたい人向け",
         ActionId::AppearanceTaskbarAnimations => "タスクバーの視覚アニメーションを選びたい人向け",
         ActionId::NotificationsToastBanners => "Windowsの通知バナー表示を管理したい人向け",
         ActionId::SetupStartupInventory => {
@@ -713,7 +713,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::AppearanceWindowColor => {
             "タイトルバーなどの色を、決められた色から選んで変えたい人向け"
         }
-        ActionId::SetupPowerToysStatus => "日常のWindows操作をPowerToysで整えたい人向け",
+        ActionId::SetupPowerToysStatus => "日常のWindows操作をPowerToysで便利にしたい人向け",
         ActionId::SetupLaunchApps => "勉強や作業を始めるアプリを一度に開きたい人向け",
         ActionId::SetupWindowsUpdateStatus => {
             "更新確認日時と再起動保留だけを変更せず確認したい人向け"
@@ -879,7 +879,7 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
                     if *keep_display_on { "あり" } else { "なし" }
                 )
             } else {
-                "Totonoeのスリープ防止なし".to_owned()
+                "PCカスタムのスリープ防止なし".to_owned()
             }
         }
         ObservedValue::ActivePowerScheme { guid } => {
@@ -1022,7 +1022,7 @@ fn observed_detail(value: &ObservedValue) -> String {
             "アプリとシステムの2値を別々に確認しています。".to_owned()
         }
         ObservedValue::SleepLease { .. } => {
-            "Windows全体ではなく、Totonoeが所有するleaseだけを表示します。".to_owned()
+            "Windows全体ではなく、PCカスタムが所有するleaseだけを表示します。".to_owned()
         }
         ObservedValue::ActivePowerScheme { .. } => {
             "公開Power APIで読み取りました。設定は変更していません。".to_owned()

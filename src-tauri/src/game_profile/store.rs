@@ -615,7 +615,7 @@ fn resolve_binding(_path: &str) -> CoreResult<(String, u64, [u8; 16])> {
         "UNSUPPORTED_PLATFORM",
         "VALIDATE",
         false,
-        "TotonoeはWindows 11専用です。",
+        "PCカスタムはWindows 11専用です。",
     ))
 }
 

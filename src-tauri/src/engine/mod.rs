@@ -48,14 +48,14 @@ struct WorkItem {
     backup: BackupEnvelope,
 }
 
-pub struct TotonoeEngine {
+pub struct PcCustomEngine {
     journal: Arc<JournalDatabase>,
     initial_identity: Option<OsIdentity>,
     previews: Mutex<HashMap<String, PreviewRecord>>,
     mutation_gate: Mutex<()>,
 }
 
-impl TotonoeEngine {
+impl PcCustomEngine {
     pub fn new(
         journal: Arc<JournalDatabase>,
         initial_identity: Option<OsIdentity>,
@@ -370,7 +370,7 @@ fn core_mutation_lock_error(error: crate::windows::WindowsError) -> CoreError {
         "MUTATION_LOCK_FAILURE",
         "LOCK_RESOURCES",
         retryable,
-        "別のTotonoe処理が進行中か、安全な排他を取得できませんでした。変更していません。",
+        "別のPCカスタム処理が進行中か、安全な排他を取得できませんでした。変更していません。",
     )
 }
 

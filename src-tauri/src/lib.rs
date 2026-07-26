@@ -28,7 +28,7 @@ pub fn run() {
                 let window = app.get_webview_window("main").ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::NotFound,
-                        "Totonoe main window was not created",
+                        "PCカスタム main window was not created",
                     )
                 })?;
                 let dark = matches!(window.theme(), Ok(tauri::Theme::Dark));
@@ -69,5 +69,5 @@ pub fn run() {
             commands::open_windows_settings,
         ])
         .run(tauri::generate_context!())
-        .expect("Totonoe runtime terminated unexpectedly");
+        .expect("PCカスタム runtime terminated unexpectedly");
 }

@@ -292,7 +292,7 @@ pub fn launch_known_apps(bundle: AppLaunchBundle) -> WindowsResult<KnownAppsObse
         if app_is_running(*app, &running) {
             continue;
         }
-        // 標準入出力を継承させない。継承すると、起動したアプリが Totonoe のパイプを
+        // 標準入出力を継承させない。継承すると、起動したアプリが PCカスタム のパイプを
         // 掴んだままになり、こちらの出力を読んでいる側がアプリ終了までブロックする。
         // （実機テストがこれで5分ハングした）
         let mut child = std::process::Command::new(path)

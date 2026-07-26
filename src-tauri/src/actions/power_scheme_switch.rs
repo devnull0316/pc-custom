@@ -345,7 +345,7 @@ impl Action for PowerSchemeSwitchAction {
             requires_admin: false,
             requires_restart: false,
             windows_update_impact: METADATA.windows_update_impact.to_owned(),
-            rollback_scope: "適用後のactive schemeがTotonoeの設定値のままの場合だけ、保存した元GUIDへ戻します。".to_owned(),
+            rollback_scope: "適用後のactive schemeがPCカスタムの設定値のままの場合だけ、保存した元GUIDへ戻します。".to_owned(),
         })
     }
 

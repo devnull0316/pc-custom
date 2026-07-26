@@ -20,9 +20,9 @@ const NAV_ITEMS: readonly { id: ViewId; label: string; icon: IconName }[] = [
 export function Sidebar({ activeView, dataMode, profileCount, onNavigate, onOpenDraft }: SidebarProps) {
   return (
     <aside className="sidebar">
-      <div aria-label="Totonoe" className="brand">
+      <div aria-label="PCカスタム" className="brand">
         <div aria-hidden="true" className="brand-mark"><span /><span /><span /></div>
-        <span className="brand-name">Totonoe</span>
+        <span className="brand-name">PCカスタム</span>
       </div>
       <nav aria-label="メインナビゲーション" className="main-nav">
         {NAV_ITEMS.map((item) => (

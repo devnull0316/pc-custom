@@ -4,7 +4,7 @@ use super::{WindowsError, WindowsErrorKind, WindowsResult};
 ///
 /// A global writer lock is deliberately stricter than independent resource locks:
 /// every resource key is therefore acquired in the same effective order. This
-/// prevents two Totonoe instances from interleaving backup/apply/verify while the
+/// prevents two PCカスタム instances from interleaving backup/apply/verify while the
 /// owner-aware per-resource lease model is completed in the next profile slice.
 #[cfg(windows)]
 pub struct CoreMutationGuard {
@@ -38,7 +38,7 @@ pub fn acquire_core_mutation_lock() -> WindowsResult<CoreMutationGuard> {
     use windows::core::w;
 
     acquire_named_mutex(
-        w!("Local\\Totonoe.CoreMutation.v1"),
+        w!("Local\\PCカスタム.CoreMutation.v1"),
         30_000,
         "CreateMutexW core mutation lock",
         "wait for core mutation lock",

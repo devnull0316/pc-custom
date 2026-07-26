@@ -20,7 +20,7 @@ export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategor
   return (
     <div className="view home-view">
       <header className="view-heading home-heading">
-        <div><p className="eyebrow">結果から選ぶ</p><h1>今日は何を整えますか</h1><p>専門用語ではなく、得たい結果から選べます。適用前には必ず差分を確認します。</p></div>
+        <div><p className="eyebrow">結果から選ぶ</p><h1>今日は何を変更しますか</h1><p>専門用語ではなく、得たい結果から選べます。適用前には必ず差分を確認します。</p></div>
         <div aria-label="システム互換性" className="system-summary">
           <span className={`system-summary__mark system-summary__mark--${bootstrap?.mode ?? "loading"}`}><Icon name={bootstrap?.mode === "ready" ? "check" : "info"} size={15} /></span>
           <span><small>{bootstrap?.osLabel ?? "Windowsを確認中"}</small><strong>{bootstrap?.build == null ? "build 未確認" : `build ${bootstrap.build}`}</strong></span>
@@ -34,7 +34,7 @@ export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategor
         </section>
       ) : null}
       <section aria-labelledby="results-title">
-        <div className="section-heading"><div><h2 id="results-title">整えたいこと</h2><p>登録済みの{actions.length}項目から、いまのWindowsで実際に変えられるものを見分けて表示します。</p></div></div>
+        <div className="section-heading"><div><h2 id="results-title">変更できる項目</h2><p>登録済みの{actions.length}項目から、いまのWindowsで実際に変えられるものを見分けて表示します。</p></div></div>
         <div className="result-grid">
           {RESULT_TILES.map((tile, index) => (
             <button className={`result-tile result-tile--${index + 1}`} key={tile.id} onClick={() => tile.category === "recovery" ? onOpenTimeline() : tile.category === "modes" ? onOpenView("profiles") : tile.category === "setup-view" ? onOpenView("setup") : onOpenCategory(tile.category)} type="button">

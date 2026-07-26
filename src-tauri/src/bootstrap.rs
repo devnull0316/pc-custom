@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     compatibility::OsIdentity,
-    engine::TotonoeEngine,
+    engine::PcCustomEngine,
     error::{CoreError, CoreResult},
     journal::JournalDatabase,
     presentation::BootstrapStatus,
@@ -15,7 +15,7 @@ use crate::{
 /// Tauri-managed application state. Initialization failures keep the UI alive in
 /// fail-closed mode; no command can reach a mutation path without an engine.
 pub struct ApplicationState {
-    engine: Option<Arc<TotonoeEngine>>,
+    engine: Option<Arc<PcCustomEngine>>,
     profile_store: Option<Arc<crate::game_profile::ProfileStore>>,
     theme_schedule_store: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     initialization_error: Option<CoreError>,
@@ -66,7 +66,7 @@ impl ApplicationState {
         }
     }
 
-    pub fn engine(&self) -> CoreResult<Arc<TotonoeEngine>> {
+    pub fn engine(&self) -> CoreResult<Arc<PcCustomEngine>> {
         if let Some(error) = &self.initialization_error {
             return Err(error.clone());
         }
@@ -143,7 +143,7 @@ impl Drop for ApplicationState {
 }
 
 type EngineBootstrap = (
-    TotonoeEngine,
+    PcCustomEngine,
     crate::windows::AppInstanceGuard,
     Arc<crate::game_profile::ProfileStore>,
     Arc<crate::theme_schedule::ThemeScheduleStore>,
@@ -160,17 +160,17 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
             "APP_INSTANCE_LOCKED",
             "BOOTSTRAP",
             error.kind == crate::windows::WindowsErrorKind::ResourceLimit,
-            "別のTotonoeが実行中です。この画面からの変更操作は停止しています。",
+            "別のPCカスタムが実行中です。この画面からの変更操作は停止しています。",
         )
     })?;
-    let database = Arc::new(JournalDatabase::open(&data_directory.join("totonoe.db"))?);
+    let database = Arc::new(JournalDatabase::open(&data_directory.join("pc-custom.db"))?);
     let identity = match OsIdentity::load() {
         Ok(identity) => Some(identity),
         // Absence is an explicit engine input: startup reconcile records
         // RECOVERY_REQUIRED and every mutation gate remains closed.
         Err(_identity_error) => None,
     };
-    let engine = TotonoeEngine::new(database, identity)?;
+    let engine = PcCustomEngine::new(database, identity)?;
     let profile_store = Arc::new(crate::game_profile::ProfileStore::open(
         data_directory.join("profiles.json"),
     )?);
@@ -189,7 +189,7 @@ fn data_directory() -> CoreResult<PathBuf> {
             "ユーザー用データ保存先を確認できないため、変更操作を停止しています。",
         )
     })?;
-    Ok(PathBuf::from(local_app_data).join("Totonoe").join("data"))
+    Ok(PathBuf::from(local_app_data).join("PCカスタム").join("data"))
 }
 
 fn ensure_private_directory(path: &Path) -> CoreResult<()> {
@@ -229,7 +229,7 @@ fn reject_reparse_points(_path: &Path) -> CoreResult<()> {
         "UNSUPPORTED_PLATFORM",
         "BOOTSTRAP",
         false,
-        "TotonoeはWindows 11専用です。",
+        "PCカスタムはWindows 11専用です。",
     ))
 }
 

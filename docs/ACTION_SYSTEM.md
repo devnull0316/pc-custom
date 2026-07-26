@@ -2,7 +2,7 @@
 
 ## 1. 設計原則
 
-Action は「1つのユーザー結果」を検出・説明・適用・検証・復元する、Totonoe の最小単位である。Windows API の1呼出しやレジストリの1値と常に同じではない。例えばダーク/ライト切替は、ユーザーにとって1つの結果なので複数値を1 Action の内部 transaction として扱う。
+Action は「1つのユーザー結果」を検出・説明・適用・検証・復元する、PCカスタム の最小単位である。Windows API の1呼出しやレジストリの1値と常に同じではない。例えばダーク/ライト切替は、ユーザーにとって1つの結果なので複数値を1 Action の内部 transaction として扱う。
 
 Action 実装はアプリに登録済みの first-party code のみである。プロファイルや AI は Action ID と schema に合うパラメータを選べるが、実装、コマンド、レジストリ path を追加できない。
 
@@ -43,7 +43,7 @@ BRIEF 必須フィールドをそのまま持つ。
 | kind | 例 | rollbackの意味 |
 | --- | --- | --- |
 | `persistent` | theme、power user mode | 保存した変更前状態へ戻す |
-| `session` | sleep prevention、app launch | lease解除、Totonoeが作ったsession資源だけを通常終了 |
+| `session` | sleep prevention、app launch | lease解除、PCカスタムが作ったsession資源だけを通常終了 |
 | `observation` | startup inventory、readiness check | OS変更なし。観測sessionを閉じるno-op |
 | `guided` | 公開setterがないDNDの案内、setter根拠未承認storageの読取候補 | 新しいOS変更を作らず、自動適用済みとは記録しない。旧durable backupだけは復旧可能 |
 
@@ -214,7 +214,7 @@ Explorer/theme系setterの書込後は、まず`SHChangeNotify(SHCNE_ASSOCCHANGE
 - local登録時にopaque app IDを発行し、Action/profileはそのIDだけを参照する。共有profileとAIはlocal path、app IDの新規作成、argvを指定できない。
 - MVPは引数なしを基本とし、将来の可変値もappごとの固定schemaとallowlistに限定する。known shell/script host、system binary launcher、file associationを汎用appとして登録できない。
 - `CreateProcessW`では検証済み絶対EXEを`lpApplicationName`へ明示し、必要な型付きargvだけをadapter内の試験済みWindows quotingで`lpCommandLine`へ変換し、handle継承を無効にする。argv配列を直接受けるAPIだとは仮定しない。
-- 起動前から存在したprocessとTotonoeが起動したprocessを区別する。
+- 起動前から存在したprocessとPCカスタムが起動したprocessを区別する。
 - rollbackで既定の強制終了をしない。明示同意がある場合も同一PID・creation time・image identityを再確認し、通常終了だけを要求する。
 
 一次情報: [CreateProcessW](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw)、[Creating Processes](https://learn.microsoft.com/en-us/windows/win32/procthread/creating-processes)。

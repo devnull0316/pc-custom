@@ -3,7 +3,7 @@
 //! 責務: 登録ゲームの起動を検知したら、そのプロファイルの Action 集合を適用し、
 //! 終了時に「このプロファイルが最後の所有者になった resource だけ」を復元する。
 //! resource_key 単位の lease 共有 / 競合停止 / instance key による多重適用防止 /
-//! 逆順復元を担う。実プロセス監視(WMI/Toolhelp)と実適用(TotonoeEngine)は
+//! 逆順復元を担う。実プロセス監視(WMI/Toolhelp)と実適用(PcCustomEngine)は
 //! trait 越しに注入し、ここは OS にも DB にも直接触れない純粋な状態機械にする。
 //!
 //! GAME_PROFILES.md §3(状態機械) §5(多重適用と資源リース) §6(適用/復元順) §11(受入試験) を実装する。

@@ -77,7 +77,7 @@ export function PowerToysPanel({
 
       <div className="inline-note" role="note">
         <Icon name="info" />
-        <span>TotonoeはPowerToysの設定ファイルを読み書きせず、キーフック・常駐フック・他プロセスへのinjectionも行いません。</span>
+        <span>PCカスタムはPowerToysの設定ファイルを読み書きせず、キーフック・常駐フック・他プロセスへのinjectionも行いません。</span>
       </div>
     </section>
   );

@@ -147,7 +147,7 @@ pub enum RegistryRestoreOutcome {
     /// The target value was safely removed, but an empty key was retained.
     ///
     /// This is only reachable while recovering a backup written by an older
-    /// Totonoe version. Deleting an apparently-empty registry key is not an
+    /// PCカスタム version. Deleting an apparently-empty registry key is not an
     /// atomic compare-and-delete operation and could erase values written by
     /// another process after the emptiness check.
     RestoredValueKeyRetained,
@@ -273,7 +273,7 @@ mod tests {
     fn unique_target(value_name: &'static str) -> RegistryTarget {
         let key: &'static str = Box::leak(
             format!(
-                r"Software\Totonoe\IntegrationTests\{}",
+                r"Software\PCカスタム\IntegrationTests\{}",
                 Uuid::new_v4()
             )
             .into_boxed_str(),

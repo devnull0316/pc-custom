@@ -542,7 +542,7 @@ mod tests {
     fn isolated_targets() -> (RegistryTarget, RegistryTarget) {
         let key = Box::leak(
             format!(
-                r"Software\Totonoe\IntegrationTests\ColorMode\{}",
+                r"Software\PCカスタム\IntegrationTests\ColorMode\{}",
                 Uuid::new_v4()
             )
             .into_boxed_str(),

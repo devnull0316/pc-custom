@@ -1,19 +1,19 @@
 [package]
-name = "totonoe"
+name = "pc-custom"
 version = "0.1.0"
 description = "Windows を利用場面に合わせて、安全に整えて元へ戻す"
-authors = ["Totonoe contributors"]
+authors = ["PCカスタム contributors"]
 edition = "2021"
 rust-version = "1.77.2"
 license = "UNLICENSED"
 publish = false
 
 [lib]
-name = "totonoe_core"
+name = "pc_custom_core"
 path = "src/lib.rs"
 
 [[bin]]
-name = "totonoe"
+name = "pc-custom"
 path = "src/main.rs"
 
 [features]

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Totonoe",
+  "productName": "PCCustom",
   "version": "0.1.0",
-  "identifier": "jp.totonoe.app",
+  "identifier": "jp.pccustom.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Totonoe",
+        "title": "PCカスタム",
         "width": 1220,
         "height": 780,
         "minWidth": 940,

@@ -229,7 +229,7 @@ pub fn install(_app_id: &str) -> CoreResult<InstallOutcome> {
         "UNSUPPORTED_PLATFORM",
         "APPLY",
         false,
-        "TotonoeはWindows 11専用です。",
+        "PCカスタムはWindows 11専用です。",
     ))
 }
 

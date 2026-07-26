@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crate::engine::TotonoeEngine;
+use crate::engine::PcCustomEngine;
 use crate::error::{CoreError, CoreResult};
 
 use super::engine_sink::EngineProfileSink;
@@ -89,7 +89,7 @@ pub struct ProfileWatcher {
 
 impl ProfileWatcher {
     pub fn spawn(
-        engine: Arc<TotonoeEngine>,
+        engine: Arc<PcCustomEngine>,
         store: Arc<ProfileStore>,
         theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     ) -> CoreResult<Self> {
@@ -162,7 +162,7 @@ impl Drop for ProfileWatcher {
 }
 
 fn run_loop(
-    engine: Arc<TotonoeEngine>,
+    engine: Arc<PcCustomEngine>,
     store: Arc<ProfileStore>,
     theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     stop: Arc<AtomicBool>,
@@ -201,7 +201,7 @@ fn run_loop(
 /// 境界をまたいだ時だけ、検証済みの `theme.color_mode` を preview→commit で適用する。
 /// 失敗は握り潰さず store へ記録し、UIから見えるようにする。
 fn apply_theme_schedule_if_due(
-    engine: &TotonoeEngine,
+    engine: &PcCustomEngine,
     store: &crate::theme_schedule::ThemeScheduleStore,
     tracker: &mut crate::theme_schedule::ThemeScheduleTracker,
 ) {
@@ -506,7 +506,7 @@ mod tests {
             Arc::new(ProfileStore::open(temp.path().join("profiles.json")).expect("profile store"));
         let journal = Arc::new(JournalDatabase::open_in_memory().expect("journal"));
         let engine = Arc::new(
-            TotonoeEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).expect("engine"),
+            PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).expect("engine"),
         );
         let mut watcher = ProfileWatcher::spawn(engine, store, None).expect("spawn watcher");
         watcher.shutdown().expect("graceful shutdown");

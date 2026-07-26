@@ -2153,6 +2153,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "pc-custom"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "crossbeam-channel",
+ "hex",
+ "parking_lot",
+ "rand",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tempfile",
+ "thiserror 2.0.19",
+ "uuid",
+ "windows 0.58.0",
+ "winreg 0.52.0",
+ "wmi",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3570,29 +3593,6 @@ name = "toml_writer"
 version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
-
-[[package]]
-name = "totonoe"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "crossbeam-channel",
- "hex",
- "parking_lot",
- "rand",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tempfile",
- "thiserror 2.0.19",
- "uuid",
- "windows 0.58.0",
- "winreg 0.52.0",
- "wmi",
-]
 
 [[package]]
 name = "tower"

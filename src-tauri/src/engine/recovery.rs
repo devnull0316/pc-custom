@@ -1,7 +1,7 @@
 use super::*;
 use crate::journal::{ItemState, TransactionState};
 
-impl TotonoeEngine {
+impl PcCustomEngine {
     pub fn rollback_item(&self, item_id: Uuid) -> CoreResult<CommitResult> {
         let _mutation_guard = self.mutation_gate.lock();
         let _process_guard =

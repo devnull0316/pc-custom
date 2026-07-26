@@ -39,22 +39,22 @@ CC 記載の「Electron 100〜200MB級」は本リポジトリ条件では未計
 ```text
 標準権限
 ┌────────────────────────────────────────────────────┐
-│ totonoe.exe (Rust core / asInvoker)                │
+│ pc-custom.exe (Rust core / asInvoker)                │
 │  Action調停・SQLite・互換判定・tray・game watcher   │
 │       ├─ 必要時だけ生成 ─ React UI on WebView2      │
 │       └─ UAC起動・相互認証 IPC ───────────────┐     │
 └───────────────────────────────────────────────│─────┘
                                                 ▼
                                      ┌──────────────────────┐
-                                     │ totonoe-elevated.exe │
+                                     │ pc-custom-elevated.exe │
                                      │ allowlisted Action   │
                                      │ 1 transactionで終了  │
                                      └──────────────────────┘
 
-既定無効・非常駐: totonoe-experimental-host.exe
+既定無効・非常駐: pc-custom-experimental-host.exe
 ```
 
-### 2.1 `totonoe.exe`
+### 2.1 `pc-custom.exe`
 
 - 実行 manifest は `asInvoker`。常時管理者で起動しない。
 - Rust core が Action レジストリ、transaction coordinator、compatibility service、SQLite、トレイ、ゲーム検知を所有する。
@@ -71,7 +71,7 @@ CC 記載の「Electron 100〜200MB級」は本リポジトリ条件では未計
 - ウィンドウを閉じたら hide ではなく WebView/window を破棄し、トレイから必要時に再生成する。
 - WebView compromise を想定し、core 側で全引数と transaction state を再検証する。Tauri capability は helper 認証の代わりにはならない。
 
-### 2.3 `totonoe-elevated.exe`
+### 2.3 `pc-custom-elevated.exe`
 
 Task 2ではこのbinaryを作成しない。IPCの型、deny-all allowlist、validation、attack spikeだけを先に固定し、helper実体は次Taskで保護install・署名・実機攻撃試験と一体で実装する。
 
@@ -122,7 +122,7 @@ CC監査P2に従い、Explorer/theme系registry writeの反映は`SHChangeNotify
 
 ## 4. データ層
 
-標準権限Action用SQLiteは`%LOCALAPPDATA%\Totonoe\data\totonoe.db`に置き、標準ユーザーだけがアクセスできるACLを確認する。DBはUIから直接開かない。
+標準権限Action用SQLiteは`%LOCALAPPDATA%\PCカスタム\data\pc-custom.db`に置き、標準ユーザーだけがアクセスできるACLを確認する。DBはUIから直接開かない。
 
 | テーブル | 主な内容 |
 | --- | --- |
@@ -194,12 +194,12 @@ protected storeにはraw backupとは別に、要求元SIDがread-onlyで確認�
 
 - 初期版は動的プラグインを読み込まない。
 - community が共有できるのは schema 検証された data-only profile だけである。
-- Action 実装の拡張は、Totonoe に同梱され、同一publisherで署名され、compile-time registry に登録された first-party module に限定する。
+- Action 実装の拡張は、PCカスタム に同梱され、同一publisherで署名され、compile-time registry に登録された first-party module に限定する。
 - DLL、JS、任意のシェルスクリプト、EXE、任意 URL download を runtime plugin として読み込まない。
 
 ### 実験的モジュール
 
-`totonoe-experimental-host.exe` を stable core/helper と別にする。
+`pc-custom-experimental-host.exe` を stable core/helper と別にする。
 
 - Action ID は `experimental.*` namespace。
 - 別 binary、別 allowlist、別 compatibility manifest、既定未インストールまたは既定無効、非常駐。

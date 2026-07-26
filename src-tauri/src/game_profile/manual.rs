@@ -6,7 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
-    engine::TotonoeEngine,
+    engine::PcCustomEngine,
     error::{CoreError, CoreResult},
     presentation::{PreviewActionRequest, PreviewActionsRequest},
 };
@@ -23,7 +23,7 @@ pub struct ManualProfileResult {
 }
 
 pub fn run_manual_profile(
-    engine: Arc<TotonoeEngine>,
+    engine: Arc<PcCustomEngine>,
     store: Arc<ProfileStore>,
     id: &str,
 ) -> CoreResult<ManualProfileResult> {
@@ -128,7 +128,7 @@ pub fn run_manual_profile(
 }
 
 pub fn restore_manual_profile(
-    engine: Arc<TotonoeEngine>,
+    engine: Arc<PcCustomEngine>,
     store: Arc<ProfileStore>,
     id: &str,
 ) -> CoreResult<ManualProfileResult> {
@@ -187,7 +187,7 @@ mod tests {
             .unwrap();
         let journal = Arc::new(JournalDatabase::open_in_memory().unwrap());
         let engine = Arc::new(
-            TotonoeEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).unwrap(),
+            PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).unwrap(),
         );
 
         let run = run_manual_profile(engine.clone(), store.clone(), &profile.id).unwrap();
