@@ -128,6 +128,8 @@ pub enum ActionId {
     AppearanceAccentColorCheck,
     #[serde(rename = "appearance.window_color")]
     AppearanceWindowColor,
+    #[serde(rename = "setup.powertoys_status")]
+    SetupPowerToysStatus,
     #[serde(rename = "setup.launch_apps")]
     SetupLaunchApps,
     #[serde(rename = "setup.windows_update_status")]
@@ -135,7 +137,7 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 63] = [
+    pub const ALL: [Self; 64] = [
         Self::SessionPreventSleep,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
@@ -197,6 +199,7 @@ impl ActionId {
         Self::StorageTempFilesCheck,
         Self::AppearanceAccentColorCheck,
         Self::AppearanceWindowColor,
+        Self::SetupPowerToysStatus,
         Self::SetupLaunchApps,
         Self::SetupWindowsUpdateStatus,
     ];
@@ -264,6 +267,7 @@ impl ActionId {
             Self::StorageTempFilesCheck => "storage.temp_files_check",
             Self::AppearanceAccentColorCheck => "appearance.accent_color_check",
             Self::AppearanceWindowColor => "appearance.window_color",
+            Self::SetupPowerToysStatus => "setup.powertoys_status",
             Self::SetupLaunchApps => "setup.launch_apps",
             Self::SetupWindowsUpdateStatus => "setup.windows_update_status",
         }
@@ -353,6 +357,7 @@ impl FromStr for ActionId {
             "storage.temp_files_check" => Ok(Self::StorageTempFilesCheck),
             "appearance.accent_color_check" => Ok(Self::AppearanceAccentColorCheck),
             "appearance.window_color" => Ok(Self::AppearanceWindowColor),
+            "setup.powertoys_status" => Ok(Self::SetupPowerToysStatus),
             "setup.launch_apps" => Ok(Self::SetupLaunchApps),
             "setup.windows_update_status" => Ok(Self::SetupWindowsUpdateStatus),
             _ => Err(ParseActionIdError),

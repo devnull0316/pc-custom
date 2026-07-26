@@ -126,6 +126,7 @@ mod tests {
             detail: "現在の値".to_owned(),
             items: vec![],
             observed_at: Some("2026-07-25T00:00:00Z".to_owned()),
+            integration: None,
         }
     }
 

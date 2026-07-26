@@ -249,6 +249,13 @@ mod tests {
     }
 
     #[test]
+    fn powertoys_install_uses_the_existing_fixed_winget_entry() {
+        let app = find_allowed("powertoys").expect("PowerToys is allowlisted");
+        assert_eq!(app.winget_id, "Microsoft.PowerToys");
+        assert_eq!(app.name, "Microsoft PowerToys");
+    }
+
+    #[test]
     fn unknown_app_id_is_not_in_allowlist() {
         assert!(find_allowed("totally-unknown").is_none());
         assert!(find_allowed("../../evil").is_none());

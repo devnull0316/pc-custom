@@ -107,6 +107,7 @@ function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "storage.temp_files_check") return {};
   if (actionId === "appearance.accent_color_check") return {};
   if (actionId === "appearance.window_color") return { color: "teal" };
+  if (actionId === "setup.powertoys_status") return {};
   if (actionId === "setup.launch_apps") return { bundle: "study" };
   if (actionId === "setup.windows_update_status") return {};
   return {};
@@ -241,12 +242,12 @@ export function App() {
     return navigation.concat(actionCommands);
   }, [actions, navigate, openAction]);
 
-  async function requestPreview(action: ActionPresentation) {
+  async function requestActionPreview(actionId: string, parameters: Record<string, JsonValue>) {
     if (dataMode !== "live") return;
-    setPreviewPendingId(action.id);
+    setPreviewPendingId(actionId);
     setUiError(null);
     try {
-      const result = await previewActions({ actions: [{ actionId: action.id, parameters: parametersForAction(action.id) }] });
+      const result = await previewActions({ actions: [{ actionId, parameters }] });
       setPreview(result);
       setPreviewConfirmed(false);
     } catch (error: unknown) {
@@ -254,6 +255,14 @@ export function App() {
     } finally {
       setPreviewPendingId(null);
     }
+  }
+
+  function requestPreview(action: ActionPresentation) {
+    return requestActionPreview(action.id, parametersForAction(action.id));
+  }
+
+  function requestPowerToysLaunch() {
+    return requestActionPreview("setup.launch_apps", { bundle: "power_toys" });
   }
 
   async function confirmPreview() {
@@ -397,6 +406,7 @@ export function App() {
   }
 
   const draftIds = useMemo(() => new Set(profileDraft.map((item) => item.actionId)), [profileDraft]);
+  const powerToysAction = actions.find((action) => action.id === "setup.powertoys_status");
 
   return (
     <div className="app-shell">
@@ -418,7 +428,14 @@ export function App() {
           ) : view === "profiles" ? (
             <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} profiles={profiles} />
           ) : view === "setup" ? (
-            <SetupView dataMode={dataMode} />
+            <SetupView
+              dataMode={dataMode}
+              onPowerToysDetect={() => void handleDetect("setup.powertoys_status")}
+              onPowerToysLaunch={() => void requestPowerToysLaunch()}
+              powerToysAction={powerToysAction}
+              powerToysDetecting={detectionPendingId === "setup.powertoys_status"}
+              powerToysLaunching={previewPendingId === "setup.launch_apps"}
+            />
           ) : (
             <TimelineView bootstrap={bootstrap} dataMode={dataMode} items={timeline} onOpenActions={() => navigate("actions")} onRequestRollback={setRollbackTarget} onRetryRecovery={() => void runReconcile()} recoveryBusy={recoveryBusy} rollbackPendingId={rollbackPendingId} />
           )}

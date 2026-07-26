@@ -447,6 +447,39 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 
 /* --- 新しいPCをセットアップ --- */
 .setup-view { display: flex; flex-direction: column; gap: 1.25rem; }
+.powertoys-panel { display: flex; flex-direction: column; gap: 1rem; padding: 1.15rem; border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); }
+.powertoys-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.powertoys-panel__header h1 { margin: .2rem 0 .45rem; font-size: 1.35rem; }
+.powertoys-panel__header p { margin: 0; max-width: 70ch; color: var(--text-secondary); }
+.powertoys-status { display: flex; align-items: center; gap: .55rem; min-width: 220px; padding: .65rem .75rem; border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 4%, transparent); border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); }
+.powertoys-status__mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text) 8%, transparent); }
+.powertoys-status__mark--installed { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.powertoys-status > span:last-child { display: grid; gap: .15rem; }
+.powertoys-status small { color: var(--text-tertiary); }
+.powertoys-status strong { font-size: .82rem; }
+.powertoys-panel__actions { display: flex; flex-wrap: wrap; gap: .55rem; }
+.everyday-feature-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(265px, 1fr)); gap: .65rem; margin: 0; padding: 0; list-style: none; }
+.everyday-feature-card { display: grid; align-content: start; gap: .35rem; padding: .8rem .9rem; border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 3%, transparent); border: 1px solid color-mix(in srgb, var(--text) 11%, transparent); }
+.everyday-feature-card__title { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+.everyday-feature-card__title strong { font-size: .9rem; }
+/* アクセント色は面の装飾用で、小さい文字に使うとAA(4.5:1)へ届かない。
+   機能名は本文色で出し、アクセントは下の縁取りだけに使う。 */
+.everyday-feature-card__feature { color: var(--text); font-size: .78rem; font-weight: 600; }
+.everyday-feature-card p { margin: 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.55; }
+.provider-badge { flex-shrink: 0; padding: .18rem .45rem; border-radius: 999px; font-size: .7rem; font-weight: 600;
+  color: var(--text); background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); }
+.provider-badge--windows { color: var(--text-secondary); background: color-mix(in srgb, var(--text) 8%, transparent); }
+@media (max-width: 780px) {
+  .powertoys-panel__header { flex-direction: column; }
+  .powertoys-status { width: 100%; min-width: 0; }
+}
+
 .setup-group { display: flex; flex-direction: column; gap: .6rem; }
 .setup-group h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
 .setup-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .7rem; }

@@ -39,7 +39,7 @@ static METADATA: ActionMetadata = ActionMetadata {
     dependencies: &[],
     action_version: 1,
     kind: ActionKind::OneWay,
-    parameter_schema: r#"{"bundle":"study|work|creative"}"#,
+    parameter_schema: r#"{"bundle":"study|work|creative|power_toys"}"#,
     resource_keys: &["process:fixed-allowlist-app-launch"],
     method_class: MethodClass::PublicApi,
     evidence_urls: &[
@@ -253,6 +253,7 @@ mod tests {
             AppLaunchBundle::Study,
             AppLaunchBundle::Work,
             AppLaunchBundle::Creative,
+            AppLaunchBundle::PowerToys,
         ] {
             for app in apps_for_bundle(bundle) {
                 let result = resolve_known_app(*app);
@@ -261,6 +262,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    #[ignore = "CC実機確認専用: App Pathsで解決したPowerToys本体を起動し、終了しません"]
+    fn powertoys_bundle_launches_only_the_fixed_app_paths_entry() {
+        let Some(path) = crate::windows::resolve_powertoys_app_path()
+            .expect("read fixed PowerToys App Paths entry")
+        else {
+            println!("PowerToys is not registered in App Paths; launch was not attempted");
+            return;
+        };
+        assert!(path.to_ascii_lowercase().ends_with("powertoys.exe"));
+        let observed =
+            launch_known_apps(AppLaunchBundle::PowerToys).expect("launch fixed PowerToys bundle");
+        assert_eq!(observed.apps.len(), 1);
+        assert_eq!(observed.apps[0].name, "Microsoft PowerToys");
+        assert_eq!(observed.apps[0].state, KnownAppState::Running);
     }
 
     #[test]

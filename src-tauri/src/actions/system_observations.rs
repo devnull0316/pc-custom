@@ -247,6 +247,61 @@ pub static ACCENT_COLOR_CHECK_ACTION: SystemObservationAction = SystemObservatio
     method: "公開APIのDwmGetColorizationColor",
 };
 
+static POWERTOYS_STATUS_METADATA: ActionMetadata = ActionMetadata {
+    id: ActionId::SetupPowerToysStatus,
+    name: "PowerToysの導入状況を確認する",
+    description: "Windowsの文書化されたApp Paths登録だけでPowerToysの導入状況を確認します。設定ファイルは読み書きしません。",
+    category: "setup",
+    tags: &["powertoys", "app-paths", "read-only"],
+    supportedWindowsVersions: &[
+        WindowsReleaseFamily::Windows11_24H2,
+        WindowsReleaseFamily::Windows11_25H2,
+        WindowsReleaseFamily::Windows11_26H1,
+    ],
+    minimumBuild: 22_631,
+    maximumTestedBuild: 26_200,
+    riskLevel: ActionRiskLevel::Safe,
+    requiresAdmin: false,
+    requiresRestart: false,
+    requiresExplorerRestart: false,
+    conflicts: &[],
+    dependencies: &[],
+    action_version: 1,
+    kind: ActionKind::Observation,
+    parameter_schema: "{}",
+    resource_keys: &[
+        "registry:app-paths:powertoys:observation",
+        "registry:uninstall:powertoys-version:observation",
+    ],
+    method_class: MethodClass::DocumentedRegistry,
+    evidence_urls: &[
+        "https://learn.microsoft.com/windows/win32/shell/app-registration",
+        "https://learn.microsoft.com/windows/win32/msi/uninstall-registry-key",
+    ],
+    compatibility_key: "setup.powertoys_status.v1",
+    backup_codec_version: 1,
+    rollback_decoder_versions: &[1],
+    auto_apply_eligible: false,
+    windows_update_impact: "低。App Pathsとアンインストール登録の読み取りのみです。",
+};
+
+fn detect_powertoys_status() -> WindowsResult<ObservedValue> {
+    crate::windows::read_powertoys_installation().map(ObservedValue::PowerToysInstallation)
+}
+
+fn is_powertoys_installation(value: &ObservedValue) -> bool {
+    matches!(value, ObservedValue::PowerToysInstallation(_))
+}
+
+pub static POWERTOYS_STATUS_ACTION: SystemObservationAction = SystemObservationAction {
+    metadata: &POWERTOYS_STATUS_METADATA,
+    backup_source: "documented PowerToys App Paths and uninstall registration",
+    detect: detect_powertoys_status,
+    expected: is_powertoys_installation,
+    result: "PowerToys.exeの固定App Paths登録を確認し、導入済みかを表示します。バージョンはMicrosoftのアンインストール登録から取得できた場合だけ表示します。",
+    method: "App Pathsとアンインストール登録の読み取り専用確認（PowerToys設定ファイルは対象外）",
+};
+
 static WINDOWS_UPDATE_STATUS_METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::SetupWindowsUpdateStatus,
     name: "Windows Updateの確認状況を見る",
@@ -527,6 +582,15 @@ mod tests {
                 .verify_rolled_back(&context, &parameters, &envelope)
                 .expect("verify read-only rollback")
                 .verified
+        );
+    }
+
+    #[test]
+    fn powertoys_status_apply_detect_rollback_detect_is_read_only() {
+        assert_read_only_round_trip(
+            &POWERTOYS_STATUS_ACTION,
+            ActionParameters::SetupPowerToysStatus {},
+            is_powertoys_installation,
         );
     }
 

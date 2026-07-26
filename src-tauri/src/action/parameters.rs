@@ -23,6 +23,7 @@ pub enum AppLaunchBundle {
     Study,
     Work,
     Creative,
+    PowerToys,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,6 +218,8 @@ pub enum ActionParameters {
     AppearanceAccentColorCheck {},
     #[serde(rename = "appearance.window_color")]
     AppearanceWindowColor { color: WindowColorPreset },
+    #[serde(rename = "setup.powertoys_status")]
+    SetupPowerToysStatus {},
     #[serde(rename = "setup.launch_apps")]
     SetupLaunchApps { bundle: AppLaunchBundle },
     #[serde(rename = "setup.windows_update_status")]
@@ -287,6 +290,7 @@ impl ActionParameters {
             Self::StorageTempFilesCheck { .. } => ActionId::StorageTempFilesCheck,
             Self::AppearanceAccentColorCheck { .. } => ActionId::AppearanceAccentColorCheck,
             Self::AppearanceWindowColor { .. } => ActionId::AppearanceWindowColor,
+            Self::SetupPowerToysStatus { .. } => ActionId::SetupPowerToysStatus,
             Self::SetupLaunchApps { .. } => ActionId::SetupLaunchApps,
             Self::SetupWindowsUpdateStatus { .. } => ActionId::SetupWindowsUpdateStatus,
         }

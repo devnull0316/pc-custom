@@ -186,6 +186,18 @@ pub struct WindowsUpdateStatusObservation {
     pub last_checked_local: ReadinessComponent<String>,
     pub restart_pending: ReadinessComponent<bool>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerToysInstallationObservation {
+    /// True only when the documented App Paths registration resolves to an
+    /// existing PowerToys.exe. Uninstall metadata alone never makes this true.
+    pub installed: bool,
+    /// Optional DisplayVersion from Windows uninstall registration.
+    pub version: Option<String>,
+    /// Launch is offered only when the fixed App Paths entry resolved.
+    pub launch_available: bool,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowColorPreset {
@@ -221,6 +233,7 @@ pub enum ObservedValue {
     TempFiles(TempFilesObservation),
     GameReadiness(GameReadinessObservation),
     KnownApps(KnownAppsObservation),
+    PowerToysInstallation(PowerToysInstallationObservation),
     WindowsUpdateStatus(WindowsUpdateStatusObservation),
     AccentColor {
         hex: String,

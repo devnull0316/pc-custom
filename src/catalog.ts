@@ -1,5 +1,28 @@
 import type { ActionPresentation, CategoryPresentation, ResultTile } from "./model";
 
+export interface EverydayFeatureGuide {
+  readonly id: string;
+  readonly result: string;
+  readonly featureName: string;
+  readonly description: string;
+  readonly provider: "powertoys" | "windows";
+}
+
+export const EVERYDAY_FEATURE_GUIDES = [
+  { id: "remap-keys", result: "キーを入れ替える", featureName: "Keyboard Manager", description: "使いにくいキーを別のキーやショートカットへ割り当てます。", provider: "powertoys" },
+  { id: "app-shortcuts", result: "アプリごとにショートカットを変える", featureName: "Keyboard Manager", description: "特定のアプリを使っている間だけ、ショートカットの割り当てを変えます。", provider: "powertoys" },
+  { id: "plain-paste", result: "貼り付けるとき書式を消す", featureName: "Paste as Plain Text", description: "色やフォントなどを外し、文字だけを貼り付けます。", provider: "powertoys" },
+  { id: "ocr", result: "画面の文字を読み取る", featureName: "Text Extractor", description: "画面の範囲を選び、画像中の文字をクリップボードへ取り込みます。", provider: "powertoys" },
+  { id: "always-on-top", result: "ウィンドウを常に手前へ置く", featureName: "Always On Top", description: "選んだウィンドウを、他のウィンドウの上に表示し続けます。", provider: "powertoys" },
+  { id: "split-layouts", result: "画面分割の型を作る", featureName: "FancyZones", description: "よく使う分割レイアウトを作り、ウィンドウをその枠に配置しやすくします。", provider: "powertoys" },
+  { id: "save-layout", result: "ウィンドウ配置を保存する", featureName: "Workspaces", description: "複数アプリの起動と配置をひとつの作業環境として保存します。", provider: "powertoys" },
+  { id: "launch-apps", result: "複数アプリを一度に開く", featureName: "Workspaces", description: "保存した作業環境から、必要なアプリをまとめて起動します。", provider: "powertoys" },
+  { id: "mouse-highlight", result: "マウスの位置を見つけやすくする", featureName: "Mouse Utilities", description: "Find My Mouseなどで、ポインターの位置やクリックを強調します。", provider: "powertoys" },
+  { id: "clipboard-history", result: "クリップボード履歴を使う", featureName: "Windows 11 クリップボード履歴（PowerToys外）", description: "Windows標準の Win + V で、過去にコピーした項目を選びます。", provider: "windows" },
+  { id: "resize-images", result: "画像を簡単に小さくする", featureName: "Image Resizer", description: "Explorerから画像を選び、決めた大きさへまとめてリサイズします。", provider: "powertoys" },
+  { id: "batch-rename", result: "複数ファイルの名前をまとめて変える", featureName: "PowerRename", description: "Explorerから複数ファイルを選び、名前の置換や一括変更を行います。", provider: "powertoys" },
+] as const satisfies readonly EverydayFeatureGuide[];
+
 export const CATEGORIES = [
   { id: "session", label: "集中・セッション", description: "その場だけ有効にして、終われば解放", icon: "focus" },
   { id: "power", label: "電源", description: "現在の電源状態を安全に確認", icon: "power" },
@@ -13,6 +36,7 @@ export const CATEGORIES = [
 ] as const satisfies readonly CategoryPresentation[];
 
 export const RESULT_TILES = [
+  { id: "everyday", title: "操作・普段使いを整える", description: "PowerToysとWindows標準機能で、日常操作を便利にします。", category: "setup-view", icon: "action" },
   { id: "game-ready", title: "ゲームの準備を整える", description: "起動を検知し、邪魔を減らす準備をまとめます。", category: "games", icon: "game" },
   { id: "appearance", title: "見た目を変える", description: "Windowsとアプリを落ち着いた明暗へ揃えます。", category: "appearance", icon: "appearance" },
   { id: "files", title: "ファイルを見分けやすくする", description: "拡張子や隠しファイルを必要なときに表示します。", category: "explorer", icon: "explorer" },
@@ -870,6 +894,21 @@ const OBSERVATION_FALLBACKS = [
       "変更するのは決められた2つの色設定だけで、任意の色は受け取りません。",
       "2つの値を1つの変更としてまとめ、片方だけ変わった状態を残しません。",
       "元の色・型・有無を保存し、他アプリが変更していた場合は上書きしません。",
+    ],
+  },
+  {
+    id: "setup.powertoys_status",
+    name: "PowerToysの導入状況を確認する",
+    description: "Windowsの文書化されたApp Paths登録だけでPowerToysの導入状況を確認します。設定ファイルは読み書きしません。",
+    audience: "日常のWindows操作をPowerToysで整えたい人向け",
+    category: "setup",
+    tags: ["PowerToys", "App Paths", "読み取り専用"],
+    methodSummary: "文書化されたApp Paths登録とアンインストール登録の読み取り",
+    desiredState: "PowerToysの導入状況とバージョンを表示する（変更なし）",
+    detailPoints: [
+      "PowerToys.exeの固定App Paths登録と実ファイルを確認します。",
+      "バージョンはMicrosoftのアンインストール登録から取得できた場合だけ表示します。",
+      "PowerToysの設定ファイルは読み書きしません。",
     ],
   },
   {

@@ -29,6 +29,7 @@ pub use process_watch::{ProcessWatchAction, PROCESS_WATCH_ACTION};
 pub use registry_settings::*;
 pub use system_observations::{
     SystemObservationAction, ACCENT_COLOR_CHECK_ACTION, FREE_SPACE_CHECK_ACTION,
-    STARTUP_INVENTORY_ACTION, TEMP_FILES_CHECK_ACTION, WINDOWS_UPDATE_STATUS_ACTION,
+    POWERTOYS_STATUS_ACTION, STARTUP_INVENTORY_ACTION, TEMP_FILES_CHECK_ACTION,
+    WINDOWS_UPDATE_STATUS_ACTION,
 };
 pub use window_color::{WindowColorAction, WINDOW_COLOR_ACTION};

@@ -30,6 +30,14 @@ pub struct BootstrapStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UiIntegrationState {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub launch_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UiActionState {
     pub kind: String,
     pub label: String,
@@ -38,6 +46,8 @@ pub struct UiActionState {
     pub items: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integration: Option<UiIntegrationState>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +290,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
                 detail: "固定位置の保存値だけを読み取りました。Windows UIの有効状態を示すものではありません。".to_owned(),
                 items: Vec::new(),
                 observed_at: Some(format_timestamp(evidence.observed_at_unix_ms)),
+                integration: None,
             };
         }
     }
@@ -290,6 +301,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             detail: observed_detail(&value),
             items: observed_items(&value),
             observed_at: Some(format_timestamp(evidence.observed_at_unix_ms)),
+            integration: integration_state(&value),
         },
         DetectedState::NeedsRestart { value, evidence } => UiActionState {
             kind: "known".to_owned(),
@@ -297,6 +309,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             detail: "設定値は確認できました。反映にはアプリ側の再読込が必要です。".to_owned(),
             items: observed_items(&value),
             observed_at: Some(format_timestamp(evidence.observed_at_unix_ms)),
+            integration: integration_state(&value),
         },
         DetectedState::Unknown { reason } => UiActionState {
             kind: "unknown".to_owned(),
@@ -304,6 +317,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             detail: bounded(reason),
             items: Vec::new(),
             observed_at: None,
+            integration: None,
         },
         DetectedState::Unsupported { reason } => UiActionState {
             kind: "unsupported".to_owned(),
@@ -311,6 +325,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             detail: bounded(reason),
             items: Vec::new(),
             observed_at: None,
+            integration: None,
         },
         DetectedState::PolicyManaged { authority } => UiActionState {
             kind: "policy_managed".to_owned(),
@@ -320,6 +335,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
                 .unwrap_or_else(|| "Totonoeからは上書きしません。".to_owned()),
             items: Vec::new(),
             observed_at: None,
+            integration: None,
         },
         DetectedState::Conflict { .. } => UiActionState {
             kind: "unknown".to_owned(),
@@ -327,6 +343,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             detail: "保存した適用値と現在値が異なるため、自動操作を止めています。".to_owned(),
             items: Vec::new(),
             observed_at: None,
+            integration: None,
         },
         DetectedState::Error { code, reason } => UiActionState {
             kind: "error".to_owned(),
@@ -334,7 +351,19 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             detail: format!("{} ({})", bounded(reason), bounded(code)),
             items: Vec::new(),
             observed_at: None,
+            integration: None,
         },
+    }
+}
+
+fn integration_state(value: &ObservedValue) -> Option<UiIntegrationState> {
+    match value {
+        ObservedValue::PowerToysInstallation(observed) => Some(UiIntegrationState {
+            installed: observed.installed,
+            version: observed.version.clone(),
+            launch_available: observed.launch_available,
+        }),
+        _ => None,
     }
 }
 
@@ -496,6 +525,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::AppearanceWindowColor => ActionParameters::AppearanceWindowColor {
             color: crate::action::WindowColorPreset::WindowsBlue,
         },
+        ActionId::SetupPowerToysStatus => ActionParameters::SetupPowerToysStatus {},
         ActionId::SetupLaunchApps => ActionParameters::SetupLaunchApps {
             bundle: AppLaunchBundle::Study,
         },
@@ -589,6 +619,7 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::GamesControllerGameBar => "games",
         ActionId::DevicesAutoplay
         | ActionId::SetupStartupInventory
+        | ActionId::SetupPowerToysStatus
         | ActionId::SetupLaunchApps
         | ActionId::SetupWindowsUpdateStatus => "setup",
         ActionId::StorageFreeSpaceCheck | ActionId::StorageTempFilesCheck => "storage",
@@ -682,6 +713,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::AppearanceWindowColor => {
             "タイトルバーなどの色を、決められた色から選んで変えたい人向け"
         }
+        ActionId::SetupPowerToysStatus => "日常のWindows操作をPowerToysで整えたい人向け",
         ActionId::SetupLaunchApps => "勉強や作業を始めるアプリを一度に開きたい人向け",
         ActionId::SetupWindowsUpdateStatus => {
             "更新確認日時と再起動保留だけを変更せず確認したい人向け"
@@ -753,6 +785,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::StorageTempFilesCheck => "削除せず、ユーザー一時ファイルを上限付き集計",
         ActionId::AppearanceAccentColorCheck => "公開APIで現在の配色を読み取り（変更なし）",
         ActionId::AppearanceWindowColor => "HKCU DWMの色2値を1トランザクションで変更",
+        ActionId::SetupPowerToysStatus => "変更せず、PowerToysの導入状況とバージョンを確認",
         ActionId::SetupLaunchApps => "固定allowlistのアプリを、起動中でなければ直接開く",
         ActionId::SetupWindowsUpdateStatus => "Windows Update Agentの状態を変更せず確認",
     }
@@ -805,6 +838,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::AppearanceAccentColorCheck => "公開APIのDwmGetColorizationColorによる読み取り",
         ActionId::GamesReadinessCheck => {
             "Windows公開APIと登録済み固定HKCU設定値による7項目の読み取り"
+        }
+        ActionId::SetupPowerToysStatus => {
+            "文書化されたApp Paths登録とアンインストール登録の読み取り"
         }
         ActionId::SetupLaunchApps => {
             "App Pathsと固定System32候補を検証し、Command::spawnで直接起動"
@@ -891,6 +927,15 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             let unknown = statuses.iter().filter(|status| **status == 1).count();
             let unconfigured = statuses.iter().filter(|status| **status == 2).count();
             format!("ゲーム準備: 確認 {known} / 不明 {unknown} / 未設定 {unconfigured}")
+        }
+        ObservedValue::PowerToysInstallation(observed) => {
+            if !observed.installed {
+                "PowerToys 未導入".to_owned()
+            } else if let Some(version) = &observed.version {
+                format!("PowerToys 導入済み（v{version}）")
+            } else {
+                "PowerToys 導入済み（バージョン不明）".to_owned()
+            }
         }
         ObservedValue::KnownApps(value) => {
             let running = value
@@ -995,6 +1040,7 @@ fn observed_detail(value: &ObservedValue) -> String {
             temp.skipped_reparse_points, temp.unreadable_entries
         ),
         ObservedValue::GameReadiness(readiness) => game_readiness_detail(readiness),
+        ObservedValue::PowerToysInstallation(_) => "導入判定はPowerToys.exeのApp Paths登録と実ファイルの解決で行います。バージョンはアンインストール登録から取得できた場合だけ表示します。PowerToysの設定ファイルは読み書きしません。".to_owned(),
         ObservedValue::KnownApps(_) => "固定allowlistの既知アプリについて、App Paths解決可否とプロセス名だけを確認します。".to_owned(),
         ObservedValue::WindowsUpdateStatus(_) => "Windows Update Agentの読み取り専用プロパティです。Updateの停止・変更・検索開始は行いません。".to_owned(),
         ObservedValue::AccentColor { hex, opaque_blend } => format!(
@@ -1026,6 +1072,28 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
             })
             .collect(),
         // ゲーム準備チェックは1行の要約ではなく、項目ごとに並べて見せる（BRIEF §4 の準備確認画面）。
+        ObservedValue::PowerToysInstallation(observed) => vec![
+            format!(
+                "導入状況 — {}",
+                if observed.installed {
+                    "導入済み"
+                } else {
+                    "未導入"
+                }
+            ),
+            format!(
+                "バージョン — {}",
+                observed.version.as_deref().unwrap_or("不明")
+            ),
+            format!(
+                "App Paths起動 — {}",
+                if observed.launch_available {
+                    "利用可能"
+                } else {
+                    "利用不可"
+                }
+            ),
+        ],
         ObservedValue::KnownApps(value) => value
             .apps
             .iter()
@@ -1270,8 +1338,8 @@ mod tests {
     use super::*;
     use crate::action::{
         Action, AdvancedColorObservation, DefaultRenderAudioObservation,
-        PrimaryRefreshRateObservation, StartupInventoryEntry, StateEvidence,
-        SystemDriveSpaceObservation, ACTION_REGISTRY,
+        PowerToysInstallationObservation, PrimaryRefreshRateObservation, StartupInventoryEntry,
+        StateEvidence, SystemDriveSpaceObservation, ACTION_REGISTRY,
     };
     use crate::actions::TASKBAR_SEARCH_MODE_ACTION;
     use crate::compatibility::CompatibilityCatalog;
@@ -1457,6 +1525,40 @@ mod tests {
     }
 
     #[test]
+    fn powertoys_observation_keeps_typed_install_and_launch_state() {
+        let metadata = ACTION_REGISTRY
+            .get(ActionId::SetupPowerToysStatus)
+            .expect("PowerToys status action registered")
+            .metadata();
+        let ui = action_presentation(
+            metadata,
+            CompatibilityCatalog::decision_for_build(26_200),
+            Some(DetectedState::Known {
+                value: ObservedValue::PowerToysInstallation(PowerToysInstallationObservation {
+                    installed: true,
+                    version: Some("0.99.1".to_owned()),
+                    launch_available: true,
+                }),
+                evidence: StateEvidence {
+                    source: "documented App Paths test".to_owned(),
+                    observed_at_unix_ms: 1,
+                    os_build: 26_200,
+                },
+            }),
+        );
+        assert_eq!(ui.id, "setup.powertoys_status");
+        assert_eq!(ui.kind, "observation");
+        assert_eq!(ui.availability, "read_only");
+        assert_eq!(ui.method_class, "documented_registry");
+        let state = ui.current_state.expect("presented PowerToys state");
+        assert!(state.label.contains("0.99.1"));
+        let integration = state.integration.expect("typed integration state");
+        assert!(integration.installed);
+        assert!(integration.launch_available);
+        assert_eq!(integration.version.as_deref(), Some("0.99.1"));
+    }
+
+    #[test]
     fn launch_apps_schema_and_presentation_are_fail_closed_and_one_way() {
         let valid = parse_action_request(PreviewActionRequest {
             action_id: "setup.launch_apps".to_owned(),
@@ -1468,6 +1570,18 @@ mod tests {
             valid,
             ActionParameters::SetupLaunchApps {
                 bundle: AppLaunchBundle::Study
+            }
+        ));
+        let powertoys = parse_action_request(PreviewActionRequest {
+            action_id: "setup.launch_apps".to_owned(),
+            parameters: serde_json::from_value(serde_json::json!({ "bundle": "power_toys" }))
+                .expect("parameter object"),
+        })
+        .expect("fixed PowerToys bundle");
+        assert!(matches!(
+            powertoys,
+            ActionParameters::SetupLaunchApps {
+                bundle: AppLaunchBundle::PowerToys
             }
         ));
 
@@ -1514,5 +1628,6 @@ mod tests {
             assert!(default_parameters(id).is_some());
         }
         assert!(listing_parameters(ActionId::PowerActiveSchemeCheck).is_some());
+        assert!(listing_parameters(ActionId::SetupPowerToysStatus).is_some());
     }
 }

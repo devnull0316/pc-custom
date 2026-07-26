@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { configSnapshotExport, publicErrorMessage, setupCatalog, setupInstall } from "../backend";
-import type { DataMode, InstallOutcome, SetupAppDto } from "../model";
+import type { ActionPresentation, DataMode, InstallOutcome, SetupAppDto } from "../model";
 import { Icon } from "./Icon";
+import { PowerToysPanel } from "./PowerToysPanel";
 
 interface SetupViewProps {
   dataMode: DataMode;
+  powerToysAction: ActionPresentation | undefined;
+  powerToysDetecting: boolean;
+  powerToysLaunching: boolean;
+  onPowerToysDetect: () => void;
+  onPowerToysLaunch: () => void;
 }
 
 const CATEGORY_LABELS: Readonly<Record<string, string>> = {
@@ -14,7 +20,14 @@ const CATEGORY_LABELS: Readonly<Record<string, string>> = {
   work: "作業・学習",
 };
 
-export function SetupView({ dataMode }: SetupViewProps) {
+export function SetupView({
+  dataMode,
+  powerToysAction,
+  powerToysDetecting,
+  powerToysLaunching,
+  onPowerToysDetect,
+  onPowerToysLaunch,
+}: SetupViewProps) {
   const live = dataMode === "live";
   const [apps, setApps] = useState<readonly SetupAppDto[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -69,6 +82,7 @@ export function SetupView({ dataMode }: SetupViewProps) {
     try {
       const outcome = await setupInstall(app.id);
       setResults((current) => ({ ...current, [app.id]: outcome }));
+      if (app.id === "powertoys" && outcome.succeeded) onPowerToysDetect();
       setMessage(
         outcome.succeeded
           ? `${outcome.appName} の導入処理が完了しました。`
@@ -81,8 +95,21 @@ export function SetupView({ dataMode }: SetupViewProps) {
     }
   }
 
+  function showPowerToysInstall() {
+    document.getElementById("setup-app-powertoys")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   return (
     <section className="setup-view">
+      <PowerToysPanel
+        action={powerToysAction}
+        dataMode={dataMode}
+        detecting={powerToysDetecting}
+        launching={powerToysLaunching}
+        onDetect={onPowerToysDetect}
+        onLaunch={onPowerToysLaunch}
+        onShowInstall={showPowerToysInstall}
+      />
       <header className="view-header">
         <span className="eyebrow">新しいPCをセットアップ</span>
         <h1>よく使うアプリをまとめて入れる</h1>
@@ -112,7 +139,7 @@ export function SetupView({ dataMode }: SetupViewProps) {
             {list.map((app) => {
               const outcome = results[app.id];
               return (
-                <li className="setup-card" key={app.id}>
+                <li className="setup-card" id={`setup-app-${app.id}`} key={app.id}>
                   <div className="setup-card__body">
                     <strong>{app.name}</strong>
                     <small>{app.description}</small>

@@ -39,12 +39,19 @@ export type DetectionKind =
   | "policy_managed"
   | "error";
 
+export interface IntegrationState {
+  installed: boolean;
+  version: string | null;
+  launchAvailable: boolean;
+}
+
 export interface ActionState {
   kind: DetectionKind;
   label: string;
   detail: string;
   items?: readonly string[];
   observedAt?: string;
+  integration?: IntegrationState;
 }
 
 export interface ActionPresentation {

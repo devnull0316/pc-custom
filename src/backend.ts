@@ -91,6 +91,7 @@ const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "appearance.taskbar_animations": "appearance",
   "notifications.toast_banners": "notifications",
   "setup.startup_inventory": "setup",
+  "setup.powertoys_status": "setup",
   "setup.launch_apps": "setup",
   "setup.windows_update_status": "setup",
   "storage.free_space_check": "storage",

@@ -5,6 +5,7 @@ mod broadcast;
 mod execution_state;
 mod observations;
 mod power;
+mod powertoys;
 mod process;
 mod readiness;
 mod registry;
@@ -15,7 +16,8 @@ mod window_effects;
 mod wmi_process;
 
 pub use app_launch::{
-    apps_for_bundle, launch_known_apps, observe_known_apps, resolve_known_app, KnownApp,
+    apps_for_bundle, launch_known_apps, observe_known_apps, resolve_known_app,
+    resolve_powertoys_app_path, KnownApp,
 };
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
@@ -25,6 +27,7 @@ pub use observations::{
     TEMP_CLEANUP_MIN_AGE_DAYS,
 };
 pub use power::{active_power_scheme, active_power_scheme_guid, set_active_power_scheme};
+pub use powertoys::read_powertoys_installation;
 pub use process::{
     process_instance_status, registered_file_identity, snapshot_process_identities,
     ProcessIdentity, ProcessInstanceStatus, ProcessSnapshotReport,

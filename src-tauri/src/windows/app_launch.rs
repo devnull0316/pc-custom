@@ -42,15 +42,25 @@ const PAINT: KnownApp = KnownApp {
     fixed_args: &[],
 };
 
+const POWERTOYS: KnownApp = KnownApp {
+    name: "Microsoft PowerToys",
+    app_path_name: "PowerToys.exe",
+    process_names: &["powertoys.exe"],
+    system_fallback: false,
+    fixed_args: &[],
+};
+
 const STUDY: &[KnownApp] = &[EDGE, NOTEPAD];
 const WORK: &[KnownApp] = &[EDGE, NOTEPAD, CALCULATOR];
 const CREATIVE: &[KnownApp] = &[PAINT, NOTEPAD];
+const POWER_TOYS: &[KnownApp] = &[POWERTOYS];
 
 pub const fn apps_for_bundle(bundle: AppLaunchBundle) -> &'static [KnownApp] {
     match bundle {
         AppLaunchBundle::Study => STUDY,
         AppLaunchBundle::Work => WORK,
         AppLaunchBundle::Creative => CREATIVE,
+        AppLaunchBundle::PowerToys => POWER_TOYS,
     }
 }
 
@@ -104,6 +114,30 @@ fn app_path_registry_value(app: KnownApp) -> WindowsResult<Option<String>> {
         }
     }
     Ok(None)
+}
+
+/// Resolve the one fixed PowerToys App Paths entry. Absence is a normal
+/// read-only result; malformed or inaccessible resolved files are errors.
+#[cfg(windows)]
+pub fn resolve_powertoys_app_path() -> WindowsResult<Option<String>> {
+    let Some(candidate) = app_path_registry_value(POWERTOYS)? else {
+        return Ok(None);
+    };
+    if candidate.contains('\0') || candidate.contains('"') {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "reject malformed PowerToys App Paths value",
+            None,
+        ));
+    }
+    registered_file_identity(&candidate).map(|(canonical, _)| Some(canonical))
+}
+
+#[cfg(not(windows))]
+pub fn resolve_powertoys_app_path() -> WindowsResult<Option<String>> {
+    Err(WindowsError::unsupported(
+        "resolve fixed PowerToys App Paths entry",
+    ))
 }
 
 #[cfg(windows)]
@@ -309,6 +343,7 @@ mod tests {
             AppLaunchBundle::Study,
             AppLaunchBundle::Work,
             AppLaunchBundle::Creative,
+            AppLaunchBundle::PowerToys,
         ] {
             let apps = apps_for_bundle(bundle);
             assert!(!apps.is_empty());
