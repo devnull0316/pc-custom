@@ -18,6 +18,9 @@ export const RESULT_TILES = [
   { id: "files", title: "ファイルを見分けやすくする", description: "拡張子や隠しファイルを必要なときに表示します。", category: "explorer", icon: "explorer" },
   { id: "focus", title: "集中を途切れさせない", description: "作業中の自動スリープだけを一時的に防ぎます。", category: "session", icon: "focus" },
   { id: "power", title: "電源設定を確かめる", description: "変更せず、現在の電源プランを確認します。", category: "power", icon: "power" },
+  { id: "study", title: "勉強・作業に集中する", description: "よく使う準備をまとめて、実行したいときだけ適用します。", category: "modes", icon: "focus" },
+  { id: "setup", title: "新しいPCをセットアップする", description: "よく使うアプリの導入と、いまの設定の控えを作れます。", category: "setup-view", icon: "plus" },
+  { id: "storage", title: "容量を空ける", description: "空き容量を確認し、古い一時ファイルだけを消せます。", category: "storage", icon: "info" },
   { id: "recovery", title: "変更を元へ戻す", description: "適用履歴から、戻したい項目だけを選べます。", category: "recovery", icon: "recovery" },
 ] as const satisfies readonly ResultTile[];
 

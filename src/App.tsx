@@ -389,7 +389,7 @@ export function App() {
 
   function addToDraft(action: ActionPresentation) {
     if (action.autoApplyEligible !== true) {
-      setNotice("このActionは明示操作専用のため、ゲームプロファイルへ追加できません。");
+      setNotice("このActionは明示操作専用のため、モードへ追加できません。");
       return;
     }
     setProfileDraft((current) => current.some((item) => item.actionId === action.id) ? current : [...current, { actionId: action.id, title: action.name }]);
@@ -412,7 +412,7 @@ export function App() {
         )}
         <main aria-busy={dataMode === "loading"} id="main-content">
           {view === "home" ? (
-            <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
+            <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onOpenView={(target) => setView(target)} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
           ) : view === "actions" ? (
             <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
           ) : view === "profiles" ? (

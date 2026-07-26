@@ -10,11 +10,12 @@ interface HomeViewProps {
   timeline: readonly TimelineItem[];
   onOpenCategory: (category: CategoryId) => void;
   onOpenTimeline: () => void;
+  onOpenView: (view: "profiles" | "setup") => void;
   onReconcile: () => void;
   recoveryBusy: boolean;
 }
 
-export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategory, onOpenTimeline, onReconcile, recoveryBusy }: HomeViewProps) {
+export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategory, onOpenTimeline, onOpenView, onReconcile, recoveryBusy }: HomeViewProps) {
   const recent = timeline[0];
   return (
     <div className="view home-view">
@@ -36,7 +37,7 @@ export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategor
         <div className="section-heading"><div><h2 id="results-title">整えたいこと</h2><p>登録済みの{actions.length}項目から、いまのWindowsで実際に変えられるものを見分けて表示します。</p></div></div>
         <div className="result-grid">
           {RESULT_TILES.map((tile, index) => (
-            <button className={`result-tile result-tile--${index + 1}`} key={tile.id} onClick={() => tile.category === "recovery" ? onOpenTimeline() : onOpenCategory(tile.category)} type="button">
+            <button className={`result-tile result-tile--${index + 1}`} key={tile.id} onClick={() => tile.category === "recovery" ? onOpenTimeline() : tile.category === "modes" ? onOpenView("profiles") : tile.category === "setup-view" ? onOpenView("setup") : onOpenCategory(tile.category)} type="button">
               <span className="result-tile__icon"><Icon name={tile.icon} size={22} /></span>
               <span className="result-tile__copy"><strong>{tile.title}</strong><small>{tile.description}</small></span>
               <Icon className="result-tile__arrow" name="chevron" />

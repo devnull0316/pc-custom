@@ -178,7 +178,8 @@ export interface ResultTile {
   id: string;
   title: string;
   description: string;
-  category: CategoryId | "recovery";
+  /** カテゴリ名のほか、履歴・モード・セットアップの各画面へも飛ばせる。 */
+  category: CategoryId | "recovery" | "modes" | "setup-view";
   icon: IconName;
 }
 
