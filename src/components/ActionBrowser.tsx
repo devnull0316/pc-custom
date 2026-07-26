@@ -27,6 +27,7 @@ interface ActionBrowserProps {
   onDetect: (actionId: string) => void;
   onPreview: (action: ActionPresentation) => void;
   onAddToDraft: (action: ActionPresentation) => void;
+  onError: (error: unknown) => void;
 }
 
 function updateImpactLabel(impact: ActionPresentation["updateImpact"]): string {
@@ -47,7 +48,10 @@ function methodClassLabel(methodClass: ActionPresentation["methodClass"]): strin
 }
 
 function availabilityLabel(action: ActionPresentation): string {
-  if (action.kind === "guided") return "設計候補・読取のみ";
+  if (action.kind === "guided" && action.methodClass === "unverified_storage") {
+    return "設計候補・読取のみ";
+  }
+  if (action.kind === "guided") return "Windows設定案内";
   if (action.availability === "mutable") return "適用可能";
   if (action.availability === "read_only") return "読み取り専用";
   if (action.availability === "detect_only") return "検出のみ";
@@ -80,6 +84,7 @@ export function ActionBrowser({
   onDetect,
   onPreview,
   onAddToDraft,
+  onError,
 }: ActionBrowserProps) {
   const categoryActions = actions.filter((action) => action.category === selectedCategory);
   const selected = actions.find((action) => action.id === selectedActionId) ?? categoryActions[0];
@@ -183,6 +188,7 @@ export function ActionBrowser({
               onAddToDraft={() => onAddToDraft(selected)}
               onDetect={() => onDetect(selected.id)}
               onPreview={() => onPreview(selected)}
+              onError={onError}
             />
           )}
         </section>
@@ -201,9 +207,10 @@ interface ActionDetailProps {
   onAddToDraft: () => void;
   onDetect: () => void;
   onPreview: () => void;
+  onError: (error: unknown) => void;
 }
 
-function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, previewing, onAddToDraft, onDetect, onPreview }: ActionDetailProps) {
+function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, previewing, onAddToDraft, onDetect, onPreview, onError }: ActionDetailProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const current = action.currentState;
   const readOnly = action.availability === "read_only" || action.availability === "detect_only";
@@ -213,6 +220,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
   const profileEligible = action.autoApplyEligible === true
     && (action.kind === "persistent" || action.kind === "session");
   const observationLike = action.kind === "observation" || action.kind === "guided";
+  const guidedCandidate = action.kind === "guided" && action.methodClass === "unverified_storage";
 
   return (
     <div className="action-detail__inner">
@@ -241,7 +249,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         </div>
         <span className="state-arrow"><Icon name="arrow" /></span>
         <div className="state-panel state-panel--desired">
-          <span>{action.kind === "guided" ? "設計状態" : action.kind === "observation" ? "確認する内容" : "適用後"}</span>
+          <span>{guidedCandidate ? "設計状態" : action.kind === "guided" ? "案内先" : action.kind === "observation" ? "確認する内容" : "適用後"}</span>
           <strong>{action.desiredState}</strong>
           <small>{action.methodSummary}</small>
         </div>
@@ -260,7 +268,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           <dl className="compatibility-grid">
             <div><dt>最小build</dt><dd>{action.minimumBuild}</dd></div>
             <div><dt>試験上限</dt><dd>{action.maximumTestedBuild ?? "実機確認待ち"}</dd></div>
-            <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : action.kind === "guided" ? "設計候補（変更不可）" : "観測"}</dd></div>
+            <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : guidedCandidate ? "設計候補（変更不可）" : action.kind === "guided" ? "Windows設定案内（Totonoe変更なし）" : "観測"}</dd></div>
             <div><dt>根拠分類</dt><dd>{methodClassLabel(action.methodClass)}</dd></div>
           </dl>
         </div>
@@ -278,7 +286,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           <button
             className="secondary-button"
             disabled={dataMode !== "live"}
-            onClick={() => void openWindowsSettings(action.id).catch(() => undefined)}
+            onClick={() => void openWindowsSettings(action.id).catch(onError)}
             type="button"
           >
             <Icon name="arrow" />Windowsの設定を開く
@@ -286,7 +294,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         ) : null}
       </div>
       {action.settingsPage && action.availability !== "mutable" ? (
-        <p className="blocked-reason"><Icon name="info" size={15} />この項目はWindowsの設定画面から変更できます。Totonoeは現在値の表示だけを行います。</p>
+        <p className="blocked-reason"><Icon name="info" size={15} />この項目はWindowsの設定画面から変更できます。Totonoeは設定画面を案内し、OS設定は変更しません。</p>
       ) : null}
     </div>
   );

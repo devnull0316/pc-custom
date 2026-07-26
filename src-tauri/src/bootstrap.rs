@@ -170,10 +170,18 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
         // RECOVERY_REQUIRED and every mutation gate remains closed.
         Err(_identity_error) => None,
     };
-    let engine = TotonoeEngine::new(database, identity)?;
     let profile_store = Arc::new(crate::game_profile::ProfileStore::open(
         data_directory.join("profiles.json"),
     )?);
+    let window_layout_store = Arc::new(crate::window_layout::WindowLayoutStore::open(
+        data_directory.join("window-layout.json"),
+    )?);
+    let engine = TotonoeEngine::new_with_runtime_stores(
+        database,
+        identity,
+        Some(profile_store.clone()),
+        Some(window_layout_store.clone()),
+    )?;
     let theme_schedule_store = Arc::new(crate::theme_schedule::ThemeScheduleStore::open(
         data_directory.join("theme-schedule.json"),
     )?);

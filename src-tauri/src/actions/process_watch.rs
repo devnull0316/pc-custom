@@ -2,19 +2,19 @@ use std::path::Path;
 
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionMetadata, ActionParameters, ActionResult, ActionRiskLevel, ActionStage,
-        AppliedEvidence, ChangeExplanation, DetectedState, MethodClass, ObservedProcess,
-        ObservedValue, ProcessBindingParameters, RollbackEvidence, TroubleshootingStep,
-        ValidationReport, Verification, WindowsReleaseFamily,
+        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
+        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
+        ChangeExplanation, DetectedState, MethodClass, ObservedProcess, ObservedValue,
+        ProcessBindingParameters, RollbackEvidence, TroubleshootingStep, ValidationReport,
+        Verification, WindowsReleaseFamily,
     },
     backup::{BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, ProcessWatchBackup},
     windows::{registered_file_identity, snapshot_process_identities},
 };
 
 use super::common::{
-    evidence, fingerprint_state, map_windows_error, validate_backup,
-    validate_backup_for_apply, validate_base,
+    evidence, fingerprint_state, map_windows_error, validate_backup, validate_backup_for_apply,
+    validate_base,
 };
 
 pub struct ProcessWatchAction;
@@ -82,13 +82,14 @@ impl ProcessWatchAction {
                 "action.process_watch.invalid_binding",
             ));
         }
-        let (canonical, identity) = registered_file_identity(&binding.canonical_path).map_err(|error| {
-            map_windows_error(
-                ActionStage::Validate,
-                "action.process_watch.binding_revalidation_failed",
-                error,
-            )
-        })?;
+        let (canonical, identity) =
+            registered_file_identity(&binding.canonical_path).map_err(|error| {
+                map_windows_error(
+                    ActionStage::Validate,
+                    "action.process_watch.binding_revalidation_failed",
+                    error,
+                )
+            })?;
         if canonical != binding.canonical_path || identity != binding.file_identity {
             return Err(ActionError::new(
                 ActionErrorCode::ExternalConflict,
@@ -178,13 +179,7 @@ impl Action for ProcessWatchAction {
         context: &ActionContext<'_>,
         parameters: &ActionParameters,
     ) -> ActionResult<ValidationReport> {
-        let report = validate_base(
-            &METADATA,
-            context,
-            parameters,
-            false,
-            ActionStage::Validate,
-        )?;
+        let report = validate_base(&METADATA, context, parameters, false, ActionStage::Validate)?;
         Self::validate_binding(Self::binding(parameters)?)?;
         Ok(report)
     }
@@ -289,20 +284,22 @@ impl Action for ProcessWatchAction {
         })
     }
 
-    fn explain_changes(
-        &self,
-        parameters: &ActionParameters,
-    ) -> ActionResult<ChangeExplanation> {
+    fn explain_changes(&self, parameters: &ActionParameters) -> ActionResult<ChangeExplanation> {
         let _ = Self::binding(parameters)?;
         Ok(ChangeExplanation {
             action_id: METADATA.id,
             result: "登録済みfile identityに一致するprocessの起動状態を観測します。".to_owned(),
             method: "Toolhelp snapshot＋WMI補助＋限定権限process handle（読み取り専用）".to_owned(),
-            resources: METADATA.resource_keys.iter().map(|v| (*v).to_owned()).collect(),
+            resources: METADATA
+                .resource_keys
+                .iter()
+                .map(|v| (*v).to_owned())
+                .collect(),
             requires_admin: false,
             requires_restart: false,
             windows_update_impact: METADATA.windows_update_impact.to_owned(),
-            rollback_scope: "OS変更がないため監視観測の終了だけで、processを終了しません。".to_owned(),
+            rollback_scope: "OS変更がないため監視観測の終了だけで、processを終了しません。"
+                .to_owned(),
         })
     }
 
@@ -338,8 +335,8 @@ mod tests {
         let executable = executable
             .to_str()
             .expect("test executable path is valid Unicode");
-        let (canonical_path, file_identity) = registered_file_identity(executable)
-            .expect("register current executable identity");
+        let (canonical_path, file_identity) =
+            registered_file_identity(executable).expect("register current executable identity");
         let binding = ProcessBindingParameters {
             canonical_path,
             file_identity,
@@ -384,9 +381,11 @@ mod tests {
             .detect_current_state(&context, &parameters)
             .expect("detect current process after rollback");
         assert_current_process_is_observed(&restored);
-        assert!(PROCESS_WATCH_ACTION
-            .verify_rolled_back(&context, &parameters, &envelope)
-            .expect("verify read-only rollback")
-            .verified);
+        assert!(
+            PROCESS_WATCH_ACTION
+                .verify_rolled_back(&context, &parameters, &envelope)
+                .expect("verify read-only rollback")
+                .verified
+        );
     }
 }

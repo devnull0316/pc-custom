@@ -2,21 +2,18 @@ use uuid::Uuid;
 
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionMetadata, ActionParameters, ActionResult, ActionRiskLevel, ActionStage,
-        AppliedEvidence, ChangeExplanation, DetectedState, MethodClass, ObservedValue,
-        RollbackEvidence, TroubleshootingStep, ValidationReport, Verification,
-        WindowsReleaseFamily,
+        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
+        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
+        ChangeExplanation, DetectedState, MethodClass, ObservedValue, RollbackEvidence,
+        TroubleshootingStep, ValidationReport, Verification, WindowsReleaseFamily,
     },
-    backup::{
-        BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, SleepLeaseBackup,
-    },
+    backup::{BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, SleepLeaseBackup},
     windows::sleep_lease_manager,
 };
 
 use super::common::{
-    evidence, fingerprint_state, map_windows_error, validate_backup,
-    validate_backup_for_apply, validate_base,
+    evidence, fingerprint_state, map_windows_error, validate_backup, validate_backup_for_apply,
+    validate_base,
 };
 
 pub struct PreventSleepAction;
@@ -25,7 +22,8 @@ pub static PREVENT_SLEEP_ACTION: PreventSleepAction = PreventSleepAction;
 static METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::SessionPreventSleep,
     name: "このモード中は自動スリープを防ぐ",
-    description: "専用スレッドの公開Windows API要求をleaseとして保持します。画面の常時点灯は既定で無効です。",
+    description:
+        "専用スレッドの公開Windows API要求をleaseとして保持します。画面の常時点灯は既定で無効です。",
     category: "focus",
     tags: &["session", "sleep", "game"],
     supportedWindowsVersions: &[
@@ -68,10 +66,7 @@ impl PreventSleepAction {
         }
     }
 
-    fn state_for_owner(
-        context: &ActionContext<'_>,
-        owner: Uuid,
-    ) -> ActionResult<DetectedState> {
+    fn state_for_owner(context: &ActionContext<'_>, owner: Uuid) -> ActionResult<DetectedState> {
         let snapshot = sleep_lease_manager()
             .and_then(|manager| manager.snapshot_for(owner))
             .map_err(|error| {
@@ -112,13 +107,7 @@ impl Action for PreventSleepAction {
         context: &ActionContext<'_>,
         parameters: &ActionParameters,
     ) -> ActionResult<ValidationReport> {
-        let report = validate_base(
-            &METADATA,
-            context,
-            parameters,
-            true,
-            ActionStage::Validate,
-        )?;
+        let report = validate_base(&METADATA, context, parameters, true, ActionStage::Validate)?;
         let _ = Self::keep_display_on(parameters)?;
         Ok(report)
     }
@@ -214,13 +203,7 @@ impl Action for PreventSleepAction {
         parameters: &ActionParameters,
         backup: &BackupEnvelope,
     ) -> ActionResult<RollbackEvidence> {
-        validate_base(
-            &METADATA,
-            context,
-            parameters,
-            true,
-            ActionStage::Rollback,
-        )?;
+        validate_base(&METADATA, context, parameters, true, ActionStage::Rollback)?;
         validate_backup(&METADATA, context, backup, ActionStage::Rollback)?;
         let BackupPayload::SleepLease(lease) = &backup.payload else {
             return Err(ActionError::recovery_required(
@@ -265,10 +248,7 @@ impl Action for PreventSleepAction {
         Ok(Verification { verified, observed })
     }
 
-    fn explain_changes(
-        &self,
-        parameters: &ActionParameters,
-    ) -> ActionResult<ChangeExplanation> {
+    fn explain_changes(&self, parameters: &ActionParameters) -> ActionResult<ChangeExplanation> {
         let keep_display_on = Self::keep_display_on(parameters)?;
         Ok(ChangeExplanation {
             action_id: METADATA.id,
@@ -278,7 +258,11 @@ impl Action for PreventSleepAction {
                 "自動スリープだけを、このleaseの間だけ防ぎます。".to_owned()
             },
             method: "SetThreadExecutionState（専用スレッド）".to_owned(),
-            resources: METADATA.resource_keys.iter().map(|v| (*v).to_owned()).collect(),
+            resources: METADATA
+                .resource_keys
+                .iter()
+                .map(|v| (*v).to_owned())
+                .collect(),
             requires_admin: false,
             requires_restart: false,
             windows_update_impact: METADATA.windows_update_impact.to_owned(),

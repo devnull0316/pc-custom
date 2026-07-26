@@ -3,21 +3,17 @@ use crate::journal::{PreparedItem, TransactionState};
 
 impl TotonoeEngine {
     pub fn commit_preview(&self, preview_token: &str) -> CoreResult<CommitResult> {
-        let preview = self
-            .previews
-            .lock()
-            .remove(preview_token)
-            .ok_or_else(|| {
-                CoreError::invalid_request("プレビューが期限切れか、既に使用されています。")
-            })?;
+        let preview = self.previews.lock().remove(preview_token).ok_or_else(|| {
+            CoreError::invalid_request("プレビューが期限切れか、既に使用されています。")
+        })?;
         if preview.expires_at_ms < now_ms() {
             return Err(CoreError::invalid_request(
                 "プレビューの期限が切れました。現在状態を確認し直してください。",
             ));
         }
         let _mutation_guard = self.mutation_gate.lock();
-        let _process_guard = crate::windows::acquire_core_mutation_lock()
-            .map_err(core_mutation_lock_error)?;
+        let _process_guard =
+            crate::windows::acquire_core_mutation_lock().map_err(core_mutation_lock_error)?;
         let identity = self.identity_for_commit()?;
         if os_identity_fingerprint(&identity)? != preview.os_fingerprint {
             return Err(CoreError::recovery_required(
@@ -29,6 +25,10 @@ impl TotonoeEngine {
                 "未復元項目を解決するまで、新しい適用は開始できません。",
             ));
         }
+        // Saving a new layout or changing a registered game invalidates the
+        // private invocation even if the observed window geometry happens to
+        // produce the same public state.
+        self.ensure_layout_invocations_current(&preview.invocations)?;
 
         let transaction_id = Uuid::new_v4();
         let mut work = Vec::with_capacity(preview.invocations.len());
@@ -89,6 +89,7 @@ impl TotonoeEngine {
         )?;
 
         let mut applied_indices = Vec::new();
+        let mut result_details = Vec::new();
         for index in 0..work.len() {
             let item_id = work[index].item_id;
             self.journal.mark_item_applying(
@@ -99,11 +100,8 @@ impl TotonoeEngine {
             )?;
             let action = registered_action(work[index].parameters.action_id())?;
             let context = action_context(&identity, transaction_id, item_id);
-            let applied = match action.apply(
-                &context,
-                &work[index].parameters,
-                &work[index].backup,
-            ) {
+            let applied = match action.apply(&context, &work[index].parameters, &work[index].backup)
+            {
                 Ok(applied) => applied,
                 Err(error) => {
                     self.journal
@@ -118,14 +116,29 @@ impl TotonoeEngine {
                     );
                 }
             };
+            if let Some(ObservedValue::WindowLayout(observation)) = applied.state.known_value() {
+                result_details.extend(observation.issues.iter().map(|issue| {
+                    let reason = match issue.reason {
+                        crate::window_layout::WindowLayoutIssueReason::NotRunning => {
+                            "見つかりませんでした"
+                        }
+                        crate::window_layout::WindowLayoutIssueReason::AmbiguousMatch => {
+                            "候補が複数あるため操作しませんでした"
+                        }
+                        crate::window_layout::WindowLayoutIssueReason::GameExcluded => {
+                            "登録ゲームのため操作しませんでした"
+                        }
+                        crate::window_layout::WindowLayoutIssueReason::VerificationMismatch => {
+                            "復元結果を確認できませんでした"
+                        }
+                    };
+                    format!("{}: {reason}", issue.target)
+                }));
+            }
             work[index]
                 .backup
                 .record_applied(applied.applied_fingerprint);
-            match action.verify_applied(
-                &context,
-                &work[index].parameters,
-                &work[index].backup,
-            ) {
+            match action.verify_applied(&context, &work[index].parameters, &work[index].backup) {
                 Ok(Verification { verified: true, .. }) => {
                     self.journal.mark_item_applied(
                         transaction_id,
@@ -178,6 +191,7 @@ impl TotonoeEngine {
             transaction_id,
             status: "succeeded".to_owned(),
             message: "全Actionを適用し、現在状態を再確認しました。".to_owned(),
+            details: result_details,
         })
     }
 
@@ -191,11 +205,7 @@ impl TotonoeEngine {
         original_error: ActionError,
     ) -> CoreResult<CommitResult> {
         let failed_action = registered_action(work[failed_index].parameters.action_id())?;
-        let failed_context = action_context(
-            identity,
-            transaction_id,
-            work[failed_index].item_id,
-        );
+        let failed_context = action_context(identity, transaction_id, work[failed_index].item_id);
         let failed_classification = classify_action(
             failed_action,
             &failed_context,
@@ -205,13 +215,19 @@ impl TotonoeEngine {
         let primary_code = original_error.code.as_code().to_owned();
         let mut recovery_required = false;
         if failed_classification == RecoveryClassification::Original {
-            self.journal.mark_item_rolled_back(
-                transaction_id,
-                work[failed_index].item_id,
-                now_ms(),
-            )?;
+            if needs_original_rollback_fence(
+                work[failed_index].parameters.action_id(),
+                ItemState::ApplyFailed,
+            ) {
+                applied_indices.push(failed_index);
+            } else {
+                self.journal.mark_item_rolled_back(
+                    transaction_id,
+                    work[failed_index].item_id,
+                    now_ms(),
+                )?;
+            }
         } else if failed_classification == RecoveryClassification::Applied {
-
             applied_indices.push(failed_index);
         } else if matches!(
             failed_classification,
@@ -235,8 +251,6 @@ impl TotonoeEngine {
                 .mark_item_rolled_back(transaction_id, item.item_id, now_ms())?;
         }
 
-
-
         let mut rollback_failed = false;
         for index in applied_indices.into_iter().rev() {
             let item = &work[index];
@@ -258,16 +272,11 @@ impl TotonoeEngine {
                 .mark_item_rolling_back(transaction_id, item.item_id, now_ms())?;
             let verification = action
                 .rollback(&context, &item.parameters, &item.backup)
-                .and_then(|_| {
-                    action.verify_rolled_back(&context, &item.parameters, &item.backup)
-                });
+                .and_then(|_| action.verify_rolled_back(&context, &item.parameters, &item.backup));
             match verification {
                 Ok(Verification { verified: true, .. }) => {
-                    self.journal.mark_item_rolled_back(
-                        transaction_id,
-                        item.item_id,
-                        now_ms(),
-                    )?;
+                    self.journal
+                        .mark_item_rolled_back(transaction_id, item.item_id, now_ms())?;
                 }
                 Ok(_) => {
                     let rollback_error = ActionError::new(
@@ -325,6 +334,7 @@ impl TotonoeEngine {
             } else {
                 "自動で戻せない項目があります。タイムラインを確認してください。".to_owned()
             },
+            details: Vec::new(),
         })
     }
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::window_layout::WindowLayoutInvocation;
+
 use super::{ActionId, WindowColorPreset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +226,14 @@ pub enum ActionParameters {
     SetupLaunchApps { bundle: AppLaunchBundle },
     #[serde(rename = "setup.windows_update_status")]
     SetupWindowsUpdateStatus {},
+    #[serde(rename = "setup.default_apps")]
+    SetupDefaultApps {},
+    #[serde(rename = "setup.window_layout")]
+    SetupWindowLayout {
+        invocation: WindowLayoutInvocation,
+    },
+    #[serde(rename = "setup.audio_output")]
+    SetupAudioOutput {},
 }
 
 impl ActionParameters {
@@ -293,6 +303,9 @@ impl ActionParameters {
             Self::SetupPowerToysStatus { .. } => ActionId::SetupPowerToysStatus,
             Self::SetupLaunchApps { .. } => ActionId::SetupLaunchApps,
             Self::SetupWindowsUpdateStatus { .. } => ActionId::SetupWindowsUpdateStatus,
+            Self::SetupDefaultApps { .. } => ActionId::SetupDefaultApps,
+            Self::SetupWindowLayout { .. } => ActionId::SetupWindowLayout,
+            Self::SetupAudioOutput { .. } => ActionId::SetupAudioOutput,
         }
     }
 }

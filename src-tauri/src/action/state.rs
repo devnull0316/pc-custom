@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::backup::Fingerprint;
+use crate::window_layout::WindowLayoutObservation;
 
 use super::{AppLaunchBundle, ProcessFileIdentity, ThemeColorMode};
 
@@ -141,6 +142,23 @@ pub struct DefaultRenderAudioObservation {
     pub endpoint_exists: bool,
 }
 
+/// One active Windows Core Audio render endpoint.
+///
+/// Core Audio endpoint identifiers are intentionally absent: they are opaque
+/// machine-specific values and are not needed for this read-only observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioOutputEndpointObservation {
+    pub friendly_name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioOutputObservation {
+    pub endpoints: Vec<AudioOutputEndpointObservation>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameReadinessObservation {
@@ -235,6 +253,8 @@ pub enum ObservedValue {
     KnownApps(KnownAppsObservation),
     PowerToysInstallation(PowerToysInstallationObservation),
     WindowsUpdateStatus(WindowsUpdateStatusObservation),
+    AudioOutput(AudioOutputObservation),
+    WindowLayout(WindowLayoutObservation),
     AccentColor {
         hex: String,
         opaque_blend: bool,

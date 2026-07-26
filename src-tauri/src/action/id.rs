@@ -134,10 +134,16 @@ pub enum ActionId {
     SetupLaunchApps,
     #[serde(rename = "setup.windows_update_status")]
     SetupWindowsUpdateStatus,
+    #[serde(rename = "setup.default_apps")]
+    SetupDefaultApps,
+    #[serde(rename = "setup.window_layout")]
+    SetupWindowLayout,
+    #[serde(rename = "setup.audio_output")]
+    SetupAudioOutput,
 }
 
 impl ActionId {
-    pub const ALL: [Self; 64] = [
+    pub const ALL: [Self; 67] = [
         Self::SessionPreventSleep,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
@@ -202,6 +208,9 @@ impl ActionId {
         Self::SetupPowerToysStatus,
         Self::SetupLaunchApps,
         Self::SetupWindowsUpdateStatus,
+        Self::SetupDefaultApps,
+        Self::SetupWindowLayout,
+        Self::SetupAudioOutput,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -270,6 +279,9 @@ impl ActionId {
             Self::SetupPowerToysStatus => "setup.powertoys_status",
             Self::SetupLaunchApps => "setup.launch_apps",
             Self::SetupWindowsUpdateStatus => "setup.windows_update_status",
+            Self::SetupDefaultApps => "setup.default_apps",
+            Self::SetupWindowLayout => "setup.window_layout",
+            Self::SetupAudioOutput => "setup.audio_output",
         }
     }
 }
@@ -360,6 +372,9 @@ impl FromStr for ActionId {
             "setup.powertoys_status" => Ok(Self::SetupPowerToysStatus),
             "setup.launch_apps" => Ok(Self::SetupLaunchApps),
             "setup.windows_update_status" => Ok(Self::SetupWindowsUpdateStatus),
+            "setup.default_apps" => Ok(Self::SetupDefaultApps),
+            "setup.window_layout" => Ok(Self::SetupWindowLayout),
+            "setup.audio_output" => Ok(Self::SetupAudioOutput),
             _ => Err(ParseActionIdError),
         }
     }

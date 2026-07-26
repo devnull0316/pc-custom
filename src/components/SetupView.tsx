@@ -1,17 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { configSnapshotExport, publicErrorMessage, setupCatalog, setupInstall } from "../backend";
-import type { ActionPresentation, DataMode, InstallOutcome, SetupAppDto } from "../model";
+import type {
+  ActionPresentation,
+  BootstrapStatus,
+  DataMode,
+  InstallOutcome,
+  SetupAppDto,
+} from "../model";
 import { Icon } from "./Icon";
 import { PowerToysPanel } from "./PowerToysPanel";
+import { SetupEssentialsPanel } from "./SetupEssentialsPanel";
 
 interface SetupViewProps {
+  bootstrap: BootstrapStatus | null;
   dataMode: DataMode;
   powerToysAction: ActionPresentation | undefined;
   powerToysDetecting: boolean;
   powerToysLaunching: boolean;
   onPowerToysDetect: () => void;
   onPowerToysLaunch: () => void;
+  actions: readonly ActionPresentation[];
+  detectionPendingId: string | null;
+  previewPendingId: string | null;
+  onDetect: (actionId: string) => void;
+  onPreview: (action: ActionPresentation) => void;
+  onError: (error: unknown) => void;
+  onNotice: (message: string) => void;
 }
 
 const CATEGORY_LABELS: Readonly<Record<string, string>> = {
@@ -21,12 +36,20 @@ const CATEGORY_LABELS: Readonly<Record<string, string>> = {
 };
 
 export function SetupView({
+  bootstrap,
   dataMode,
   powerToysAction,
   powerToysDetecting,
   powerToysLaunching,
   onPowerToysDetect,
   onPowerToysLaunch,
+  actions,
+  detectionPendingId,
+  previewPendingId,
+  onDetect,
+  onPreview,
+  onError,
+  onNotice,
 }: SetupViewProps) {
   const live = dataMode === "live";
   const [apps, setApps] = useState<readonly SetupAppDto[]>([]);
@@ -101,6 +124,27 @@ export function SetupView({
 
   return (
     <section className="setup-view">
+      <header className="view-header">
+        <span className="eyebrow">新しいPCをセットアップ</span>
+        <h1>新しいPCの準備をまとめる</h1>
+        <p>
+          Windowsの仕上げ、普段使いの機能、よく使うアプリの導入を、
+          それぞれ内容を確認しながら進めます。
+        </p>
+      </header>
+      <SetupEssentialsPanel
+        audioAction={actions.find((action) => action.id === "setup.audio_output")}
+        bootstrap={bootstrap}
+        dataMode={dataMode}
+        defaultAppsAction={actions.find((action) => action.id === "setup.default_apps")}
+        detectingId={detectionPendingId}
+        onDetect={onDetect}
+        onError={onError}
+        onNotice={onNotice}
+        onPreview={onPreview}
+        previewingId={previewPendingId}
+        windowLayoutAction={actions.find((action) => action.id === "setup.window_layout")}
+      />
       <PowerToysPanel
         action={powerToysAction}
         dataMode={dataMode}
@@ -110,61 +154,62 @@ export function SetupView({
         onLaunch={onPowerToysLaunch}
         onShowInstall={showPowerToysInstall}
       />
-      <header className="view-header">
-        <span className="eyebrow">新しいPCをセットアップ</span>
-        <h1>よく使うアプリをまとめて入れる</h1>
-        <p>
-          Microsoft公式の WinGet を使い、<strong>ここに載っている既知のアプリだけ</strong>を導入します。
-          任意のアプリIDやコマンドは受け付けません。導入するアプリを選んでから実行します。
-        </p>
-      </header>
+      <section aria-labelledby="setup-apps-title" className="setup-apps">
+        <header className="setup-apps__header">
+          <h2 id="setup-apps-title">よく使うアプリをまとめて入れる</h2>
+          <p>
+            Microsoft公式の WinGet を使い、<strong>ここに載っている既知のアプリだけ</strong>を導入します。
+            任意のアプリIDやコマンドは受け付けません。導入するアプリを選んでから実行します。
+          </p>
+        </header>
 
-      {live ? null : (
-        <div className="inline-note" role="note">
-          <Icon name="info" />
-          <span>閲覧モードです。安全コアに接続すると、アプリの導入ができます。</span>
-        </div>
-      )}
-      {loadError === null ? null : (
-        <div className="inline-note" role="note">
-          <Icon name="warning" />
-          <span>{loadError}</span>
-        </div>
-      )}
+        {live ? null : (
+          <div className="inline-note" role="note">
+            <Icon name="info" />
+            <span>閲覧モードです。安全コアに接続すると、アプリの導入ができます。</span>
+          </div>
+        )}
+        {loadError === null ? null : (
+          <div className="inline-note" role="note">
+            <Icon name="warning" />
+            <span>{loadError}</span>
+          </div>
+        )}
 
-      {grouped.map(([category, list]) => (
-        <div className="setup-group" key={category}>
-          <h2>{CATEGORY_LABELS[category] ?? category}</h2>
-          <ul className="setup-list">
-            {list.map((app) => {
-              const outcome = results[app.id];
-              return (
-                <li className="setup-card" id={`setup-app-${app.id}`} key={app.id}>
-                  <div className="setup-card__body">
-                    <strong>{app.name}</strong>
-                    <small>{app.description}</small>
-                    {outcome === undefined ? null : (
-                      <span className={`setup-card__result setup-card__result--${outcome.succeeded ? "ok" : "fail"}`}>
-                        <Icon name={outcome.succeeded ? "check" : "warning"} size={14} />
-                        {outcome.summary}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    className="secondary-button"
-                    disabled={!live || pendingId !== null || outcome?.succeeded === true}
-                    onClick={() => void install(app)}
-                    type="button"
-                  >
-                    {pendingId === app.id ? <Icon className="spin" name="spinner" /> : <Icon name="plus" />}
-                    {outcome?.succeeded === true ? "導入済み" : "導入する"}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+        {grouped.map(([category, list]) => (
+          <div className="setup-group" key={category}>
+            <h3>{CATEGORY_LABELS[category] ?? category}</h3>
+            <ul className="setup-list">
+              {list.map((app) => {
+                const outcome = results[app.id];
+                return (
+                  <li className="setup-card" id={`setup-app-${app.id}`} key={app.id}>
+                    <div className="setup-card__body">
+                      <strong>{app.name}</strong>
+                      <small>{app.description}</small>
+                      {outcome === undefined ? null : (
+                        <span className={`setup-card__result setup-card__result--${outcome.succeeded ? "ok" : "fail"}`}>
+                          <Icon name={outcome.succeeded ? "check" : "warning"} size={14} />
+                          {outcome.summary}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      className="secondary-button"
+                      disabled={!live || pendingId !== null || outcome?.succeeded === true}
+                      onClick={() => void install(app)}
+                      type="button"
+                    >
+                      {pendingId === app.id ? <Icon className="spin" name="spinner" /> : <Icon name="plus" />}
+                      {outcome?.succeeded === true ? "導入済み" : "導入する"}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </section>
 
       <div className="setup-group">
         <h2>今の設定を控えておく</h2>

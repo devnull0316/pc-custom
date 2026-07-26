@@ -5,13 +5,16 @@ use tempfile::tempdir;
 use uuid::Uuid;
 
 use crate::{
-    action::{ActionId, ActionParameters},
-    backup::{
-        BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, ObservationBackup,
-    },
+    action::{ActionId, ActionParameters, ProcessFileIdentity},
+    backup::{BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, ObservationBackup},
     compatibility::OsIdentity,
+    game_profile::{CreateProfileRequest, ProfileStore, StoredProfileAction},
     journal::{JournalDatabase, PreparedItem},
     presentation::{PreviewActionRequest, PreviewActionsRequest},
+    window_layout::{
+        SavedWindowPlacement, SavedWindowPlacementEntry, SensitiveWindowTitle,
+        WindowLayoutSnapshot, WindowLayoutStore, WindowPoint, WindowRect,
+    },
 };
 
 use super::TotonoeEngine;
@@ -43,6 +46,48 @@ fn power_observation_item(transaction_id: Uuid, item_id: Uuid) -> PreparedItem {
         resource_keys: vec!["power:active-scheme:read".to_owned()],
         backup,
     }
+}
+
+fn layout_snapshot(label: &str) -> WindowLayoutSnapshot {
+    WindowLayoutSnapshot {
+        snapshot_id: Uuid::new_v4(),
+        captured_at_unix_ms: 1,
+        entries: vec![SavedWindowPlacementEntry {
+            entry_id: Uuid::new_v4(),
+            process_file_identity: ProcessFileIdentity {
+                volume_serial_number: 1,
+                file_id: [2; 16],
+            },
+            application_label: "layout-test.exe".to_owned(),
+            class_name: "TotonoeEngineLayoutTest".to_owned(),
+            title: SensitiveWindowTitle::new(label.to_owned()).expect("bounded title"),
+            placement: SavedWindowPlacement {
+                flags: 0,
+                show_cmd: 1,
+                min_position: WindowPoint { x: -1, y: -1 },
+                max_position: WindowPoint { x: -1, y: -1 },
+                normal_position: WindowRect {
+                    left: 10,
+                    top: 20,
+                    right: 410,
+                    bottom: 320,
+                },
+            },
+            observed_rect: WindowRect {
+                left: 10,
+                top: 20,
+                right: 410,
+                bottom: 320,
+            },
+        }],
+        excluded_game_windows: 0,
+        skipped_windows: 0,
+    }
+}
+
+fn notepad() -> String {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+    format!(r"{root}\System32\notepad.exe")
 }
 
 #[test]
@@ -134,7 +179,109 @@ fn unknown_build_rejects_persistent_preview_without_registry_write() {
         })
         .expect_err("unknown build must reject persistent mutation preview");
     assert_eq!(error.code, "RECOVERY_REQUIRED");
-    assert_eq!(engine.list_timeline(10).expect("timeline remains readable").len(), 0);
+    assert_eq!(
+        engine
+            .list_timeline(10)
+            .expect("timeline remains readable")
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn replaced_layout_or_changed_exclusions_invalidates_private_invocation() {
+    let directory = tempdir().expect("runtime stores directory");
+    let profile_store = Arc::new(
+        ProfileStore::open(directory.path().join("profiles.json")).expect("profile store"),
+    );
+    let layout_store = Arc::new(
+        WindowLayoutStore::open(directory.path().join("window-layout.json")).expect("layout store"),
+    );
+    layout_store
+        .replace(layout_snapshot("first generation"))
+        .expect("save first layout");
+    let journal = Arc::new(JournalDatabase::open_in_memory().expect("journal"));
+    let engine = TotonoeEngine::new_with_runtime_stores(
+        journal,
+        Some(OsIdentity::from_test_build(26_100)),
+        Some(profile_store),
+        Some(layout_store.clone()),
+    )
+    .expect("engine with runtime stores");
+    let first = engine
+        .window_layout_parameters()
+        .expect("first private invocation");
+
+    layout_store
+        .replace(layout_snapshot("second generation"))
+        .expect("replace saved layout");
+    let stale = engine
+        .ensure_layout_invocations_current(std::slice::from_ref(&first))
+        .expect_err("replaced snapshot must invalidate invocation");
+    assert_eq!(stale.code, "STALE_PREVIEW");
+
+    let mut current = engine
+        .window_layout_parameters()
+        .expect("current private invocation");
+    let ActionParameters::SetupWindowLayout { invocation } = &mut current else {
+        panic!("window-layout parameters");
+    };
+    invocation
+        .excluded_game_file_identities
+        .push(ProcessFileIdentity {
+            volume_serial_number: 9,
+            file_id: [9; 16],
+        });
+    let stale = engine
+        .ensure_layout_invocations_current(&[current])
+        .expect_err("changed exclusion set must invalidate invocation");
+    assert_eq!(stale.code, "STALE_PREVIEW");
+}
+
+#[test]
+fn recovery_parameters_union_current_registered_game_identity() {
+    let directory = tempdir().expect("runtime stores directory");
+    let profile_store = Arc::new(
+        ProfileStore::open(directory.path().join("profiles.json")).expect("profile store"),
+    );
+    profile_store
+        .create(CreateProfileRequest {
+            name: "recovery game".to_owned(),
+            executable_path: Some(notepad()),
+            conflict_policy: None,
+            actions: vec![StoredProfileAction {
+                action_id: "theme.color_mode".to_owned(),
+                parameters: serde_json::json!({ "mode": "dark" }),
+            }],
+        })
+        .expect("register current executable");
+    let journal = Arc::new(JournalDatabase::open_in_memory().expect("journal"));
+    let engine = TotonoeEngine::new_with_runtime_stores(
+        journal,
+        Some(OsIdentity::from_test_build(26_100)),
+        Some(profile_store.clone()),
+        None,
+    )
+    .expect("engine with profile store");
+    let parameters = ActionParameters::SetupWindowLayout {
+        invocation: crate::window_layout::WindowLayoutInvocation {
+            desired: layout_snapshot("recovery target"),
+            excluded_game_file_identities: Vec::new(),
+        },
+    };
+
+    let effective = engine
+        .recovery_parameters(&parameters)
+        .expect("current exclusions can be added");
+    let ActionParameters::SetupWindowLayout { invocation } = effective else {
+        panic!("window-layout parameters");
+    };
+    assert_eq!(
+        invocation.excluded_game_file_identities,
+        profile_store
+            .registered_game_file_identities()
+            .expect("authoritative exclusions")
+    );
 }
 
 /// 実機・実エンジンでの通し確認。利用者が画面で行う順番そのままを、
@@ -163,14 +310,21 @@ fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
         })
         .expect("preview succeeds on a supported build");
     assert_eq!(preview.changes.len(), 1, "変更内容が1件提示される");
-    assert!(!preview.changes[0].before.is_empty(), "現在の状態が示される");
+    assert!(
+        !preview.changes[0].before.is_empty(),
+        "現在の状態が示される"
+    );
     assert!(!preview.changes[0].after.is_empty(), "適用後が示される");
 
     // 2. 内容を確認して適用する
     let commit = engine
         .commit_preview(&preview.preview_token)
         .expect("commit succeeds");
-    assert_eq!(commit.status, "succeeded", "適用が成功する: {}", commit.message);
+    assert_eq!(
+        commit.status, "succeeded",
+        "適用が成功する: {}",
+        commit.message
+    );
 
     // 3. タイムラインに1件残り、戻せる状態になっている
     let timeline = engine.list_timeline(10).expect("timeline");
@@ -182,8 +336,14 @@ fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
     assert!(item.rollback_available, "この1件だけ戻せる");
 
     // 4. その1件だけを元へ戻す
-    let rolled = engine.rollback_item(item.item_id).expect("rollback succeeds");
-    assert_eq!(rolled.status, "rolled_back", "復元が成功する: {}", rolled.message);
+    let rolled = engine
+        .rollback_item(item.item_id)
+        .expect("rollback succeeds");
+    assert_eq!(
+        rolled.status, "rolled_back",
+        "復元が成功する: {}",
+        rolled.message
+    );
 
     let after = engine.list_timeline(10).expect("timeline after rollback");
     let restored = after

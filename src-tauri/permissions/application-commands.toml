@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "application-commands"
-description = "Allows the main window to call Totonoe typed catalog, preview, transaction, recovery, and timeline commands."
+description = "Allows the main window to call Totonoe's fixed typed commands for catalog, setup, profiles, transactions, recovery, and read-only exports."
 commands.allow = [
   "get_bootstrap_status",
   "list_actions",
@@ -9,6 +9,25 @@ commands.allow = [
   "commit_preview",
   "list_timeline",
   "rollback_item",
-  "reconcile_now"
+  "reconcile_now",
+  "profiles_list",
+  "profile_create",
+  "profile_set_enabled",
+  "profile_run_now",
+  "profile_restore_now",
+  "profile_delete",
+  "config_export",
+  "config_import_preview",
+  "config_import_apply",
+  "setup_app_catalog",
+  "setup_app_install",
+  "config_snapshot_export",
+  "theme_schedule_get",
+  "theme_schedule_set",
+  "storage_temp_cleanup_plan",
+  "storage_temp_cleanup_apply",
+  "open_windows_settings",
+  "get_window_layout_status",
+  "save_window_layout"
 ]
 

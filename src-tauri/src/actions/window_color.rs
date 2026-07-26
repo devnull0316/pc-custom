@@ -13,11 +13,10 @@
 
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionId, ActionKind, ActionMetadata,
-        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
-        ChangeExplanation, DetectedState, MethodClass, ObservedValue, RollbackEvidence,
-        TroubleshootingStep, ValidationReport, Verification, WindowColorPreset,
-        WindowsReleaseFamily,
+        Action, ActionContext, ActionError, ActionId, ActionKind, ActionMetadata, ActionParameters,
+        ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence, ChangeExplanation,
+        DetectedState, MethodClass, ObservedValue, RollbackEvidence, TroubleshootingStep,
+        ValidationReport, Verification, WindowColorPreset, WindowsReleaseFamily,
     },
     backup::{
         prepare_registry_backup, read_registry_state, restore_registry_backup,
@@ -69,7 +68,8 @@ pub static WINDOW_COLOR_ACTION: WindowColorAction = WindowColorAction;
 static METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::AppearanceWindowColor,
     name: "ウィンドウの色を変える",
-    description: "タイトルバーなどに使われる色を、決められた色から選んで変えます。元の色は正確に戻せます。",
+    description:
+        "タイトルバーなどに使われる色を、決められた色から選んで変えます。元の色は正確に戻せます。",
     category: "appearance",
     tags: &["見た目", "色", "DWM"],
     supportedWindowsVersions: &[
@@ -247,12 +247,28 @@ impl Action for WindowColorAction {
             );
         }
         let precondition_fingerprint = Fingerprint::of_parts([
-            entries[0].original.fingerprint(&entries[0].location).0.as_slice(),
-            entries[1].original.fingerprint(&entries[1].location).0.as_slice(),
+            entries[0]
+                .original
+                .fingerprint(&entries[0].location)
+                .0
+                .as_slice(),
+            entries[1]
+                .original
+                .fingerprint(&entries[1].location)
+                .0
+                .as_slice(),
         ]);
         let intended_fingerprint = Fingerprint::of_parts([
-            entries[0].intended_state().fingerprint(&entries[0].location).0.as_slice(),
-            entries[1].intended_state().fingerprint(&entries[1].location).0.as_slice(),
+            entries[0]
+                .intended_state()
+                .fingerprint(&entries[0].location)
+                .0
+                .as_slice(),
+            entries[1]
+                .intended_state()
+                .fingerprint(&entries[1].location)
+                .0
+                .as_slice(),
         ]);
         Ok(BackupDraft {
             precondition_fingerprint,
@@ -414,7 +430,10 @@ impl Action for WindowColorAction {
         })
     }
 
-    fn troubleshooting(&self, _code: crate::action::ActionErrorCode) -> &'static [TroubleshootingStep] {
+    fn troubleshooting(
+        &self,
+        _code: crate::action::ActionErrorCode,
+    ) -> &'static [TroubleshootingStep] {
         &[TroubleshootingStep {
             message_key: "action.window_color.open_official_settings_if_refresh_is_delayed",
             opens_official_settings: true,
@@ -476,7 +495,10 @@ mod tests {
 
         let before_reg = read_registry_state(&COLOR_TARGET.location()).expect("read colour");
         let before = system_accent_color().expect("effective colour");
-        println!("before #{:02X}{:02X}{:02X}", before.red, before.green, before.blue);
+        println!(
+            "before #{:02X}{:02X}{:02X}",
+            before.red, before.green, before.blue
+        );
 
         // 元の色から離れたプリセットを選ぶ。
         let preset = if before.red > 128 {

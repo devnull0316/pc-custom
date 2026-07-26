@@ -40,6 +40,7 @@ winreg = "0.52"
 wmi = "0.13"
 windows = { version = "0.58", features = [
   "Win32_Devices_Display",
+  "Win32_Devices_FunctionDiscovery",
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
@@ -57,6 +58,7 @@ windows = { version = "0.58", features = [
   "Win32_System_UpdateAgent",
   "Win32_System_WindowsProgramming",
   "Win32_UI_Shell",
+  "Win32_UI_Shell_PropertiesSystem",
   "Win32_UI_Accessibility",
   "Win32_UI_WindowsAndMessaging",
 ] }

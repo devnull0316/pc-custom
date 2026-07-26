@@ -8,22 +8,19 @@
 
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionMetadata, ActionParameters, ActionResult, ActionRiskLevel, ActionStage,
-        AppliedEvidence, ChangeExplanation, DetectedState, MethodClass, ObservedValue,
-        RollbackEvidence, TroubleshootingStep, ValidationReport, Verification,
-        WindowsReleaseFamily,
+        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
+        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
+        ChangeExplanation, DetectedState, MethodClass, ObservedValue, RollbackEvidence,
+        TroubleshootingStep, ValidationReport, Verification, WindowsReleaseFamily,
     },
     backup::{
-        read_registry_state, restore_registry_backup, verify_registry_backup_restored,
-        BackupDraft, BackupEnvelope, BackupPayload, RegistryRestoreOutcome, RegistryTarget,
+        read_registry_state, restore_registry_backup, verify_registry_backup_restored, BackupDraft,
+        BackupEnvelope, BackupPayload, RegistryRestoreOutcome, RegistryTarget,
     },
     windows::notify_explorer_settings_changed,
 };
 
-use super::common::{
-    decode_dword, evidence, map_windows_error, validate_backup, validate_base,
-};
+use super::common::{decode_dword, evidence, map_windows_error, validate_backup, validate_base};
 
 const WINDOWS_SETTINGS_REFERENCE: &str =
     "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11";
@@ -167,11 +164,11 @@ fn detect_setting(
     let configured = if state.value_existed {
         match decode_dword(state.value_type, &state.raw_bytes) {
             Some(value) if (action.valid)(value) => Some(value),
-            _ => {
-                return Ok(DetectedState::Unknown {
-                    reason: "保存値の型または値域が候補schema外のため、Windows UI状態として解釈しません。".to_owned(),
-                })
-            }
+            _ => return Ok(DetectedState::Unknown {
+                reason:
+                    "保存値の型または値域が候補schema外のため、Windows UI状態として解釈しません。"
+                        .to_owned(),
+            }),
         }
     } else {
         None
@@ -352,10 +349,7 @@ impl Action for DwordRegistryAction {
         Ok(Verification { verified, observed })
     }
 
-    fn explain_changes(
-        &self,
-        parameters: &ActionParameters,
-    ) -> ActionResult<ChangeExplanation> {
+    fn explain_changes(&self, parameters: &ActionParameters) -> ActionResult<ChangeExplanation> {
         let _ = (self.desired)(parameters)?;
         let _candidate_result = self.result;
         Ok(ChangeExplanation {
@@ -377,8 +371,7 @@ impl Action for DwordRegistryAction {
 
     fn troubleshooting(&self, _code: ActionErrorCode) -> &'static [TroubleshootingStep] {
         &[TroubleshootingStep {
-            message_key:
-                "action.registry_setting.open_official_settings_if_refresh_is_delayed",
+            message_key: "action.registry_setting.open_official_settings_if_refresh_is_delayed",
             opens_official_settings: true,
         }]
     }
@@ -472,16 +465,12 @@ fn taskbar_grouping_desired(parameters: &ActionParameters) -> ActionResult<u32> 
 
 fn taskbar_secondary_grouping_desired(parameters: &ActionParameters) -> ActionResult<u32> {
     match parameters {
-        ActionParameters::TaskbarSecondaryButtonGrouping { mode } => {
-            Ok(grouping_mode_value(*mode))
-        }
+        ActionParameters::TaskbarSecondaryButtonGrouping { mode } => Ok(grouping_mode_value(*mode)),
         _ => Err(wrong_parameters()),
     }
 }
 
-fn taskbar_multi_monitor_mode_desired(
-    parameters: &ActionParameters,
-) -> ActionResult<u32> {
+fn taskbar_multi_monitor_mode_desired(parameters: &ActionParameters) -> ActionResult<u32> {
     use crate::action::TaskbarMultiMonitorMode;
     match parameters {
         ActionParameters::TaskbarMultiMonitorMode { mode } => Ok(match mode {
@@ -545,12 +534,10 @@ bool_parameter!(
 );
 bool_parameter!(toast_banners_desired, NotificationsToastBanners, enabled);
 
-const ADVANCED_SUBKEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+const ADVANCED_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 const EXPLORER_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer";
 const START_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Start";
-const PERSONALIZE_SUBKEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+const PERSONALIZE_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
 macro_rules! action_metadata {
     (
@@ -1730,8 +1717,7 @@ mod tests {
         let target = unique_target("ExternalConflict");
         let location = target.location();
         let _cleanup = IsolatedKeyCleanup(location.clone());
-        write_raw_value(&location, REG_DWORD_TYPE, &dword_bytes(0))
-            .expect("seed original DWORD");
+        write_raw_value(&location, REG_DWORD_TYPE, &dword_bytes(0)).expect("seed original DWORD");
         let action = DwordRegistryAction::new(
             START_RECOMMENDATIONS_ACTION.metadata,
             target,
@@ -1859,7 +1845,8 @@ mod tests {
             .rollback(&context, &parameters, &envelope)
             .expect_err("legacy key retention must require recovery acknowledgement");
         assert_eq!(error.code, ActionErrorCode::RecoveryRequired);
-        let target_after = read_registry_state(&location).expect("read legacy target after rollback");
+        let target_after =
+            read_registry_state(&location).expect("read legacy target after rollback");
         assert!(target_after.key_existed);
         assert!(!target_after.value_existed);
         let sibling_after = read_registry_state(&sibling).expect("read preserved sibling");
@@ -1955,8 +1942,8 @@ mod tests {
     #[test]
     fn enum_and_inverted_boolean_storage_mappings_are_fixed_oracles() {
         use crate::action::{
-            ExplorerLaunchTarget, TaskbarAlignment, TaskbarGroupingMode,
-            TaskbarMultiMonitorMode, TaskbarSearchMode,
+            ExplorerLaunchTarget, TaskbarAlignment, TaskbarGroupingMode, TaskbarMultiMonitorMode,
+            TaskbarSearchMode,
         };
 
         for (mode, expected) in [
@@ -1991,10 +1978,8 @@ mod tests {
             (ExplorerLaunchTarget::Downloads, 3),
         ] {
             assert_eq!(
-                explorer_launch_target_desired(&ActionParameters::ExplorerLaunchTarget {
-                    target,
-                })
-                .expect("map Explorer launch target"),
+                explorer_launch_target_desired(&ActionParameters::ExplorerLaunchTarget { target })
+                    .expect("map Explorer launch target"),
                 expected
             );
         }
@@ -2022,9 +2007,9 @@ mod tests {
             (TaskbarMultiMonitorMode::WindowMonitor, 2),
         ] {
             assert_eq!(
-                taskbar_multi_monitor_mode_desired(
-                    &ActionParameters::TaskbarMultiMonitorMode { mode },
-                )
+                taskbar_multi_monitor_mode_desired(&ActionParameters::TaskbarMultiMonitorMode {
+                    mode
+                },)
                 .expect("map multi-monitor taskbar mode"),
                 expected
             );

@@ -57,6 +57,7 @@ pub const fn settings_page_for(action: ActionId) -> Option<&'static str> {
         ActionId::GamesGameMode => "ms-settings:gaming-gamemode",
         ActionId::GamesControllerGameBar => "ms-settings:gaming-gamebar",
         ActionId::DevicesAutoplay => "ms-settings:autoplay",
+        ActionId::SetupAudioOutput => "ms-settings:sound",
         // 電源・ストレージ
         ActionId::PowerActiveSchemeCheck
         | ActionId::PowerActiveSchemeSwitch
@@ -65,6 +66,7 @@ pub const fn settings_page_for(action: ActionId) -> Option<&'static str> {
             "ms-settings:storagesense"
         }
         ActionId::SetupStartupInventory => "ms-settings:startupapps",
+        ActionId::SetupDefaultApps => "ms-settings:defaultapps",
         // Explorer の各設定は「フォルダーオプション」側にあり、設定アプリの対応ページがない。
         _ => return None,
     })
@@ -168,5 +170,17 @@ mod tests {
                 "{action:?} にWindows設定への導線があること"
             );
         }
+    }
+
+    #[test]
+    fn setup_guides_use_fixed_official_settings_pages() {
+        assert_eq!(
+            settings_page_for(ActionId::SetupDefaultApps),
+            Some("ms-settings:defaultapps")
+        );
+        assert_eq!(
+            settings_page_for(ActionId::SetupAudioOutput),
+            Some("ms-settings:sound")
+        );
     }
 }

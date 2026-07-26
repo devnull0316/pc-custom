@@ -6,21 +6,19 @@
 
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionMetadata, ActionParameters, ActionResult, ActionRiskLevel, ActionStage,
-        AppliedEvidence, ChangeExplanation, DetectedState, MethodClass, ObservedValue,
-        PowerScheme, RollbackEvidence, TroubleshootingStep, ValidationReport, Verification,
+        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
+        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
+        ChangeExplanation, DetectedState, MethodClass, ObservedValue, PowerScheme,
+        RollbackEvidence, TroubleshootingStep, ValidationReport, Verification,
         WindowsReleaseFamily,
     },
-    backup::{
-        BackupDraft, BackupEnvelope, BackupPayload, PowerSchemeBackup, PowerSchemeGuid,
-    },
+    backup::{BackupDraft, BackupEnvelope, BackupPayload, PowerSchemeBackup, PowerSchemeGuid},
     windows::{active_power_scheme, set_active_power_scheme},
 };
 
 use super::common::{
-    evidence, fingerprint_state, map_windows_error, validate_backup,
-    validate_backup_for_apply, validate_base,
+    evidence, fingerprint_state, map_windows_error, validate_backup, validate_backup_for_apply,
+    validate_base,
 };
 
 pub struct PowerSchemeSwitchAction;
@@ -74,10 +72,7 @@ impl PowerSchemeSwitchAction {
         }
     }
 
-    fn state_for_guid(
-        context: &ActionContext<'_>,
-        guid: PowerSchemeGuid,
-    ) -> DetectedState {
+    fn state_for_guid(context: &ActionContext<'_>, guid: PowerSchemeGuid) -> DetectedState {
         DetectedState::Known {
             value: ObservedValue::ActivePowerScheme {
                 guid: guid.canonical_string(),
@@ -148,13 +143,7 @@ impl Action for PowerSchemeSwitchAction {
         context: &ActionContext<'_>,
         parameters: &ActionParameters,
     ) -> ActionResult<ValidationReport> {
-        let report = validate_base(
-            &METADATA,
-            context,
-            parameters,
-            true,
-            ActionStage::Validate,
-        )?;
+        let report = validate_base(&METADATA, context, parameters, true, ActionStage::Validate)?;
         let _ = Self::scheme(parameters)?;
         let _ = Self::read_state(context, ActionStage::Validate)?;
         Ok(report)
@@ -254,13 +243,7 @@ impl Action for PowerSchemeSwitchAction {
         parameters: &ActionParameters,
         envelope: &BackupEnvelope,
     ) -> ActionResult<RollbackEvidence> {
-        validate_base(
-            &METADATA,
-            context,
-            parameters,
-            true,
-            ActionStage::Rollback,
-        )?;
+        validate_base(&METADATA, context, parameters, true, ActionStage::Rollback)?;
         validate_backup(&METADATA, context, envelope, ActionStage::Rollback)?;
         let payload = Self::payload(parameters, envelope, ActionStage::Rollback)?;
         let (before, state) = Self::read_state(context, ActionStage::Rollback)?;
@@ -321,10 +304,7 @@ impl Action for PowerSchemeSwitchAction {
         })
     }
 
-    fn explain_changes(
-        &self,
-        parameters: &ActionParameters,
-    ) -> ActionResult<ChangeExplanation> {
+    fn explain_changes(&self, parameters: &ActionParameters) -> ActionResult<ChangeExplanation> {
         let scheme = Self::scheme(parameters)?;
         let result = match scheme {
             PowerScheme::Balanced => "現在ユーザーの電源プランをバランスへ切り替えます。",
@@ -345,7 +325,9 @@ impl Action for PowerSchemeSwitchAction {
             requires_admin: false,
             requires_restart: false,
             windows_update_impact: METADATA.windows_update_impact.to_owned(),
-            rollback_scope: "適用後のactive schemeがTotonoeの設定値のままの場合だけ、保存した元GUIDへ戻します。".to_owned(),
+            rollback_scope:
+                "適用後のactive schemeがTotonoeの設定値のままの場合だけ、保存した元GUIDへ戻します。"
+                    .to_owned(),
         })
     }
 
@@ -412,17 +394,21 @@ mod tests {
             .apply(&context, &parameters, &envelope)
             .expect("no-change apply");
         envelope.record_applied(applied.applied_fingerprint);
-        assert!(POWER_SCHEME_SWITCH_ACTION
-            .verify_applied(&context, &parameters, &envelope)
-            .expect("verify apply")
-            .verified);
+        assert!(
+            POWER_SCHEME_SWITCH_ACTION
+                .verify_applied(&context, &parameters, &envelope)
+                .expect("verify apply")
+                .verified
+        );
         POWER_SCHEME_SWITCH_ACTION
             .rollback(&context, &parameters, &envelope)
             .expect("rollback to exact original");
-        assert!(POWER_SCHEME_SWITCH_ACTION
-            .verify_rolled_back(&context, &parameters, &envelope)
-            .expect("verify rollback")
-            .verified);
+        assert!(
+            POWER_SCHEME_SWITCH_ACTION
+                .verify_rolled_back(&context, &parameters, &envelope)
+                .expect("verify rollback")
+                .verified
+        );
         assert_eq!(active_power_scheme().expect("read final scheme"), current);
     }
 
@@ -437,10 +423,8 @@ mod tests {
             scheme: PowerScheme::Balanced,
         };
         let original_state = PowerSchemeSwitchAction::state_for_guid(&context, original);
-        let intended_state = PowerSchemeSwitchAction::state_for_guid(
-            &context,
-            PowerSchemeGuid::BALANCED,
-        );
+        let intended_state =
+            PowerSchemeSwitchAction::state_for_guid(&context, PowerSchemeGuid::BALANCED);
         let draft = BackupDraft {
             precondition_fingerprint: fingerprint_state(&original_state, ActionStage::Backup)
                 .expect("original fingerprint"),
@@ -465,7 +449,10 @@ mod tests {
             .apply(&context, &parameters, &envelope)
             .expect_err("mismatched typed backup must fail closed");
         assert_eq!(error.code, ActionErrorCode::RecoveryRequired);
-        assert_eq!(active_power_scheme().expect("read unchanged scheme"), original);
+        assert_eq!(
+            active_power_scheme().expect("read unchanged scheme"),
+            original
+        );
     }
 
     #[test]
@@ -505,11 +492,7 @@ mod tests {
                 1,
                 os.base_build,
             );
-            let applied = match POWER_SCHEME_SWITCH_ACTION.apply(
-                &context,
-                &parameters,
-                &envelope,
-            ) {
+            let applied = match POWER_SCHEME_SWITCH_ACTION.apply(&context, &parameters, &envelope) {
                 Ok(applied) => applied,
                 Err(error) => {
                     eprintln!("scheme {scheme:?} unavailable: {error:?}");
@@ -534,7 +517,10 @@ mod tests {
             POWER_SCHEME_SWITCH_ACTION
                 .rollback(&context, &parameters, &envelope)
                 .expect("restore exact original");
-            assert_eq!(active_power_scheme().expect("read restored scheme"), original);
+            assert_eq!(
+                active_power_scheme().expect("read restored scheme"),
+                original
+            );
             return;
         }
         eprintln!(

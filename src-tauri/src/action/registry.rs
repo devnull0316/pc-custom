@@ -4,7 +4,7 @@ use crate::actions::*;
 
 use super::{Action, ActionError, ActionErrorCode, ActionId, ActionResult, ActionStage};
 
-static REGISTERED_ACTIONS: [&'static dyn Action; 64] = [
+static REGISTERED_ACTIONS: [&'static dyn Action; 67] = [
     &PREVENT_SLEEP_ACTION,
     &ACTIVE_SCHEME_CHECK_ACTION,
     &POWER_SCHEME_SWITCH_ACTION,
@@ -69,6 +69,9 @@ static REGISTERED_ACTIONS: [&'static dyn Action; 64] = [
     &POWERTOYS_STATUS_ACTION,
     &LAUNCH_APPS_ACTION,
     &WINDOWS_UPDATE_STATUS_ACTION,
+    &SETUP_DEFAULT_APPS_ACTION,
+    &WINDOW_LAYOUT_ACTION,
+    &SETUP_AUDIO_OUTPUT_ACTION,
 ];
 
 pub static ACTION_REGISTRY: ActionRegistry = ActionRegistry {

@@ -118,10 +118,7 @@ pub fn evidence(context: &ActionContext<'_>, source: &'static str) -> StateEvide
     }
 }
 
-pub fn fingerprint_state(
-    state: &DetectedState,
-    stage: ActionStage,
-) -> ActionResult<Fingerprint> {
+pub fn fingerprint_state(state: &DetectedState, stage: ActionStage) -> ActionResult<Fingerprint> {
     state.stable_fingerprint().map_err(|_| {
         ActionError::new(
             ActionErrorCode::InternalInvariant,
@@ -155,6 +152,7 @@ pub fn map_windows_error(
         WindowsErrorKind::InvalidData => ActionErrorCode::StateUnknown,
         WindowsErrorKind::ChannelClosed => ActionErrorCode::LeaseFailure,
         WindowsErrorKind::ApiFailure => ActionErrorCode::WindowsApiFailure,
+        WindowsErrorKind::RecoveryRequired => ActionErrorCode::RecoveryRequired,
     };
     let detail = match error.os_code {
         Some(os_code) => format!("{} (OS code {})", error.operation, os_code),
