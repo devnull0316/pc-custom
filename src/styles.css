@@ -14,8 +14,9 @@
   --surface-active: rgba(0, 0, 0, 0.075);
   --text: #1a1a1a;
   --text-secondary: #575757;
-  /* ライト時の三次テキスト。#747474 は白地で 4.48:1 と AA(4.5:1) にわずかに届かないため濃くする。 */
-  --text-tertiary: #6b6b6b;
+  /* ライト時の三次テキスト。面が半透明(Mica風)なので実効背景は白より暗く、
+     白地で測ると通るはずの値が実測で落ちる。#6b6b6b は合成後の実測で 4.23:1 だった。 */
+  --text-tertiary: #656565;
   --border: rgba(0, 0, 0, 0.11);
   --border-strong: rgba(0, 0, 0, 0.2);
   --safe: #177245;
@@ -231,7 +232,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .detail-disclosure ul { margin: 12px 0; padding-left: 18px; color: var(--text-secondary); line-height: 1.6; font-size: 12px; }
 .compatibility-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
 .compatibility-grid div { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-control); }
-.compatibility-grid dt { color: var(--text-tertiary); font-size: 9px; }
+.compatibility-grid dt { color: var(--text-tertiary); font-size: 10px; }
 .compatibility-grid dd { margin: 3px 0 0; font-size: 11px; }
 .blocked-reason { display: flex; align-items: flex-start; gap: 6px; margin: 12px 0 0; color: var(--caution); font-size: 11px; line-height: 1.5; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
@@ -265,7 +266,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .timeline-entry p { margin: 0; color: var(--text-secondary); font-size: 11px; }
 .timeline-state-change { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin: 13px 0; padding: 10px; border-radius: var(--radius-control); background: var(--surface-muted); }
 .timeline-state-change > span { display: grid; gap: 2px; }
-.timeline-state-change small { color: var(--text-tertiary); font-size: 9px; }
+.timeline-state-change small { color: var(--text-tertiary); font-size: 10px; }
 .timeline-state-change strong { font-size: 11px; }
 .timeline-state-change > svg { color: var(--text-tertiary); }
 .timeline-entry__actions { display: flex; align-items: center; gap: 10px; }
@@ -276,7 +277,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .stage--failed span { background: var(--danger-soft); color: var(--danger); }
 .timeline-details dl { display: grid; align-content: start; gap: 5px; margin: 0; }
 .timeline-details dl div { display: grid; grid-template-columns: 80px 1fr; gap: 7px; }
-.timeline-details dt { color: var(--text-tertiary); font-size: 9px; }
+.timeline-details dt { color: var(--text-tertiary); font-size: 10px; }
 .timeline-details dd { margin: 0; overflow: hidden; text-overflow: ellipsis; }
 .empty-state { min-height: 400px; padding: 30px; }
 .empty-state__icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--surface-active); }
@@ -310,7 +311,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .preview-change h3 { margin: 0; font-size: 13px; }
 .preview-change > div { display: grid; grid-template-columns: 1fr auto 1fr; gap: 9px; align-items: center; margin: 11px 0; }
 .preview-change > div span { display: grid; gap: 3px; }
-.preview-change small { color: var(--text-tertiary); font-size: 9px; }
+.preview-change small { color: var(--text-tertiary); font-size: 10px; }
 .preview-change p { margin: 0 0 4px; color: var(--text-secondary); font-size: 11px; }
 .preview-warnings { margin-top: 12px; padding: 11px; border: 1px solid color-mix(in srgb, var(--caution) 35%, var(--border)); border-radius: var(--radius-card); background: var(--caution-soft); }
 .preview-warnings strong { display: flex; align-items: center; gap: 6px; color: var(--caution); }
@@ -320,7 +321,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .rollback-summary > strong { font-size: 14px; }
 .rollback-summary > div { display: grid; grid-template-columns: 1fr auto 1fr; gap: 9px; align-items: center; margin: 14px 0; padding: 11px; border-radius: var(--radius-control); background: var(--surface-muted); }
 .rollback-summary span { display: grid; gap: 3px; }
-.rollback-summary small { color: var(--text-tertiary); font-size: 9px; }
+.rollback-summary small { color: var(--text-tertiary); font-size: 10px; }
 .rollback-summary p { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
 .dialog-empty { min-height: 170px; gap: 5px; }
 .draft-list { display: grid; gap: 7px; list-style: none; margin: 0; padding: 0; }
@@ -404,7 +405,8 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .action-pick span { display: flex; flex-direction: column; gap: .1rem; }
 .action-pick small { color: color-mix(in srgb, var(--text) 58%, transparent); font-size: .78rem; }
 
-.link-button { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.link-button { background: none; border: 0; padding: 0; color: var(--text); font: inherit; font-weight: 600;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
 .empty-block { display: flex; flex-direction: column; align-items: center; text-align: center; gap: .4rem;
   padding: 2rem 1rem; color: color-mix(in srgb, var(--text) 60%, transparent); }
@@ -420,7 +422,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .profile-card__head code { font-size: .78rem; color: color-mix(in srgb, var(--text) 58%, transparent);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-state { flex-shrink: 0; font-size: .74rem; font-weight: 600; padding: .2rem .55rem; border-radius: 999px; }
-.profile-state--on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.profile-state--on { color: var(--safe); background: var(--safe-soft); }
 .profile-state--off { color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .profile-card__actions-count { display: flex; align-items: center; gap: .4rem; font-size: .82rem;
   color: color-mix(in srgb, var(--text) 62%, transparent); }
@@ -443,7 +445,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .config-io__preview { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
 .config-io__preview li { display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
 .config-io__preview--blocked { color: color-mix(in srgb, var(--text) 62%, transparent); }
-.config-io__message { margin: 0; font-size: .85rem; color: var(--accent); }
+.config-io__message { margin: 0; font-size: .85rem; color: var(--text-secondary); }
 
 /* --- 新しいPCをセットアップ --- */
 .setup-view { display: flex; flex-direction: column; gap: 1.25rem; }
@@ -457,7 +459,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   background: color-mix(in srgb, var(--text) 4%, transparent); border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); }
 .powertoys-status__mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--text-secondary);
   background: color-mix(in srgb, var(--text) 8%, transparent); }
-.powertoys-status__mark--installed { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.powertoys-status__mark--installed { color: var(--safe); background: var(--safe-soft); }
 .powertoys-status > span:last-child { display: grid; gap: .15rem; }
 .powertoys-status small { color: var(--text-tertiary); }
 .powertoys-status strong { font-size: .82rem; }
@@ -492,10 +494,10 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .setup-card__body small { color: color-mix(in srgb, var(--text) 60%, transparent); font-size: .8rem; }
 .setup-card__result { display: inline-flex; align-items: center; gap: .3rem; font-size: .75rem; margin-top: .2rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.setup-card__result--ok { color: var(--accent); }
+.setup-card__result--ok { color: var(--safe); }
 .setup-card__result--fail { color: color-mix(in srgb, var(--text) 62%, transparent); }
 .setup-card .secondary-button { flex-shrink: 0; }
-.setup-view__message { margin: 0; font-size: .85rem; color: var(--accent); }
+.setup-view__message { margin: 0; font-size: .85rem; color: var(--text-secondary); }
 
 /* --- 時間帯によるテーマ切り替え --- */
 .theme-schedule { margin-bottom: 1.1rem; padding: 1rem 1.15rem; border-radius: 12px;
@@ -516,7 +518,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .theme-schedule__row input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .theme-schedule__error { margin: 0; font-size: .82rem; display: inline-flex; align-items: center; gap: .35rem;
   color: color-mix(in srgb, var(--text) 72%, transparent); }
-.theme-schedule__message { margin: 0; font-size: .82rem; color: var(--accent); }
+.theme-schedule__message { margin: 0; font-size: .82rem; color: var(--text-secondary); }
 
 /* --- 一時ファイルの削除 --- */
 .temp-cleanup { margin-bottom: 1.1rem; padding: 1rem 1.15rem; border-radius: 12px;
@@ -532,7 +534,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   font-size: .82rem; padding: .3rem .5rem; border-radius: 6px;
   background: color-mix(in srgb, var(--text) 4%, transparent); }
 .temp-cleanup__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.temp-cleanup__message { font-size: .85rem; color: var(--accent); }
+.temp-cleanup__message { font-size: .85rem; color: var(--text-secondary); }
 
 /* --- ゲーム前の準備確認 --- */
 .readiness-panel { margin-top: 1.5rem; padding: 1.15rem; border-radius: 12px;
@@ -550,7 +552,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   padding: .45rem .6rem; border-radius: 8px;
   background: color-mix(in srgb, var(--text) 4%, transparent); }
 .readiness-panel__row--unknown { color: color-mix(in srgb, var(--text) 68%, transparent); }
-.readiness-panel__message { margin: 0; font-size: .85rem; color: var(--accent); }
+.readiness-panel__message { margin: 0; font-size: .85rem; color: var(--text-secondary); }
 
 /* --- 自動化の内容を文章で示す（Apple Shortcuts の作法） --- */
 .automation-sentence { margin: 0 0 4px; padding: 10px 12px; border-radius: 8px;
