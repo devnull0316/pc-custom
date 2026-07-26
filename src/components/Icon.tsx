@@ -7,7 +7,7 @@ interface IconProps {
 }
 
 export function Icon({ name, size = 18, className }: IconProps) {
-  return (
+  const glyph = (
     <svg
       aria-hidden="true"
       className={className}
@@ -40,5 +40,16 @@ export function Icon({ name, size = 18, className }: IconProps) {
       {name === "spinner" ? <path className="spinner-path" d="M20 12a8 8 0 1 1-2.3-5.7" /> : null}
       {name === "chevron" ? <path d="m9 6 6 6-6 6" /> : null}
     </svg>
+  );
+
+  // 回っている絵は目で見ている人にしか届かない。読み上げにも「処理中」を渡す。
+  // role="status" は暗黙の live region なので、現れた時点で読み上げられる。
+  // 進行中のボタンは disabled になりフォーカスできないため、これがないと無音になる。
+  if (name !== "spinner") return glyph;
+  return (
+    <>
+      {glyph}
+      <span className="sr-only" role="status">処理中</span>
+    </>
   );
 }

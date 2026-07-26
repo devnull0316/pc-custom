@@ -362,7 +362,12 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+  /* 進行中の表示だけは止めない。一律に止めると回転が1回で固まり、
+     「処理中」なのか「固まった」のか見分けがつかなくなる。
+     回転(前庭系に障る動き)はやめて、その場での明滅に置き換える。 */
+  .spin { animation: spin-reduced 1.6s ease-in-out infinite !important; }
 }
+@keyframes spin-reduced { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 @media (forced-colors: active) {
   :root { --accent: Highlight; --on-accent: HighlightText; --focus: Highlight; }
