@@ -752,20 +752,21 @@ macro_rules! verified_action_metadata {
     };
 }
 
-action_metadata!(
+// 実機で往復確認済み(2026-07-27)。タスクバー要素「検索」present true->false->true。
+verified_action_metadata!(
     TASKBAR_SEARCH_MODE_METADATA,
     TASKBAR_SEARCH_MODE_ACTION,
     TaskbarSearchMode,
     "タスクバー検索の表示方法を選ぶ",
-    "検索を隠す、アイコン、ラベル付き、検索ボックスから選びます。固定HKCU値だけを変更します。",
+    "タスクバーの検索を隠す、アイコンだけ、ラベル付き、検索ボックスから選びます。反映するにはエクスプローラーの再起動が必要で、そのとき開いているフォルダーの窓が閉じます。",
     "appearance",
-    &["taskbar", "search", "explicit-only"],
+    &["taskbar", "search", "explorer-restart"],
     r#"{"mode":"hidden|icon|icon_and_label|search_box"}"#,
     "registry:hkcu:64:software/microsoft/windows/currentversion/search:searchboxtaskbarmode",
     Caution,
     &["https://learn.microsoft.com/windows/client-management/mdm/policy-csp-search"],
     "taskbar.search_mode.v1",
-    "高。タスクバー更新後はAction固有の実機確認まで自動適用しません。",
+    "中。Windows Update でタスクバーの実装が変わると再確認が必要になります。",
     r"Software\Microsoft\Windows\CurrentVersion\Search",
     "SearchboxTaskbarMode",
     taskbar_search_mode_desired,
@@ -943,20 +944,21 @@ action_metadata!(
     "タスクバーのウィンドウ共有表示を選択状態へ変更します。"
 );
 
-action_metadata!(
+// 実機で往復確認済み(2026-07-27)。タスクバー要素「デスクトップを表示する」present true->false->true。
+verified_action_metadata!(
     TASKBAR_SHOW_DESKTOP_METADATA,
     TASKBAR_SHOW_DESKTOP_ACTION,
     TaskbarShowDesktop,
     "タスクバー右端のデスクトップ表示を切り替える",
-    "タスクバー右端を選んでデスクトップを表示する操作を切り替えます。",
+    "タスクバー右端の、押すとデスクトップが見える細い領域を出すか消すかを選びます。反映するにはエクスプローラーの再起動が必要で、そのとき開いているフォルダーの窓が閉じます。",
     "appearance",
-    &["taskbar", "desktop", "explicit-only"],
+    &["taskbar", "show-desktop", "explorer-restart"],
     r#"{"enabled":"boolean"}"#,
     "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:taskbarsd",
     Caution,
     &[WINDOWS_SETTINGS_REFERENCE],
     "taskbar.show_desktop.v1",
-    "高。タスクバー更新後はAction固有の実機確認まで自動適用しません。",
+    "中。Windows Update でタスクバーの実装が変わると再確認が必要になります。",
     ADVANCED_SUBKEY,
     "TaskbarSd",
     taskbar_show_desktop_desired,

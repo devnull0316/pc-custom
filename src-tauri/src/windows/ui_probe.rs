@@ -1527,6 +1527,171 @@ mod tests {
     /// 元の値・型・有無へ正確に復元 → 位置が戻ったか実測、までを1往復で確認する。
     ///
     /// ユーザーの実環境を一時的に変更するため、通常のテスト実行では走らせない。
+    /// 候補をまとめて適用し、シェル再起動 1 回で複数の項目を同時に判定する。
+    ///
+    /// 1 件ずつ測ると再起動が件数×2 回になり、画面が何十回も点滅する。
+    /// 観測できる信号が互いに独立している項目は、まとめて測ってよい。
+    ///
+    /// **実機のタスクバーが 2 回消えて戻る。**
+    #[test]
+    #[ignore = "実機のシェルを2回再起動して複数候補をまとめて判定"]
+    fn batch_measure_taskbar_candidates_after_shell_restart() {
+        use crate::backup::{
+            prepare_registry_backup, restore_registry_backup, RegistryBackup, RegistryTarget,
+        };
+        use crate::windows::{restart_shell, write_raw_value};
+        use std::{thread::sleep, time::Duration};
+
+        const REG_DWORD: u32 = 4;
+        const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const SEARCH: &str = r"Software\Microsoft\Windows\CurrentVersion\Search";
+
+        /// 測る対象。`marker` がタスクバー要素名に含まれるかで有無を判定する。
+        struct Candidate {
+            id: &'static str,
+            subkey: &'static str,
+            value_name: &'static str,
+            off_value: u32,
+            marker: &'static str,
+        }
+
+        let candidates = [
+            Candidate {
+                id: "taskbar.search_mode",
+                subkey: SEARCH,
+                value_name: "SearchboxTaskbarMode",
+                off_value: 0, // 0 = 検索を隠す
+                marker: "検索",
+            },
+            Candidate {
+                id: "taskbar.show_desktop",
+                subkey: ADVANCED,
+                value_name: "TaskbarSd",
+                off_value: 0, // 0 = 右端の「デスクトップの表示」を出さない
+                marker: "デスクトップを表示する",
+            },
+        ];
+
+        fn names_or_empty() -> Vec<String> {
+            taskbar_element_names().unwrap_or_default()
+        }
+        fn contains(names: &[String], marker: &str) -> bool {
+            names.iter().any(|name| name.contains(marker))
+        }
+        /// シェルが戻り、要素が読めるようになるまで待つ。
+        fn settle() -> Vec<String> {
+            for _ in 0..40 {
+                sleep(Duration::from_millis(300));
+                let names = names_or_empty();
+                if names.len() > 5 {
+                    return names;
+                }
+            }
+            names_or_empty()
+        }
+
+        let before = names_or_empty();
+        if before.len() <= 5 {
+            println!("タスクバーを観測できないためスキップ");
+            return;
+        }
+        for candidate in &candidates {
+            println!(
+                "before: {} marker={:?} present={}",
+                candidate.id,
+                candidate.marker,
+                contains(&before, candidate.marker)
+            );
+        }
+
+        // 全件のバックアップを取ってから、まとめて書く。
+        let mut backups: Vec<(&Candidate, RegistryBackup)> = Vec::new();
+        for candidate in &candidates {
+            let target = RegistryTarget::current_user_64(candidate.subkey, candidate.value_name);
+            match prepare_registry_backup(
+                target,
+                REG_DWORD,
+                candidate.off_value.to_le_bytes().to_vec(),
+                1,
+                26_200,
+            ) {
+                Ok(backup) => backups.push((candidate, backup)),
+                Err(error) => println!("{}: backup 不可のため除外 {error:?}", candidate.id),
+            }
+        }
+
+        struct Guard(Vec<RegistryBackup>, bool);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                if !self.1 {
+                    for backup in &self.0 {
+                        let _ = restore_registry_backup(backup);
+                    }
+                    let _ = crate::windows::restart_shell();
+                }
+            }
+        }
+        let mut guard = Guard(backups.iter().map(|(_, b)| b.clone()).collect(), false);
+
+        for (candidate, backup) in &backups {
+            if let Err(error) = write_raw_value(
+                &backup.location,
+                REG_DWORD,
+                &candidate.off_value.to_le_bytes(),
+            ) {
+                println!("{}: 書き込み失敗 {error:?}", candidate.id);
+            }
+        }
+
+        println!(
+            "restart#1: {:?}",
+            restart_shell().expect("restart after write")
+        );
+        let after = settle();
+
+        let mut verdicts = Vec::new();
+        for (candidate, _) in &backups {
+            let was = contains(&before, candidate.marker);
+            let now = contains(&after, candidate.marker);
+            let changed = was != now;
+            println!(
+                "applied: {} present {was} -> {now}  changed={changed}",
+                candidate.id
+            );
+            verdicts.push((candidate.id, changed));
+        }
+
+        for (_, backup) in &backups {
+            let _ = restore_registry_backup(backup);
+        }
+        println!(
+            "restart#2: {:?}",
+            restart_shell().expect("restart after restore")
+        );
+        let restored = settle();
+        guard.1 = true;
+        drop(guard);
+
+        for (candidate, _) in &backups {
+            let back = contains(&restored, candidate.marker);
+            let originally = contains(&before, candidate.marker);
+            println!(
+                "restored: {} present={back} (元は {originally})",
+                candidate.id
+            );
+            assert_eq!(back, originally, "{} が元へ戻ること", candidate.id);
+        }
+
+        println!("---- 判定 ----");
+        for (id, changed) in verdicts {
+            if changed {
+                println!("EVIDENCE: {id} はシェル再起動で実UIへ反映される。昇格可能");
+            } else {
+                println!("EVIDENCE: {id} は反映を確認できなかった。昇格しない");
+            }
+        }
+    }
+
     /// 42 件の候補を「使えるようにする」ための決定的な実験。
     ///
     /// 設定変更通知だけでは反映されないことは既に実測済み。ここではシェルを再起動して

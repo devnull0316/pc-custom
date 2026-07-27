@@ -791,3 +791,37 @@ restart#2 → restored:  start_center_ratio=0.304   delta=0.000   ← 完全に�
 昇格した項目が自動適用に載らないことを固定した。
 
 230 テスト通過、clippy `-D warnings` 通過。
+
+### 一括測定へ切り替えて2件追加昇格（2026-07-27）
+
+1件ずつ測ると再起動が件数×2回になり、画面が何十回も点滅する。
+**観測信号が互いに独立している項目はまとめて適用し、再起動1回で同時に判定する**方式へ変えた。
+`batch_measure_taskbar_candidates_after_shell_restart` がその実装。
+
+実測結果（再起動2回で2件を判定）:
+
+```
+before: taskbar.search_mode   marker="検索"                 present=true
+before: taskbar.show_desktop  marker="デスクトップを表示する" present=true
+restart#1 → applied: taskbar.search_mode   true -> false  changed=true
+            applied: taskbar.show_desktop  true -> false  changed=true
+restart#2 → restored: 両方とも present=true（元どおり）
+```
+
+昇格: `taskbar.search_mode`、`taskbar.show_desktop`。**昇格済み3件 / 未検証39件。**
+
+### タスクバーのUIAツリーは想像より読める
+
+下調べで分かったこと。要素名には `検索`、`タスク ビュー`、`ウィジェット 33°C 晴れ`、
+`デスクトップを表示する`、`時計 18:21`、`ボリューム`、`ネットワーク`、`通知` が並ぶ。
+**項目の有無はそのまま判定に使える。**
+
+副産物: 以前 Guided へ降格した6件のうち `taskbar.task_view` と `taskbar.widgets` も
+この一覧に出ている。シェル再起動を前提にすれば再測定で復活する可能性がある。
+
+### テストの見本には昇格済み項目を使わない
+
+`unverified_registry_candidates_...` は `TASKBAR_SEARCH_MODE_ACTION` を
+「未検証候補の見本」として参照していたため、昇格した瞬間に落ちた。
+まだ未検証の `START_LAYOUT_ACTION` へ差し替えた。
+**昇格のたびに落ちるテストを書かないこと。**

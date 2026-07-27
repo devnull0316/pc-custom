@@ -1432,7 +1432,7 @@ mod tests {
         PowerToysInstallationObservation, PrimaryRefreshRateObservation, StartupInventoryEntry,
         StateEvidence, SystemDriveSpaceObservation, ACTION_REGISTRY,
     };
-    use crate::actions::TASKBAR_SEARCH_MODE_ACTION;
+    use crate::actions::START_LAYOUT_ACTION;
     use crate::compatibility::CompatibilityCatalog;
 
     #[test]
@@ -1520,7 +1520,9 @@ mod tests {
                 .expect("guided storage candidate metadata must be internally consistent");
         }
 
-        let metadata = TASKBAR_SEARCH_MODE_ACTION.metadata();
+        // 見本には「まだ未検証のまま」の項目を使う。昇格した項目を見本にすると、
+        // 昇格のたびにこのテストが落ちる。start.layout は 3 値でまだ未検証。
+        let metadata = START_LAYOUT_ACTION.metadata();
         let ui = action_presentation(
             metadata,
             CompatibilityCatalog::decision_for_build(26_100),
