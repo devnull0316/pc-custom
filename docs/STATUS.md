@@ -758,3 +758,36 @@ restart#2 → restored:  start_center_ratio=0.304   delta=0.000   ← 完全に�
 `explorer.info_tips` や `input.autocorrect` のように画面から読めないものが多い。
 観測できないものを「変更できます」として出せば、6 件を出荷したときと同じ失敗になる。
 昇格は項目ごとに観測手段を用意できたものから行う。
+
+## 候補の昇格経路を作り、1件目を昇格（2026-07-27）
+
+シェル再起動で反映されることが実測できたので、候補を可変にする経路を作った。
+
+**分かったこと**: 42件を封じていたのは `registry_metadata()` が `kind` と `method_class` を
+固定していたことに加え、`ActionMetadata::validate_static_contract()` に
+**「安定Actionは `requiresExplorerRestart` を持てない」という不変条件がコードで強制されていた**。
+方針が文書だけでなくコードに書かれていた。良い設計だが、方針を変えるならここも変える必要がある。
+
+不変条件は次の意味へ変えた。`requiresExplorerRestart` は「**反映にシェル再起動が要る**」という
+表示であって「適用時に勝手に再起動する」ではない。再起動は利用者が別途選んだときだけ行う。
+ただし **`auto_apply_eligible` との併用は禁止のまま**にした。ゲーム起動で自動適用された瞬間に
+開いているフォルダーの窓が予告なく閉じては困る。
+
+**追加したもの**:
+
+- `DwordRegistryAction` に `verified: bool`。false のあいだは従来どおり validate/backup/apply が
+  拒否を返す。42件のうち41件は今も false。
+- `verified_registry_metadata()` と `verified_action_metadata!`。渡した説明・危険度・根拠URLを
+  そのまま使い、`kind: Persistent` / `method_class: DocumentedRegistry` /
+  `requiresExplorerRestart: true` / `maximumTestedBuild: 26_200` を立てる。
+- `apply_verified_registry_backup()`。適用直前に現在値を読み直し、preview 時と違えば
+  `ExternalConflict` で書かずに止める。
+
+**昇格1件目**: `taskbar.alignment`。実機の往復確認済み（0.304 → 0.014 → 0.304）。
+
+**テストの扱い**: 「候補は42件」という固定値は「41件以下」へ変えた。減る方向にしか動かないので、
+増えていたら確認していないものを足したということで落ちる。あわせて
+`verified_registry_actions_are_mutable_but_never_auto_applied` を追加し、
+昇格した項目が自動適用に載らないことを固定した。
+
+230 テスト通過、clippy `-D warnings` 通過。

@@ -91,9 +91,9 @@ fn shell_process_ids() -> WindowsResult<Vec<u32>> {
         let name = String::from_utf16_lossy(&entry.szExeFile[..name_end]);
         if name.eq_ignore_ascii_case("explorer.exe") {
             let mut session = u32::MAX;
-            let same_session =
-                unsafe { ProcessIdToSessionId(entry.th32ProcessID, &mut session) }.is_ok()
-                    && session == own_session;
+            let same_session = unsafe { ProcessIdToSessionId(entry.th32ProcessID, &mut session) }
+                .is_ok()
+                && session == own_session;
             if same_session {
                 ids.push(entry.th32ProcessID);
             }

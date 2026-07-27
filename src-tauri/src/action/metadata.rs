@@ -88,8 +88,12 @@ impl ActionMetadata {
         {
             return Err("current backup codec has no rollback decoder");
         }
-        if self.requiresExplorerRestart {
-            return Err("stable MVP Actions may not force-restart Explorer");
+        // requiresExplorerRestart は「反映にシェル再起動が要る」という表示であって、
+        // 「適用時に勝手に再起動する」という意味ではない。再起動は利用者が別途選んだときだけ行う。
+        // ただしゲーム起動などで自動適用される経路に載せてはいけない。
+        // 開いているフォルダーの窓が予告なく閉じることになる。
+        if self.requiresExplorerRestart && self.auto_apply_eligible {
+            return Err("Actions needing an Explorer restart may not be auto-applied");
         }
         if matches!(
             self.kind,

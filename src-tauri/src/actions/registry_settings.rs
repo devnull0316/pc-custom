@@ -14,13 +14,16 @@ use crate::{
         TroubleshootingStep, ValidationReport, Verification, WindowsReleaseFamily,
     },
     backup::{
-        read_registry_state, restore_registry_backup, verify_registry_backup_restored, BackupDraft,
-        BackupEnvelope, BackupPayload, RegistryRestoreOutcome, RegistryTarget,
+        prepare_registry_backup, read_registry_state, restore_registry_backup,
+        verify_registry_backup_restored, BackupDraft, BackupEnvelope, BackupPayload,
+        RegistryBackup, RegistryRestoreOutcome, RegistryTarget,
     },
-    windows::notify_explorer_settings_changed,
+    windows::{notify_explorer_settings_changed, write_raw_value},
 };
 
-use super::common::{decode_dword, evidence, map_windows_error, validate_backup, validate_base};
+use super::common::{
+    decode_dword, evidence, map_windows_error, validate_backup, validate_base, REG_DWORD_TYPE,
+};
 
 const WINDOWS_SETTINGS_REFERENCE: &str =
     "https://learn.microsoft.com/windows/apps/develop/settings/settings-windows-11";
@@ -40,6 +43,9 @@ pub struct DwordRegistryAction {
     desired: DesiredValue,
     valid: ValidValue,
     result: &'static str,
+    /// 実機で「書いたら画面が変わる」ことを確認できた項目だけ true。
+    /// false のあいだは validate/backup/apply が拒否を返し、表示専用にとどまる。
+    verified: bool,
 }
 
 impl DwordRegistryAction {
@@ -56,6 +62,25 @@ impl DwordRegistryAction {
             desired,
             valid,
             result,
+            verified: false,
+        }
+    }
+
+    /// 実機での往復確認が取れた項目用。変更経路が開く。
+    const fn new_verified(
+        metadata: &'static ActionMetadata,
+        target: RegistryTarget,
+        desired: DesiredValue,
+        valid: ValidValue,
+        result: &'static str,
+    ) -> Self {
+        Self {
+            metadata,
+            target,
+            desired,
+            valid,
+            result,
+            verified: true,
         }
     }
 }
@@ -109,6 +134,58 @@ const fn registry_metadata(
     }
 }
 
+/// 実機で往復確認が取れた項目のメタデータ。候補用と違い、渡された説明・危険度・根拠URLを
+/// そのまま使い、変更できる Action として出す。
+///
+/// `requiresExplorerRestart: true` は飾りではない。この種の設定はレジストリへ書いただけでは
+/// 画面が変わらず、シェルを再起動して初めて反映されることを実測している。
+#[allow(clippy::too_many_arguments)]
+const fn verified_registry_metadata(
+    id: ActionId,
+    name: &'static str,
+    description: &'static str,
+    category: &'static str,
+    tags: &'static [&'static str],
+    parameter_schema: &'static str,
+    resource_keys: &'static [&'static str],
+    risk_level: ActionRiskLevel,
+    evidence_urls: &'static [&'static str],
+    compatibility_key: &'static str,
+    update_impact: &'static str,
+) -> ActionMetadata {
+    ActionMetadata {
+        id,
+        name,
+        description,
+        category,
+        tags,
+        supportedWindowsVersions: &[
+            WindowsReleaseFamily::Windows11_24H2,
+            WindowsReleaseFamily::Windows11_25H2,
+        ],
+        minimumBuild: 26_100,
+        maximumTestedBuild: 26_200,
+        riskLevel: risk_level,
+        requiresAdmin: false,
+        requiresRestart: false,
+        requiresExplorerRestart: true,
+        conflicts: &[],
+        dependencies: &[],
+        action_version: 1,
+        kind: ActionKind::Persistent,
+        parameter_schema,
+        resource_keys,
+        method_class: MethodClass::DocumentedRegistry,
+        evidence_urls,
+        compatibility_key,
+        backup_codec_version: 1,
+        rollback_decoder_versions: &[1],
+        // シェル再起動を伴うため、ゲーム起動時の自動適用には載せない。
+        auto_apply_eligible: false,
+        windows_update_impact: update_impact,
+    }
+}
+
 fn wrong_parameters() -> ActionError {
     ActionError::new(
         ActionErrorCode::WrongParameters,
@@ -132,6 +209,37 @@ fn four_value_is_valid(value: u32) -> bool {
 
 fn explorer_launch_target_is_valid(value: u32) -> bool {
     (1..=3).contains(&value)
+}
+
+/// 実適用。適用直前に現在値を読み直し、preview 時と違っていれば書かずに止める。
+fn apply_verified_registry_backup(backup: &RegistryBackup) -> ActionResult<()> {
+    let current = read_registry_state(&backup.location).map_err(|error| {
+        map_windows_error(
+            ActionStage::Apply,
+            "action.registry_setting.precondition_read_failed",
+            error,
+        )
+    })?;
+    if current != backup.original {
+        return Err(ActionError::new(
+            ActionErrorCode::ExternalConflict,
+            ActionStage::Apply,
+            false,
+            "action.apply.stale_preview",
+        ));
+    }
+    write_raw_value(&backup.location, backup.intended_type, &backup.intended_raw).map_err(
+        |error| {
+            map_windows_error(
+                ActionStage::Apply,
+                "action.registry_setting.apply_failed",
+                error,
+            )
+        },
+    )?;
+    // 通知だけでは反映されないことは実測済み。反映はシェル再起動を利用者が選んだときに行う。
+    let _ = notify_explorer_settings_changed();
+    Ok(())
 }
 
 fn setter_evidence_pending(stage: ActionStage) -> ActionError {
@@ -211,7 +319,12 @@ impl Action for DwordRegistryAction {
             ActionStage::Validate,
         )?;
         let _ = (self.desired)(parameters)?;
-        Err(setter_evidence_pending(ActionStage::Validate))
+        if !self.verified {
+            return Err(setter_evidence_pending(ActionStage::Validate));
+        }
+        Ok(ValidationReport::valid(
+            self.metadata.resource_keys.iter().copied(),
+        ))
     }
 
     fn create_backup(
@@ -226,8 +339,29 @@ impl Action for DwordRegistryAction {
             false,
             ActionStage::Backup,
         )?;
-        let _ = (self.desired)(parameters)?;
-        Err(setter_evidence_pending(ActionStage::Backup))
+        let desired = (self.desired)(parameters)?;
+        if !self.verified {
+            return Err(setter_evidence_pending(ActionStage::Backup));
+        }
+        let backup = prepare_registry_backup(
+            self.target,
+            REG_DWORD_TYPE,
+            desired.to_le_bytes().to_vec(),
+            self.metadata.action_version,
+            context.os_identity.base_build,
+        )
+        .map_err(|error| {
+            map_windows_error(
+                ActionStage::Backup,
+                "action.registry_setting.backup_failed",
+                error,
+            )
+        })?;
+        Ok(BackupDraft {
+            precondition_fingerprint: backup.original.fingerprint(&backup.location),
+            intended_fingerprint: backup.intended_state().fingerprint(&backup.location),
+            payload: BackupPayload::Registry(backup),
+        })
     }
 
     fn apply(
@@ -244,7 +378,23 @@ impl Action for DwordRegistryAction {
             ActionStage::Apply,
         )?;
         let _ = (self.desired)(parameters)?;
-        Err(setter_evidence_pending(ActionStage::Apply))
+        if !self.verified {
+            return Err(setter_evidence_pending(ActionStage::Apply));
+        }
+        let BackupPayload::Registry(backup) = &_envelope.payload else {
+            return Err(ActionError::new(
+                ActionErrorCode::BackupMismatch,
+                ActionStage::Apply,
+                false,
+                "action.registry_setting.backup_kind_mismatch",
+            ));
+        };
+        apply_verified_registry_backup(backup)?;
+        let observed = self.detect_current_state(context, parameters)?;
+        Ok(AppliedEvidence {
+            state: observed,
+            applied_fingerprint: backup.intended_state().fingerprint(&backup.location),
+        })
     }
 
     fn verify_applied(
@@ -572,6 +722,36 @@ macro_rules! action_metadata {
     };
 }
 
+macro_rules! verified_action_metadata {
+    (
+        $metadata:ident, $action:ident, $id:ident, $name:literal, $description:literal,
+        $category:literal, $tags:expr, $schema:literal, $resource:literal,
+        $risk:ident, $evidence:expr, $compatibility:literal, $impact:literal,
+        $subkey:expr, $value_name:literal, $desired:ident, $valid:ident, $result:literal
+    ) => {
+        static $metadata: ActionMetadata = verified_registry_metadata(
+            ActionId::$id,
+            $name,
+            $description,
+            $category,
+            $tags,
+            $schema,
+            &[$resource],
+            ActionRiskLevel::$risk,
+            $evidence,
+            $compatibility,
+            $impact,
+        );
+        pub static $action: DwordRegistryAction = DwordRegistryAction::new_verified(
+            &$metadata,
+            RegistryTarget::current_user_64($subkey, $value_name),
+            $desired,
+            $valid,
+            $result,
+        );
+    };
+}
+
 action_metadata!(
     TASKBAR_SEARCH_MODE_METADATA,
     TASKBAR_SEARCH_MODE_ACTION,
@@ -593,20 +773,22 @@ action_metadata!(
     "タスクバー検索を選択した表示方法へ変更します。"
 );
 
-action_metadata!(
+// 実機で往復確認済み(2026-07-27)。start_center_ratio 0.304 -> 0.014 -> 0.304。
+// 反映にはシェル再起動が要る。詳細は docs/STATUS.md。
+verified_action_metadata!(
     TASKBAR_ALIGNMENT_METADATA,
     TASKBAR_ALIGNMENT_ACTION,
     TaskbarAlignment,
     "タスクバーを左寄せ／中央寄せにする",
-    "Windows 11のタスクバー配置を選びます。タスクバーを終了せず設定変更通知だけを送ります。",
+    "スタートボタンとアイコンを左端か中央に置きます。反映するにはエクスプローラーの再起動が必要で、そのとき開いているフォルダーの窓が閉じます。",
     "appearance",
-    &["taskbar", "alignment", "explicit-only"],
+    &["taskbar", "alignment", "explorer-restart"],
     r#"{"alignment":"left|center"}"#,
     "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:taskbaral",
     Caution,
     &[WINDOWS_SETTINGS_REFERENCE],
     "taskbar.alignment.v1",
-    "高。タスクバー更新後はAction固有の実機確認まで自動適用しません。",
+    "中。Windows Update でタスクバーの実装が変わると再確認が必要になります。",
     ADVANCED_SUBKEY,
     "TaskbarAl",
     taskbar_alignment_desired,

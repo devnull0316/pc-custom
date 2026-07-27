@@ -1465,13 +1465,50 @@ mod tests {
         }
     }
 
+    /// 実機確認が取れて可変にした項目の契約を固定する。
+    /// 「反映にシェル再起動が要る」ものが自動適用に載ると、ゲーム起動の瞬間に
+    /// 開いているフォルダーの窓が予告なく閉じることになる。そこは塞いだままにする。
+    #[test]
+    fn verified_registry_actions_are_mutable_but_never_auto_applied() {
+        let verified = ACTION_REGISTRY
+            .iter()
+            .filter(|action| {
+                action.metadata().method_class == MethodClass::DocumentedRegistry
+                    && action.metadata().requiresExplorerRestart
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !verified.is_empty(),
+            "実機確認で昇格した項目が1件も無い。昇格経路が壊れている可能性がある"
+        );
+        for action in verified {
+            let metadata = action.metadata();
+            assert_eq!(metadata.kind, ActionKind::Persistent, "{:?}", metadata.id);
+            assert_ne!(metadata.maximumTestedBuild, 0, "{:?}", metadata.id);
+            assert!(
+                !metadata.auto_apply_eligible,
+                "シェル再起動が要る項目を自動適用に載せてはいけない: {:?}",
+                metadata.id
+            );
+            metadata
+                .validate_static_contract()
+                .expect("verified registry metadata must be internally consistent");
+        }
+    }
+
     #[test]
     fn unverified_registry_candidates_are_guided_read_only_and_never_claim_ui_state() {
         let candidates = ACTION_REGISTRY
             .iter()
             .filter(|action| action.metadata().method_class == MethodClass::UnverifiedStorage)
             .collect::<Vec<_>>();
-        assert_eq!(candidates.len(), 42);
+        // 実機で往復確認が取れた項目はここから抜けて可変になる。件数は減る方向にしか動かない。
+        // 増えていたら、確認していないものを候補として足したということなので止める。
+        assert!(
+            candidates.len() <= 41,
+            "未検証候補が増えている: {}",
+            candidates.len()
+        );
         for action in candidates {
             let metadata = action.metadata();
             assert_eq!(metadata.kind, ActionKind::Guided);

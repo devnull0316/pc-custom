@@ -1593,13 +1593,15 @@ mod tests {
             baseline.start_center_ratio()
         );
 
-        write_raw_value(&backup.location, REG_DWORD, &flipped.to_le_bytes()).expect("write flipped");
+        write_raw_value(&backup.location, REG_DWORD, &flipped.to_le_bytes())
+            .expect("write flipped");
         let restart1 = restart_shell().expect("restart shell after write");
         println!("restart#1: {restart1:?}");
         let after = settle();
         let moved = match after {
             Some(observation) => {
-                let delta = (observation.start_center_ratio() - baseline.start_center_ratio()).abs();
+                let delta =
+                    (observation.start_center_ratio() - baseline.start_center_ratio()).abs();
                 println!(
                     "applied: start_center_ratio={:.3} delta={delta:.3}",
                     observation.start_center_ratio()

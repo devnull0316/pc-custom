@@ -49,11 +49,11 @@ pub use registry::delete_key_if_empty;
 pub use registry::{
     delete_value, read_value_state, write_raw_value, RawRegistryValue, RawRegistryValueState,
 };
+#[cfg(test)]
+pub use shell_restart::{restart_shell, ShellRestartOutcome};
 pub use transaction_lock::{
     acquire_app_instance_lock, acquire_core_mutation_lock, AppInstanceGuard, CoreMutationGuard,
 };
-#[cfg(test)]
-pub use shell_restart::{restart_shell, ShellRestartOutcome};
 pub use update_status::read_windows_update_status;
 pub use window_effects::{apply_mica_backdrop, system_accent_color, AccentColor};
 #[cfg(all(test, windows))]
