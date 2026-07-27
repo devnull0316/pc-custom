@@ -101,29 +101,32 @@ export function ActionBrowser({
       </header>
       {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
       {selectedCategory === "storage" ? <TempCleanupPanel dataMode={dataMode} /> : null}
+      {/* カテゴリは横一列にする。以前は左の列の8割をこれが占め、
+          肝心のAction一覧が最下部に押し込まれていた。下で選んで上のボタンへ戻る、
+          という往復はこの配置が作っていた。 */}
+      <div aria-label="Actionカテゴリ" className="category-bar">
+        {CATEGORIES.map((category) => {
+          const count = actions.filter((action) => action.category === category.id).length;
+          return (
+            <button
+              aria-pressed={selectedCategory === category.id}
+              className="category-button"
+              key={category.id}
+              onClick={() => onSelectCategory(category.id)}
+              type="button"
+            >
+              <span><Icon name={category.icon} /></span>
+              <span className="category-chip__copy">
+                <strong>{category.label}</strong>
+                <small>{category.description}</small>
+              </span>
+              <span className="category-count">{count}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className="action-workspace">
         <div className="action-master">
-          <div aria-label="Actionカテゴリ" className="category-list">
-            {CATEGORIES.map((category) => {
-              const count = actions.filter((action) => action.category === category.id).length;
-              return (
-                <button
-                  aria-pressed={selectedCategory === category.id}
-                  className="category-button"
-                  key={category.id}
-                  onClick={() => onSelectCategory(category.id)}
-                  type="button"
-                >
-                  <span><Icon name={category.icon} /></span>
-                  <span className="category-button__copy">
-                    <strong>{category.label}</strong>
-                    <small>{category.description}</small>
-                  </span>
-                  <span className="category-count">{count}</span>
-                </button>
-              );
-            })}
-          </div>
           <div
             aria-label="Action一覧"
             className="action-list"

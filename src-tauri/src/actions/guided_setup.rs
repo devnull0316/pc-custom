@@ -29,8 +29,8 @@ pub static SETUP_DEFAULT_APPS_ACTION: GuidedSetupAction = GuidedSetupAction {
     metadata: &SETUP_DEFAULT_APPS_METADATA,
     kind: GuidedSetupKind::DefaultApps,
     evidence_source: "Windows default-app settings guidance",
-    result: "既定のアプリはWindows自身の設定画面で選びます。UserChoiceにはWindowsが検証するhashがあるため、PCカスタムは保存領域を直接書き換えません。",
-    method: "文書化された汎用setterがないUserChoiceは変更せず、固定 ms-settings:defaultapps URIでWindowsの設定アプリを開く",
+    result: "既定のアプリはWindows自身の設定画面で選びます。Windowsは既定の記録に改ざん検出用の符号を付けているため、PCカスタムは記録を直接書き換えません。",
+    method: "外から書き換える正規の方法がないため記録は変更せず、決め打ちのURIでWindowsの「既定のアプリ」画面を開く",
 };
 
 pub static SETUP_AUDIO_OUTPUT_ACTION: GuidedSetupAction = GuidedSetupAction {
@@ -38,13 +38,13 @@ pub static SETUP_AUDIO_OUTPUT_ACTION: GuidedSetupAction = GuidedSetupAction {
     kind: GuidedSetupKind::AudioOutput,
     evidence_source: "IMMDeviceEnumerator active render endpoints",
     result: "公開Core Audio APIで現在の出力候補と既定デバイスを確認し、変更はWindowsのサウンド設定で行います。",
-    method: "IMMDeviceEnumerator（読み取り専用）+ 固定 ms-settings:sound URI",
+    method: "Windows公開の機能で読み取るだけ。切り替えは決め打ちのURIでWindowsのサウンド設定を開く",
 };
 
 static SETUP_DEFAULT_APPS_METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::SetupDefaultApps,
     name: "既定のアプリを確認・設定する",
-    description: "既定の関連付けを保持するUserChoiceにはWindowsが検証するhashがあり、文書化された汎用setterもないため直接書き換えず、Windows自身の「既定のアプリ」画面へ案内します。",
+    description: "Windowsは既定の関連付けの記録に改ざん検出用の符号を付けており、外から書き換える正規の方法もありません。そのため記録には触れず、Windows自身の「既定のアプリ」画面へ案内します。",
     category: "setup",
     tags: &["default-apps", "file-associations", "guided"],
     supportedWindowsVersions: &[

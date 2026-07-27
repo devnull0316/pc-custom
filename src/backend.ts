@@ -121,7 +121,7 @@ function normalizeAction(action: RawActionPresentation): ActionPresentation {
       currentState: {
         kind: "unknown",
         label: "実行ファイル未登録",
-        detail: "プロファイルで実行ファイルを登録した後に、本人性を照合します。",
+        detail: "モードに実行ファイルを登録すると、起動したものが同じファイルかどうかを毎回たしかめます。",
       },
     };
   }

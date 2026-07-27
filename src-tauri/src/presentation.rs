@@ -777,7 +777,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::ExplorerItemCheckboxes => "選択した項目チェックボックスの表示",
         ActionId::ExplorerCompactView => "選択したコンパクト表示の状態",
         ActionId::ThemeColorMode => "選択したライト／ダーク表示",
-        ActionId::GamesProcessWatch => "本人性を確認できたプロセスだけ監視",
+        ActionId::GamesProcessWatch => "同じ実行ファイルだと確かめられたものだけ見守る",
         ActionId::GamesReadinessCheck => "変更せず、ゲーム前の参考情報を個別に確認",
         ActionId::TaskbarSearchMode => "選択したタスクバー検索の表示方法",
         ActionId::TaskbarAlignment => "選択したタスクバーの配置",
@@ -897,7 +897,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::SetupWindowLayout => {
             "EnumWindows・GetWindowPlacement・SetWindowPlacementによる明示保存と復元"
         }
-        ActionId::SetupAudioOutput => "MMDeviceEnumeratorの読み取りと固定ms-settings URIによる案内",
+        ActionId::SetupAudioOutput => {
+            "Windows公開の読み取り機能と、決め打ちURIによる設定画面の案内"
+        }
         _ => method_name(method),
     }
 }
@@ -938,7 +940,7 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             format!("有効な電源プラン: {}", power_scheme_display_name(guid))
         }
         ObservedValue::Processes { matches } => {
-            format!("本人性を確認できたプロセス {}件", matches.len())
+            format!("同じ実行ファイルだと確かめられたもの {}件", matches.len())
         }
         ObservedValue::StartupInventory(inventory) => format!(
             "確認対象のスタートアップ {}件{}",

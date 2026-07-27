@@ -184,15 +184,6 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .action-view { width: min(1320px, 100%); }
 .action-workspace { display: grid; grid-template-columns: minmax(300px, 38%) minmax(420px, 1fr); min-height: 590px; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
 .action-master { min-width: 0; border-right: 1px solid var(--border); background: var(--surface-muted); }
-.category-list { display: grid; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); }
-.category-button { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center; min-height: 48px; padding: 6px 8px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
-.category-button:hover { background: var(--surface-hover); }
-.category-button[aria-pressed="true"] { background: var(--surface-active); }
-.category-button > span:first-child { display: grid; place-items: center; color: var(--text-secondary); }
-.category-button__copy { display: grid; gap: 1px; min-width: 0; }
-.category-button__copy strong { font-size: var(--fs-sm); font-weight: 600; }
-.category-button__copy small { color: var(--text-tertiary); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.category-count { color: var(--text-tertiary); font-size: var(--fs-xs); }
 .action-list { padding: 10px 8px 12px; }
 .list-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 8px 6px; color: var(--text-tertiary); font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .list-label__hint { display: inline-flex; align-items: center; gap: 3px; text-transform: none; letter-spacing: 0; font-weight: 400; }
@@ -709,3 +700,22 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .recommend-row__copy strong { display: block; font-size: var(--fs-base); }
 .recommend-row__copy small { display: block; margin-top: 2px; color: var(--text-secondary);
   font-size: var(--fs-sm); line-height: 1.55; }
+
+/* カテゴリは横一列。左の列は丸ごとAction一覧に使う。 */
+.category-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.category-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  color: var(--text-secondary); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.category-chip:hover { border-color: var(--border-strong); color: var(--text); }
+.category-chip[aria-pressed="true"] { color: var(--text); border-color: var(--border-strong);
+  background: var(--surface-active); font-weight: 650; }
+.category-chip svg { flex: none; }
+/* 説明文はチップでは出さない。9個並ぶと読まれず、幅だけ食う。 */
+.category-chip__copy small { display: none; }
+.category-chip__copy strong { font-weight: inherit; }
+.category-count { margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  color: var(--text-tertiary); background: var(--surface-muted);
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.category-chip[aria-pressed="true"] .category-count { color: var(--text); }
+/* 一覧が主役になったので、縦を目一杯使う。 */
+.action-list { padding: 10px 8px 12px; max-height: 590px; overflow-y: auto; }

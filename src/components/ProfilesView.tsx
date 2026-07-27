@@ -176,7 +176,7 @@ export function ProfilesView({
             <div className="action-picker">
               <label className="action-pick">
                 <input checked={mode === "game"} disabled={!live || busy} name="profile-mode" onChange={() => { setMode("game"); setSelected(new Set()); }} type="radio" />
-                <span><strong>ゲーム（自動）</strong><small>登録した.exeの起動で適用し、終了で復元します。</small></span>
+                <span><strong>ゲーム（自動）</strong><small>登録したゲームの起動で適用し、終了で元に戻します。</small></span>
               </label>
               <label className="action-pick">
                 <input checked={mode === "manual"} disabled={!live || busy} name="profile-mode" onChange={() => { setMode("manual"); setSelected(new Set()); }} type="radio" />
@@ -208,7 +208,7 @@ export function ProfilesView({
           </label>
           {mode === "game" ? (
             <label className="field">
-              <span>ゲームの実行ファイル（.exe のフルパス）</span>
+              <span>ゲームの実行ファイル</span>
               <input
                 disabled={!live || busy}
                 onChange={(event) => setExePath(event.target.value)}
@@ -217,7 +217,7 @@ export function ProfilesView({
                 type="text"
                 value={exePath}
               />
-              <small>ローカルドライブ上の実在する実行ファイルだけを登録できます。本人性（ファイル識別子）も記録します。</small>
+              <small>このPC上に実在する実行ファイルだけを登録できます。別のファイルに差し替わっていないか、起動のたびに確かめます。</small>
             </label>
           ) : null}
 
@@ -225,7 +225,7 @@ export function ProfilesView({
             <legend>{mode === "game" ? "起動時にまとめる準備" : "いま実行する準備"}</legend>
             {selectable.length === 0 ? (
               <p className="muted">
-                選べるActionがありません。<button className="link-button" onClick={onOpenActions} type="button">Action一覧</button>を確認してください。
+                選べる項目がありません。<button className="link-button" onClick={onOpenActions} type="button">Action一覧</button>を確認してください。
               </p>
             ) : (
               <div className="action-picker">

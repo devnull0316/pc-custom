@@ -237,7 +237,7 @@ export function SetupEssentialsPanel({
               <h3>{defaultAppsAction?.name ?? "既定のアプリを選ぶ"}</h3>
               <p>
                 Windowsの仕様で、ここから直接は変更できません。ファイルやリンクを開くアプリは
-                Windowsの設定で選びます。PCカスタムはUserChoiceを直接書き換えず、設定画面だけを開きます。
+                Windowsの設定で選びます。PCカスタムは、Windowsが既定のアプリを覚えている場所を書き換えず、設定画面だけを開きます。
               </p>
             </div>
           </div>
