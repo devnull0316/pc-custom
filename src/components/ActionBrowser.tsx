@@ -257,12 +257,17 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           <strong>{action.desiredState}</strong>
         </div>
       </div>
-      <div aria-label="Action属性" className="attribute-chips">
-        <span className={`attribute-chip attribute-chip--${action.riskLevel}`}><Icon name={action.riskLevel === "safe" ? "check" : "warning"} size={14} />危険度: {riskLabel(action.riskLevel)}</span>
-        <span className="attribute-chip">管理者: {action.requiresAdmin ? "必要" : "不要"}</span>
-        <span className="attribute-chip">再起動: {action.requiresRestart ? "OS再起動" : action.requiresExplorerRestart ? "Explorer再読込" : "不要"}</span>
-        <span className="attribute-chip">{updateImpactLabel(action.updateImpact)}</span>
-        <span className="attribute-chip">復元: {action.reversible ? "元に戻せる" : "変更なし"}</span>
+      {/* 常に5個並べると2行を占め、どれも同じ重みで読まれない。
+          既定では「戻せるか」と、注意が要る場合だけを出す。残りは詳細の中にある。 */}
+      <div aria-label="この項目の性質" className="attribute-chips">
+        <span className={`attribute-chip attribute-chip--${action.riskLevel === "safe" ? "safe" : action.riskLevel}`}>
+          <Icon name={action.reversible ? "check" : "warning"} size={14} />
+          {action.reversible ? "元に戻せます" : "元に戻せません"}
+        </span>
+        {action.requiresAdmin ? <span className="attribute-chip attribute-chip--caution">管理者の確認が出ます</span> : null}
+        {action.requiresRestart ? <span className="attribute-chip attribute-chip--caution">Windowsの再起動が必要</span> : null}
+        {action.requiresExplorerRestart ? <span className="attribute-chip attribute-chip--caution">反映にエクスプローラーの再起動が必要</span> : null}
+        {action.riskLevel === "experimental" ? <span className="attribute-chip attribute-chip--experimental">実験的</span> : null}
       </div>
       {detailsOpen ? (
         <div className="detail-disclosure" id={`details-${action.id}`}>
@@ -275,6 +280,10 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
             <div><dt>試験上限</dt><dd>{action.maximumTestedBuild ?? "実機確認待ち"}</dd></div>
             <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : guidedCandidate ? "設計候補（変更不可）" : action.kind === "guided" ? "Windows設定案内（PCカスタム変更なし）" : "観測"}</dd></div>
             <div><dt>根拠分類</dt><dd>{methodClassLabel(action.methodClass)}</dd></div>
+            <div><dt>危険度</dt><dd>{riskLabel(action.riskLevel)}</dd></div>
+            <div><dt>管理者権限</dt><dd>{action.requiresAdmin ? "必要" : "不要"}</dd></div>
+            <div><dt>再起動</dt><dd>{action.requiresRestart ? "Windowsの再起動" : action.requiresExplorerRestart ? "エクスプローラーの再起動" : "不要"}</dd></div>
+            <div><dt>Windows Updateの影響</dt><dd>{updateImpactLabel(action.updateImpact)}</dd></div>
           </dl>
         </div>
       ) : null}
