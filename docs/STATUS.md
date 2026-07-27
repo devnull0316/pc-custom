@@ -847,3 +847,47 @@ restart#2 → restored: 両方とも present=true（元どおり）
 
 検証: パネルのコントラストを明暗とも実測し不合格0件、10px 未満0件、横あふれなし。
 230 テスト・clippy・fmt・フロントビルドすべて通過。
+
+## Phase 1 A の決定実験: オーバーレイはタスクバーより手前に置ける（2026-07-27）
+
+「画像1枚でタスクバーを着せ替えたように見せる」を **Safe 方式**（Explorer へ手を入れず、
+別ウィンドウを重ねるだけ）で成立させられるかは、次の一点にかかっていた。
+
+**自分のウィンドウを `Shell_TrayWnd` より手前の Z 順に置けるか。** タスクバーは topmost である。
+
+```
+taskbar rect: left=0 top=1032 right=1920 bottom=1080
+z-order: overlay=10  taskbar=11   （小さいほど手前）
+EVIDENCE: オーバーレイはタスクバーより手前に置けた
+```
+
+再現: `cargo test --lib -- --ignored --nocapture overlay_window_can_sit_above`
+
+使ったのは `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE`
+の popup ウィンドウ＋`SetWindowPos(HWND_TOPMOST)`。すべて公開 API で、Explorer への injection も
+未文書の手口も使っていない。**新規依存はゼロ**（必要な Win32 feature は既に有効だった）。
+
+判定は目視ではなく `GetTopWindow` / `GetWindow(GW_HWNDNEXT)` で Z 順を辿って順位を数えた。
+デスクトップのスクリーンショットは撮れない環境なので、「見えた気がする」は根拠にしない。
+
+### この実験が証明していないこと
+
+- **留まり続けること**は証明していない。測ったのはある瞬間の Z 順。他の topmost ウィンドウ、
+  全画面アプリ、Explorer 再起動で順序は変わる。最前面を維持する仕組みが別途要る。
+- **見た目**は証明していない。順序が手前でも、絵として自然に見えるかは別問題。
+  最終判断は人の目が要る。
+- 排他フルスクリーンのゲームは今も上に来る。これは正しい挙動（全画面時は停止する方針）。
+
+### 併せて分かった、既存スキーマの未実装部分
+
+`migrations/0001_initial.sql` は 10 テーブルを定義しているが、**うち 3 つはコードから
+一度も参照されていない**。
+
+| テーブル | 状態 |
+| --- | --- |
+| `preview_tokens` | 定義のみ。`token_hash` / `action_ids_json` / `before_fingerprints_json` / `os_fingerprint` / `expires_at_unix_ms` / `consumed_at_unix_ms` を持つ |
+| `action_leases` | 定義のみ。`resource_key` 単位の排他。現状 ProfileSupervisor がメモリ上で代替している |
+| `os_observations` | 定義のみ |
+
+**「30 秒プレビューして、確定しなければ自動で元へ戻す」はスキーマとして既に設計されている。**
+実装を足すだけでよく、マイグレーションを壊す必要はない。

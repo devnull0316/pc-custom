@@ -1527,6 +1527,171 @@ mod tests {
     /// 元の値・型・有無へ正確に復元 → 位置が戻ったか実測、までを1往復で確認する。
     ///
     /// ユーザーの実環境を一時的に変更するため、通常のテスト実行では走らせない。
+    /// Phase 1 A の決定実験。
+    ///
+    /// 「タスクバーを着せ替えたように見せる」を Safe 方式（Explorer へ手を入れず、
+    /// 別ウィンドウを重ねるだけ）で成立させられるかは、次の一点にかかっている。
+    ///
+    ///   **自分のウィンドウを Shell_TrayWnd より手前の Z 順に置けるか。**
+    ///
+    /// タスクバーは topmost である。ここが偽なら、どれだけ絵を作り込んでも
+    /// タスクバーの下に隠れるだけで、企画そのものを見直す必要がある。
+    ///
+    /// 目視では判定しない。Z 順を `GetTopWindow` / `GetWindow` で辿って
+    /// 両者の順位を数えて比べる。
+    ///
+    /// **実機のタスクバー上に、半透明の帯が数秒表示される。クリックは透過する。**
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "実機のタスクバー上に一時的にオーバーレイを出してZ順を測る"]
+    fn overlay_window_can_sit_above_the_taskbar() {
+        use std::{thread::sleep, time::Duration};
+        use windows::{
+            core::{w, PCWSTR},
+            Win32::{
+                Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
+                Graphics::Gdi::HBRUSH,
+                UI::WindowsAndMessaging::{
+                    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, FindWindowW,
+                    GetTopWindow, GetWindow, GetWindowRect, PeekMessageW, RegisterClassW,
+                    SetLayeredWindowAttributes, SetWindowPos, ShowWindow, GW_HWNDNEXT,
+                    HWND_TOPMOST, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOACTIVATE, SW_SHOWNOACTIVATE,
+                    WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    WS_EX_TRANSPARENT, WS_POPUP,
+                },
+            },
+        };
+
+        unsafe extern "system" fn wnd_proc(
+            window: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            DefWindowProcW(window, message, wparam, lparam)
+        }
+
+        let taskbar = match unsafe { FindWindowW(w!("Shell_TrayWnd"), None) } {
+            Ok(handle) if !handle.is_invalid() => handle,
+            _ => {
+                println!("タスクバーを見つけられないためスキップ");
+                return;
+            }
+        };
+        let mut bar = RECT::default();
+        if unsafe { GetWindowRect(taskbar, &mut bar) }.is_err() {
+            println!("タスクバーの矩形を取得できないためスキップ");
+            return;
+        }
+        println!(
+            "taskbar rect: left={} top={} right={} bottom={}",
+            bar.left, bar.top, bar.right, bar.bottom
+        );
+
+        let class_name = w!("PcCustomOverlayProbe");
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(wnd_proc),
+            lpszClassName: PCWSTR(class_name.as_ptr()),
+            hbrBackground: HBRUSH(std::ptr::null_mut()),
+            ..Default::default()
+        };
+        unsafe { RegisterClassW(&class) };
+
+        // クリック透過(WS_EX_TRANSPARENT)、フォーカスを奪わない(WS_EX_NOACTIVATE)、
+        // タスクバーに出ない(WS_EX_TOOLWINDOW)、最前面(WS_EX_TOPMOST)。
+        let overlay = match unsafe {
+            CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE,
+                class_name,
+                w!("pc-custom overlay probe"),
+                WS_POPUP,
+                bar.left,
+                bar.top,
+                bar.right - bar.left,
+                (bar.bottom - bar.top).min(48),
+                None,
+                None,
+                None,
+                None,
+            )
+        } {
+            Ok(handle) if !handle.is_invalid() => handle,
+            other => {
+                println!("オーバーレイを作成できなかった: {other:?}");
+                return;
+            }
+        };
+
+        struct OwnedOverlay(HWND);
+        impl Drop for OwnedOverlay {
+            fn drop(&mut self) {
+                let _ = unsafe { DestroyWindow(self.0) };
+            }
+        }
+        let _owned = OwnedOverlay(overlay);
+
+        let _ = unsafe { SetLayeredWindowAttributes(overlay, COLORREF(0), 140, LWA_ALPHA) };
+        let _ = unsafe { ShowWindow(overlay, SW_SHOWNOACTIVATE) };
+        let _ = unsafe {
+            SetWindowPos(
+                overlay,
+                HWND_TOPMOST,
+                bar.left,
+                bar.top,
+                bar.right - bar.left,
+                (bar.bottom - bar.top).min(48),
+                SWP_NOACTIVATE,
+            )
+        };
+
+        // メッセージを少し回して落ち着かせる。
+        for _ in 0..20 {
+            let mut message = MSG::default();
+            while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+                unsafe { DispatchMessageW(&message) };
+            }
+            sleep(Duration::from_millis(100));
+        }
+
+        /// トップレベルの Z 順を先頭から辿り、対象が何番目かを返す。小さいほど手前。
+        fn z_index(target: HWND) -> Option<usize> {
+            let mut current = unsafe { GetTopWindow(None) }.ok()?;
+            let mut index = 0usize;
+            loop {
+                if current == target {
+                    return Some(index);
+                }
+                match unsafe { GetWindow(current, GW_HWNDNEXT) } {
+                    Ok(next) if !next.is_invalid() => {
+                        current = next;
+                        index += 1;
+                        if index > 5000 {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+
+        let overlay_z = z_index(overlay);
+        let taskbar_z = z_index(taskbar);
+        println!("z-order: overlay={overlay_z:?} taskbar={taskbar_z:?} (小さいほど手前)");
+
+        match (overlay_z, taskbar_z) {
+            (Some(o), Some(t)) if o < t => {
+                println!("EVIDENCE: オーバーレイはタスクバーより手前に置けた。Safe方式が成立しうる");
+            }
+            (Some(o), Some(t)) => {
+                println!("EVIDENCE: オーバーレイはタスクバーより奥だった (overlay={o} taskbar={t})。Safe方式は不成立");
+            }
+            other => {
+                println!("EVIDENCE: Z順を判定できなかった {other:?}");
+            }
+        }
+    }
+
     /// 候補をまとめて適用し、シェル再起動 1 回で複数の項目を同時に判定する。
     ///
     /// 1 件ずつ測ると再起動が件数×2 回になり、画面が何十回も点滅する。
