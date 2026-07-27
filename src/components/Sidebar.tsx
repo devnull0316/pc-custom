@@ -11,7 +11,7 @@ interface SidebarProps {
 
 const NAV_ITEMS: readonly { id: ViewId; label: string; icon: IconName }[] = [
   { id: "home", label: "ホーム", icon: "home" },
-  { id: "actions", label: "Action", icon: "action" },
+  { id: "actions", label: "変更する", icon: "action" },
   { id: "profiles", label: "モード", icon: "game" },
   { id: "setup", label: "PCセットアップ", icon: "plus" },
   { id: "timeline", label: "タイムライン", icon: "timeline" },
@@ -40,7 +40,7 @@ export function Sidebar({ activeView, dataMode, profileCount, onNavigate, onOpen
       <div className="sidebar-spacer" />
       <button className="draft-button" onClick={onOpenDraft} type="button">
         <span className="draft-button__icon"><Icon name="plus" size={16} /></span>
-        <span><strong>プロファイル下書き</strong><small>{profileCount === 0 ? "まだ空です" : `${profileCount}件のAction`}</small></span>
+        <span><strong>モードの下書き</strong><small>{profileCount === 0 ? "まだ空です" : `${profileCount}件のAction`}</small></span>
       </button>
       <div className={`connection-state connection-state--${dataMode}`}>
         <span aria-hidden="true" className="connection-dot" />

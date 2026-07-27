@@ -67,7 +67,7 @@ function ActionMetadata({
   return (
     <>
       <dl
-        aria-label={`${action?.name ?? "Action"}の対象・状態・方法`}
+        aria-label={`${action?.name ?? "この項目"}の対象・状態・方法`}
         className="setup-essential-card__contract"
       >
         <div><dt>どんな人向け</dt><dd>{action?.audience ?? "カタログ接続後に表示します"}</dd></div>
@@ -76,7 +76,7 @@ function ActionMetadata({
         <div><dt>{action?.kind === "guided" ? "案内方法" : "変更方法"}</dt><dd>{action?.methodSummary ?? "カタログ接続後に表示します"}</dd></div>
       </dl>
       <ul
-        aria-label={`${action?.name ?? "Action"}の属性`}
+        aria-label={`${action?.name ?? "この項目"}の属性`}
         className="setup-essential-card__metadata"
       >
         <li>危険度: {action === undefined ? "確認中" : riskLabel(action.riskLevel)}</li>

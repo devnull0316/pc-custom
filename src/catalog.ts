@@ -370,7 +370,7 @@ const BASE_STATIC_ACTIONS = [
     currentState: {
       kind: "unknown",
       label: "実行ファイル未登録",
-      detail: "プロファイルで実行ファイルを登録した後に、path・作成時刻・file identityを照合します。",
+      detail: "モードで実行ファイルを登録した後に、path・作成時刻・file identityを照合します。",
     },
     detailPoints: [
       "process名だけでなく、pathと作成時刻を照合します。",
@@ -756,7 +756,7 @@ function registryFallback(definition: RegistryFallbackDefinition): ActionPresent
       "setterの一次資料と対象buildの実機UI試験が未承認のため、変更処理を実行しません。",
       "表示するのは固定HKCU DWORDの保存値であり、Windows UIの有効状態を示しません。",
       "変更を求められても、処理のどの段階でも拒否します。",
-      "ゲームプロファイルの自動適用対象にはしません。",
+      "ゲームモードの自動適用対象にはしません。",
     ],
   };
 }
@@ -817,7 +817,7 @@ const OBSERVATION_FALLBACKS = [
     detailPoints: [
       "適用前のactive scheme GUIDを型付きで保存します。",
       "復元時に別の電源プランへ変わっていた場合は上書きしません。",
-      "ゲームプロファイルの無人適用対象にはしません。",
+      "ゲームモードの無人適用対象にはしません。",
     ],
   },
   {

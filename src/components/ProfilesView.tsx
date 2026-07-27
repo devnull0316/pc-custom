@@ -170,11 +170,11 @@ export function ProfilesView({
       {live ? null : (
         <div className="inline-note" role="note">
           <Icon name="info" />
-          <span>閲覧モードです。安全コアに接続すると、プロファイルの作成・有効化ができます。</span>
+          <span>閲覧モードです。安全コアに接続すると、モードの作成と有効化ができます。</span>
         </div>
       )}
 
-      <div className="profiles-layout">
+      <div className={`profiles-layout${profiles.length === 0 ? " profiles-layout--empty" : ""}`}>
         <form
           className="profile-create"
           onSubmit={(event) => {
@@ -182,7 +182,7 @@ export function ProfilesView({
             submit();
           }}
         >
-          <h2>新しいプロファイル</h2>
+          <h2>新しいモード</h2>
           {/* Apple Shortcuts の「〜のとき、〜する」。入力するとそのまま文章になり、
               専門用語を読まなくても何が起きるか分かるようにする。 */}
           <fieldset className="field">
@@ -249,7 +249,7 @@ export function ProfilesView({
             <legend>{mode === "game" ? "起動時にまとめる準備" : "いま実行する準備"}</legend>
             {selectable.length === 0 ? (
               <p className="muted">
-                選べる項目がありません。<button className="link-button" onClick={onOpenActions} type="button">Action一覧</button>を確認してください。
+                選べる項目がありません。<button className="link-button" onClick={onOpenActions} type="button">変更できる項目</button>を確認してください。
               </p>
             ) : (
               <div className="action-picker">
@@ -284,19 +284,19 @@ export function ProfilesView({
 
           <button className="primary-button" disabled={!canSubmit} type="submit">
             {busy ? <Icon className="spin" name="spinner" /> : <Icon name="plus" />}
-            プロファイルを作成
+            モードを作成
           </button>
           <p className="muted small">
-            {mode === "game" ? "作成しても自動適用はまだ開始しません。各プロファイルの「自動適用」を有効にしたときだけ働きます。" : "手動モードは自動適用されません。カードの「いま実行」を押したときだけ働きます。"}
+            {mode === "game" ? "作成しても自動適用はまだ開始しません。各モードの「自動適用」を有効にしたときだけ働きます。" : "手動モードは自動適用されません。カードの「いま実行」を押したときだけ働きます。"}
           </p>
         </form>
 
         <div className="profile-list-panel">
-          <h2>登録済みプロファイル</h2>
+          <h2>登録済みのモード</h2>
           {profiles.length === 0 ? (
             <div className="empty-block">
               <Icon name="game" />
-              <strong>まだプロファイルはありません</strong>
+              <strong>まだモードはありません</strong>
               <span>左のフォームから、ゲーム・勉強・作業などのモードを登録できます。</span>
             </div>
           ) : (
@@ -366,7 +366,7 @@ export function ProfilesView({
       <div className="config-io">
         <h2>設定のバックアップ・移行</h2>
         <p className="muted small">
-          登録したプロファイル定義だけをJSONとして書き出し・取り込みます。任意コードやスクリプトは含みません。
+          登録したモード定義だけをJSONとして書き出し・取り込みます。任意コードやスクリプトは含みません。
           ゲーム用は別PCで実行ファイルを再確認します。手動モードは実行ファイルなしのまま取り込みます。
         </p>
         <div className="config-io__row">

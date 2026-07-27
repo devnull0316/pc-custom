@@ -199,7 +199,7 @@ export function App() {
     try {
       setProfiles(await listProfiles());
     } catch {
-      // 閲覧モード（安全コア未接続）ではプロファイルを空表示にする。
+      // 閲覧モード（安全コア未接続）ではモードを空表示にする。
       setProfiles([]);
     }
   }, []);
@@ -399,7 +399,7 @@ export function App() {
     setUiError(null);
     try {
       const created = await createProfile(request);
-      setNotice(created.executablePath === undefined ? `手動モード「${created.name}」を作成しました。「いま実行」を押すまで適用しません。` : `ゲームプロファイル「${created.name}」を作成しました。自動適用はまだオフです。`);
+      setNotice(created.executablePath === undefined ? `手動モード「${created.name}」を作成しました。「いま実行」を押すまで適用しません。` : `ゲームモード「${created.name}」を作成しました。自動適用はまだオフです。`);
       await refreshProfiles();
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -454,7 +454,7 @@ export function App() {
     setUiError(null);
     try {
       await deleteProfile(id);
-      setNotice("プロファイルを削除しました。");
+      setNotice("モードを削除しました。");
       await refreshProfiles();
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -469,7 +469,7 @@ export function App() {
       return;
     }
     setProfileDraft((current) => current.some((item) => item.actionId === action.id) ? current : [...current, { actionId: action.id, title: action.name }]);
-    setNotice("プロファイル下書きへ追加しました。保存や自動適用はまだ行っていません。");
+    setNotice("モードの下書きへ追加しました。保存や自動適用はまだ行っていません。");
   }
 
   const draftIds = useMemo(() => new Set(profileDraft.map((item) => item.actionId)), [profileDraft]);
@@ -551,9 +551,9 @@ export function App() {
           description="この下書きは現在の画面内だけに保持されます。OS変更や自動適用は行いません。"
           footer={<button className="primary-button" onClick={() => setDraftOpen(false)} type="button">閉じる</button>}
           onClose={() => setDraftOpen(false)}
-          title="プロファイル下書き"
+          title="モードの下書き"
         >
-          {profileDraft.length === 0 ? <div className="dialog-empty"><Icon name="plus" /><strong>Actionはまだありません</strong><span>Action詳細から「プロファイルへ追加」を選んでください。</span></div> : <ul className="draft-list">{profileDraft.map((item) => <li key={item.actionId}><span><strong>{item.title}</strong><code>{item.actionId}</code></span><button aria-label={`${item.title}を下書きから削除`} onClick={() => setProfileDraft((current) => current.filter((candidate) => candidate.actionId !== item.actionId))} type="button"><Icon name="close" /></button></li>)}</ul>}
+          {profileDraft.length === 0 ? <div className="dialog-empty"><Icon name="plus" /><strong>Actionはまだありません</strong><span>Action詳細から「モードへ追加」を選んでください。</span></div> : <ul className="draft-list">{profileDraft.map((item) => <li key={item.actionId}><span><strong>{item.title}</strong><code>{item.actionId}</code></span><button aria-label={`${item.title}を下書きから削除`} onClick={() => setProfileDraft((current) => current.filter((candidate) => candidate.actionId !== item.actionId))} type="button"><Icon name="close" /></button></li>)}</ul>}
         </Dialog>
       ) : null}
       {justApplied.length === 0 ? null : (

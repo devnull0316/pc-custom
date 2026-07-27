@@ -94,7 +94,7 @@ export function ActionBrowser({
     <div className="view action-view">
       <header className="view-heading">
         <div>
-          <p className="eyebrow">登録済みAction</p>
+          <p className="eyebrow">ひとつずつ選ぶ</p>
           <h1>何が変わるかを先に確認</h1>
           <p>左で結果を選び、右で現在の状態、適用後、戻し方まで確認できます。</p>
         </div>
@@ -104,7 +104,7 @@ export function ActionBrowser({
       {/* カテゴリは横一列にする。以前は左の列の8割をこれが占め、
           肝心のAction一覧が最下部に押し込まれていた。下で選んで上のボタンへ戻る、
           という往復はこの配置が作っていた。 */}
-      <div aria-label="Actionカテゴリ" className="category-bar">
+      <div aria-label="種類でしぼる" className="category-bar">
         {CATEGORIES.map((category) => {
           const count = actions.filter((action) => action.category === category.id).length;
           return (
@@ -128,7 +128,7 @@ export function ActionBrowser({
       <div className="action-workspace">
         <div className="action-master">
           <div
-            aria-label="Action一覧"
+            aria-label="変更できる項目の一覧"
             className="action-list"
             onKeyDown={(event) => {
               // Raycast や Linear と同じく、一覧は上下キーだけで辿れるようにする。
@@ -158,7 +158,7 @@ export function ActionBrowser({
               <span className="list-label__hint"><kbd>↑</kbd><kbd>↓</kbd>で移動</span>
             </p>
             {categoryActions.length === 0 ? (
-              <div className="inline-empty"><Icon name="action" /><p><strong>Actionはありません</strong>このカテゴリには登録済みActionがありません。</p></div>
+              <div className="inline-empty"><Icon name="action" /><p><strong>この種類には項目がありません</strong>別の種類を選んでください。</p></div>
             ) : categoryActions.map((action) => (
               <button
                 aria-current={selected?.id === action.id ? "true" : undefined}
@@ -180,7 +180,7 @@ export function ActionBrowser({
         </div>
         <section aria-live="polite" className="action-detail" key={selected?.id ?? "empty"}>
           {selected === undefined ? (
-            <div className="detail-empty"><Icon name="action" size={26} /><h2>Actionを選んでください</h2><p>現在の状態と適用後の差分をここに表示します。</p></div>
+            <div className="detail-empty"><Icon name="action" size={26} /><h2>左から項目を選んでください</h2><p>現在の状態と、変えたあとの状態をここに並べます。</p></div>
           ) : (
             <ActionDetail
               action={selected}

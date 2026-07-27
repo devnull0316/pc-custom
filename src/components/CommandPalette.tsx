@@ -63,7 +63,7 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
           data-dialog-autofocus=""
           onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
           onKeyDown={handleKeyDown}
-          placeholder="結果またはActionを検索"
+          placeholder="やりたいことで検索"
           spellCheck="false"
           type="search"
           value={query}
