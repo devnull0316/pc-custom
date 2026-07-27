@@ -952,3 +952,40 @@ restart : terminated=1 shell_returned=true relaunched=true
 
 まだ測っていない: 他の topmost ウィンドウが前に出たとき、全画面アプリの出入り、
 モニター構成や DPI の変更、タスクバーの自動非表示。
+
+## CI が落ちた本当の理由は Windows Server だった（2026-07-27）
+
+公開後、最初の CI が `build` 失敗・`bundle` スキップで赤くなった。
+
+```
+engine::tests::full_user_journey_..._on_real_machine
+COMPATIBILITY_BLOCKED「このWindows環境では、この変更は読み取り専用です」
+```
+
+**アプリは正しい。** 互換性ゲートが「この環境では変更しない」と fail-closed に倒しただけ。
+悪かったのは CI 設計で、ホストの Windows に依存するテストを `cargo test --lib` に含めていた。
+テスト名に `on_real_machine` と書いてあるのに気づけなかったのは、
+**自分の機械（26200）では必ず通るから**である。
+
+### 1回目の修正は外した
+
+`identity.base_build < 26_100` で飛ばす、と書いた。CI はまた落ちた。
+スキップ文が出ていないので、ランナーのビルドは 26100 以上だった。
+
+本当の理由は `catalog.rs` の
+
+```rust
+if os_identity.major != 10 || os_identity.product_type != 1 {
+```
+
+**`product_type == 1` はクライアント版 Windows。GitHub の windows ランナーは Windows Server。**
+ビルド番号という誤った軸で判定していた。
+
+### 2回目: 判定を製品と共有した
+
+テストの中で互換性ルールの一部を書き直していたのが誤り。
+`CompatibilityCatalog::decision_for_identity` を呼び、`TestedMutable` でなければ
+build / product_type / 判定結果を印字して飛ばす形にした。
+**ルールを二重に書けば、二つの写しは必ずずれる。** その小さな実例だった。
+
+結果: `build: success` / `bundle: success`。**インストーラーが CI 上でも生成できることも確認できた。**
