@@ -499,8 +499,25 @@ Windows標準3プランを名前へ写像した（未知のOEMプランは推測
 無人インストールを行うと、ダイアログを出して待ち続ける。`silent: true` へ変更した。
 
 残る確認は、利用者が在席時に対話的にインストーラーを実行すること。
-コマンドは `src-tauri/target/release/bundle/nsis/Totonoe_0.1.0_x64-setup.exe`。
+コマンドは `src-tauri/target/release/bundle/nsis/PCCustom_0.1.0_x64-setup.exe`。
 **シェルから無人で押し通すのは、画面を塞ぐ危険があるためこれ以上行わない。**
+
+### 改名後のバンドルビルド検証（2026-07-27）
+
+改名時に「実行ファイル名を ASCII に留めるのは bundle ビルドを検証できないから」と書いたのに、
+その bundle ビルド自体を回していなかった。回した。
+
+```
+Built application at: src-tauri\target\release\pc-custom.exe          (9.6 MB)
+Finished 1 bundle at: ...\bundle\nsis\PCCustom_0.1.0_x64-setup.exe    (2.58 MB)
+```
+
+**改名はパッケージングを壊していない。** 旧名の成果物（`totonoe.exe` /
+`Totonoe_0.1.0_x64-setup.exe`）は、誤って旧版を実行する事故を避けるため削除した。
+どちらも git 履歴から再生成できる。
+
+依然として未検証なのは**インストーラーを対話的に実行したときの挙動**だけであり、
+これは在席した利用者の操作が要る。生成・命名・サイズはここで確認済み。
 
 ## BRIEF未実装分の追加（2026-07-26 codex + CC監査）
 
