@@ -1527,6 +1527,182 @@ mod tests {
     /// 元の値・型・有無へ正確に復元 → 位置が戻ったか実測、までを1往復で確認する。
     ///
     /// ユーザーの実環境を一時的に変更するため、通常のテスト実行では走らせない。
+    /// オーバーレイは「置けた」だけでは足りない。**留まり続けるか**を測る。
+    ///
+    /// いちばん危ないのは、このアプリ自身が持つシェル再起動との相互作用である。
+    /// シェルを作り直すとタスクバーの HWND ごと変わる。そのため、古い HWND を握ったままの
+    /// オーバーレイが位置を見失うか、新しいタスクバーが自分より手前に来るかのどちらかが
+    /// 起きうる。単一ファイルのレビューでは見つからない類の問題。
+    ///
+    /// **実機のタスクバー上に帯が出たまま、シェルが1回再起動される。**
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "オーバーレイを出したままシェルを再起動し、前面維持を測る"]
+    fn overlay_survives_a_shell_restart() {
+        use std::{thread::sleep, time::Duration};
+        use windows::{
+            core::{w, PCWSTR},
+            Win32::{
+                Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
+                Graphics::Gdi::HBRUSH,
+                UI::WindowsAndMessaging::{
+                    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, FindWindowW,
+                    GetTopWindow, GetWindow, GetWindowRect, IsWindow, PeekMessageW, RegisterClassW,
+                    SetLayeredWindowAttributes, SetWindowPos, ShowWindow, GW_HWNDNEXT,
+                    HWND_TOPMOST, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOACTIVATE, SW_SHOWNOACTIVATE,
+                    WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    WS_EX_TRANSPARENT, WS_POPUP,
+                },
+            },
+        };
+
+        unsafe extern "system" fn wnd_proc(
+            window: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            DefWindowProcW(window, message, wparam, lparam)
+        }
+
+        fn taskbar_now() -> Option<HWND> {
+            match unsafe { FindWindowW(w!("Shell_TrayWnd"), None) } {
+                Ok(handle) if !handle.is_invalid() => Some(handle),
+                _ => None,
+            }
+        }
+        fn z_index(target: HWND) -> Option<usize> {
+            let mut current = unsafe { GetTopWindow(None) }.ok()?;
+            let mut index = 0usize;
+            loop {
+                if current == target {
+                    return Some(index);
+                }
+                match unsafe { GetWindow(current, GW_HWNDNEXT) } {
+                    Ok(next) if !next.is_invalid() => {
+                        current = next;
+                        index += 1;
+                        if index > 5000 {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        fn pump(rounds: usize) {
+            for _ in 0..rounds {
+                let mut message = MSG::default();
+                while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+                    unsafe { DispatchMessageW(&message) };
+                }
+                sleep(Duration::from_millis(100));
+            }
+        }
+
+        let Some(taskbar_before) = taskbar_now() else {
+            println!("タスクバーが無いためスキップ");
+            return;
+        };
+        let mut bar = RECT::default();
+        if unsafe { GetWindowRect(taskbar_before, &mut bar) }.is_err() {
+            println!("矩形を取れないためスキップ");
+            return;
+        }
+
+        let class_name = w!("PcCustomOverlayPersist");
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(wnd_proc),
+            lpszClassName: PCWSTR(class_name.as_ptr()),
+            hbrBackground: HBRUSH(std::ptr::null_mut()),
+            ..Default::default()
+        };
+        unsafe { RegisterClassW(&class) };
+        let width = bar.right - bar.left;
+        let height = (bar.bottom - bar.top).min(48);
+        let overlay = match unsafe {
+            CreateWindowExW(
+                WS_EX_LAYERED
+                    | WS_EX_TRANSPARENT
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE,
+                class_name,
+                w!("pc-custom overlay persist"),
+                WS_POPUP,
+                bar.left,
+                bar.top,
+                width,
+                height,
+                None,
+                None,
+                None,
+                None,
+            )
+        } {
+            Ok(handle) if !handle.is_invalid() => handle,
+            other => {
+                println!("作成できなかった: {other:?}");
+                return;
+            }
+        };
+        struct Owned(HWND);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                let _ = unsafe { DestroyWindow(self.0) };
+            }
+        }
+        let _owned = Owned(overlay);
+
+        let _ = unsafe { SetLayeredWindowAttributes(overlay, COLORREF(0), 140, LWA_ALPHA) };
+        let _ = unsafe { ShowWindow(overlay, SW_SHOWNOACTIVATE) };
+        let _ = unsafe {
+            SetWindowPos(
+                overlay,
+                HWND_TOPMOST,
+                bar.left,
+                bar.top,
+                width,
+                height,
+                SWP_NOACTIVATE,
+            )
+        };
+        pump(10);
+        println!(
+            "再起動前: overlay_z={:?} taskbar_z={:?}",
+            z_index(overlay),
+            z_index(taskbar_before)
+        );
+
+        // ここでシェルを作り直す。タスクバーの HWND は変わるはず。
+        let outcome = crate::windows::restart_shell().expect("restart shell");
+        println!("restart: {outcome:?}");
+        pump(30);
+
+        let alive = unsafe { IsWindow(overlay) }.as_bool();
+        let taskbar_after = taskbar_now();
+        let handle_changed = match taskbar_after {
+            Some(after) => after != taskbar_before,
+            None => false,
+        };
+        println!(
+            "再起動後: overlay生存={alive} タスクバーHWND変化={handle_changed} overlay_z={:?} taskbar_z={:?}",
+            z_index(overlay),
+            taskbar_after.and_then(z_index)
+        );
+
+        match (z_index(overlay), taskbar_after.and_then(z_index)) {
+            (Some(o), Some(t)) if o < t => {
+                println!("EVIDENCE: シェル再起動後もオーバーレイは手前を保った");
+            }
+            (Some(o), Some(t)) => {
+                println!("EVIDENCE: シェル再起動でオーバーレイが奥へ落ちた (overlay={o} taskbar={t})。前面を取り直す仕組みが要る");
+            }
+            other => println!("EVIDENCE: 再起動後にZ順を判定できなかった {other:?}"),
+        }
+        assert!(alive, "オーバーレイ自体はシェル再起動で消えないこと");
+    }
+
     /// Phase 1 A の決定実験。
     ///
     /// 「タスクバーを着せ替えたように見せる」を Safe 方式（Explorer へ手を入れず、
@@ -1601,7 +1777,10 @@ mod tests {
         // タスクバーに出ない(WS_EX_TOOLWINDOW)、最前面(WS_EX_TOPMOST)。
         let overlay = match unsafe {
             CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST
+                WS_EX_LAYERED
+                    | WS_EX_TRANSPARENT
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
                     | WS_EX_NOACTIVATE,
                 class_name,
                 w!("pc-custom overlay probe"),
@@ -1681,7 +1860,9 @@ mod tests {
 
         match (overlay_z, taskbar_z) {
             (Some(o), Some(t)) if o < t => {
-                println!("EVIDENCE: オーバーレイはタスクバーより手前に置けた。Safe方式が成立しうる");
+                println!(
+                    "EVIDENCE: オーバーレイはタスクバーより手前に置けた。Safe方式が成立しうる"
+                );
             }
             (Some(o), Some(t)) => {
                 println!("EVIDENCE: オーバーレイはタスクバーより奥だった (overlay={o} taskbar={t})。Safe方式は不成立");

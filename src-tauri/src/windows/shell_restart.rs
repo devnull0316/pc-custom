@@ -150,7 +150,9 @@ fn is_windows_shell_image(process_id: u32) -> bool {
         return false;
     }
     let actual = String::from_utf16_lossy(&buffer[..length as usize]);
-    std::path::Path::new(&actual) == expected
+    // Windows のパスは大文字小文字を区別しない。実測では API が "C:\Windows\explorer.exe" を
+    // 返す一方 %WINDIR% は "C:\WINDOWS" で、単純比較だと本物のシェルを取り逃がす。
+    actual.to_lowercase() == expected.to_string_lossy().to_lowercase()
 }
 
 #[cfg(windows)]
@@ -174,6 +176,15 @@ fn terminate(process_id: u32) -> bool {
 #[cfg(windows)]
 pub fn restart_shell() -> WindowsResult<ShellRestartOutcome> {
     let ids = shell_process_ids()?;
+    // タスクバーが出ているのにシェルを1つも特定できないなら、こちらの判定が壊れている。
+    // 何もしていないのに成功を返すと、呼び出し側は「再起動したのに反映されない」と誤解する。
+    if ids.is_empty() && shell_window_present() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "shell process not identified while a taskbar is present",
+            None,
+        ));
+    }
     let mut terminated = 0usize;
     for id in ids {
         if terminate(id) {
@@ -234,4 +245,86 @@ pub fn restart_shell() -> WindowsResult<ShellRestartOutcome> {
         "restart shell",
         None,
     ))
+}
+
+#[cfg(all(test, windows))]
+mod regression_tests {
+    /// タスクバーが出ているなら、シェルのプロセスを必ず1つは特定できなければならない。
+    ///
+    /// 実体パス検査を入れた際、`%WINDIR%` が "C:\WINDOWS"、API が "C:\Windows" を返すため
+    /// 単純比較で本物のシェルを取り逃がし、**再起動が丸ごと無効になっていた**。
+    /// しかも `terminated: 0` で成功が返るため、呼び出し側からは気づけなかった。
+    /// この検査はそれを次に必ず捕まえる。
+    #[test]
+    fn shell_lookup_finds_the_real_shell_when_a_taskbar_exists() {
+        if !super::shell_window_present() {
+            println!("タスクバーが無い環境のためスキップ");
+            return;
+        }
+        let ids = super::shell_process_ids().expect("シェル探索は成功すること");
+        assert!(
+            !ids.is_empty(),
+            "タスクバーが出ているのにシェルのプロセスを特定できていない。
+             実体パスの比較が大文字小文字で落ちていないか、
+             セッション判定が誤っていないかを疑うこと。"
+        );
+    }
+}
+
+#[cfg(all(test, windows))]
+mod diagnostic_tests {
+    /// シェルを探す処理が実際に何を見ているかを出す。変更はしない。
+    #[test]
+    #[ignore = "シェル検出の診断。何も変更しない"]
+    fn dump_what_the_shell_lookup_sees() {
+        use windows::Win32::System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+                TH32CS_SNAPPROCESS,
+            },
+            RemoteDesktop::ProcessIdToSessionId,
+        };
+        let mut own_session = 0u32;
+        let ok = unsafe { ProcessIdToSessionId(std::process::id(), &mut own_session) }.is_ok();
+        println!("自分のセッション取得={ok} session={own_session}");
+        println!("WINDIR={:?}", std::env::var_os("WINDIR"));
+
+        let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
+            println!("スナップショット取得に失敗");
+            return;
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut more = unsafe { Process32FirstW(snapshot, &mut entry) }.is_ok();
+        let mut found = 0;
+        while more {
+            let end = entry
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            let name = String::from_utf16_lossy(&entry.szExeFile[..end]);
+            if name.eq_ignore_ascii_case("explorer.exe") {
+                found += 1;
+                let mut session = u32::MAX;
+                let session_ok =
+                    unsafe { ProcessIdToSessionId(entry.th32ProcessID, &mut session) }.is_ok();
+                let image_ok = super::is_windows_shell_image(entry.th32ProcessID);
+                println!(
+                    "  pid={} session_ok={session_ok} session={session} 同一={} 実体一致={image_ok}",
+                    entry.th32ProcessID,
+                    session == own_session
+                );
+            }
+            more = unsafe { Process32NextW(snapshot, &mut entry) }.is_ok();
+        }
+        let _ = unsafe { windows::Win32::Foundation::CloseHandle(snapshot) };
+        println!("explorer.exe という名前のプロセス数={found}");
+        println!(
+            "shell_process_ids() の結果={:?}",
+            super::shell_process_ids()
+        );
+    }
 }
