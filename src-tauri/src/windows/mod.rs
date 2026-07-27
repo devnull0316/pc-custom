@@ -10,6 +10,9 @@ mod powertoys;
 mod process;
 mod readiness;
 mod registry;
+// 42件の候補を反映させるにはシェル再起動が要る。まずは実測用に入れる。
+#[cfg(test)]
+mod shell_restart;
 mod transaction_lock;
 // 検証専用の計器。実UIを外から読むためにエクスプローラーの窓を開き、シェル設定を書き、
 // 窓を閉じる処理を含む。製品側からは一度も呼ばれないので、出荷バイナリへは入れない。
@@ -49,6 +52,8 @@ pub use registry::{
 pub use transaction_lock::{
     acquire_app_instance_lock, acquire_core_mutation_lock, AppInstanceGuard, CoreMutationGuard,
 };
+#[cfg(test)]
+pub use shell_restart::{restart_shell, ShellRestartOutcome};
 pub use update_status::read_windows_update_status;
 pub use window_effects::{apply_mica_backdrop, system_accent_color, AccentColor};
 #[cfg(all(test, windows))]

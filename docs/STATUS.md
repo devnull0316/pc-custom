@@ -718,3 +718,43 @@ publisher 設定が「アプリと機能」の発行元欄へ実際に届くこ�
 
 教訓: コンパイラの「never used」警告は、消し忘れではなく
 **出荷してはいけないものが出荷されている合図**のことがある。
+
+## シェル再起動なら反映される（2026-07-27 実測）
+
+42 件の候補を表示専用に据え置いてきた根拠は、「レジストリへ書いても実 UI が動かない」という
+実測だった。今回、**シェル(エクスプローラー)を再起動すれば反映される**ことを実測した。
+
+```
+before:   TaskbarAl=1  start_center_ratio=0.304   （中央寄せ）
+restart#1 → applied:   start_center_ratio=0.014   delta=0.290   ← 実際に左端へ動いた
+restart#2 → restored:  start_center_ratio=0.304   delta=0.000   ← 完全に元へ戻った
+```
+
+再現: `cargo test --lib -- --ignored --nocapture shell_restart_makes_taskbar_alignment`
+
+### 実装（`windows/shell_restart.rs`）
+
+文書化された API だけを使う。`CreateToolhelp32Snapshot` で explorer.exe を列挙し、
+`ProcessIdToSessionId` で**自分と同じセッションのものだけ**に絞り、`TerminateProcess` で終了、
+`FindWindowW("Shell_TrayWnd")` で復帰を待つ。
+トレイ窓へ未文書のメッセージを投げてシェルを畳む手口は使わない（BRIEF が禁じる
+「文書化されていない内部仕様への依存」に当たる）。
+
+**Windows の `AutoRestartShell` による自動復帰は、この環境では 10 秒待っても効かなかった。**
+`relaunched: true` が出ており、こちらから `%WINDIR%\explorer.exe` を起動し直すフォールバックが
+実際に仕事をしている。飾りではないので消さないこと。
+
+### 手順上の注意
+
+**explorer を落とすと、実行中コマンドの出力パイプが切れて戻らなくなる。**
+最初の実行は 10 分でタイムアウト強制終了された（強制終了では Drop ガードも走らない）。
+幸いレジストリは復元済みでシェルも復帰していたが、
+**シェルを再起動する実機テストは必ずファイルへリダイレクトして背景実行すること。**
+
+### まだ解けていない問題
+
+反映できることと、反映されたと**確認できる**ことは別である。
+42 件のうち外から観測する手段があるのは一部だけで、
+`explorer.info_tips` や `input.autocorrect` のように画面から読めないものが多い。
+観測できないものを「変更できます」として出せば、6 件を出荷したときと同じ失敗になる。
+昇格は項目ごとに観測手段を用意できたものから行う。

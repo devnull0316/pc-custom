@@ -1527,6 +1527,115 @@ mod tests {
     /// 元の値・型・有無へ正確に復元 → 位置が戻ったか実測、までを1往復で確認する。
     ///
     /// ユーザーの実環境を一時的に変更するため、通常のテスト実行では走らせない。
+    /// 42 件の候補を「使えるようにする」ための決定的な実験。
+    ///
+    /// 設定変更通知だけでは反映されないことは既に実測済み。ここではシェルを再起動して
+    /// 反映されるかを見る。ここが偽なら、シェル再起動を足しても候補は昇格できない。
+    ///
+    /// **実機のタスクバーが 2 回消えて戻る。開いているエクスプローラーの窓は閉じる。**
+    #[test]
+    #[ignore = "実機のシェルを2回再起動する。反映可否の決定実験"]
+    fn shell_restart_makes_taskbar_alignment_actually_apply() {
+        use crate::backup::{
+            prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryTarget,
+        };
+        use crate::windows::{restart_shell, write_raw_value};
+        use std::{thread::sleep, time::Duration};
+
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE: &str = "TaskbarAl";
+        const REG_DWORD: u32 = 4;
+
+        /// シェル再起動後、タスクバーが観測できるようになるまで待つ。
+        fn settle() -> Option<TaskbarLayoutObservation> {
+            for _ in 0..40 {
+                sleep(Duration::from_millis(300));
+                if let Ok(now) = observe_taskbar_layout() {
+                    if now.taskbar_width > 0 && now.start_button_width > 0 {
+                        return Some(now);
+                    }
+                }
+            }
+            None
+        }
+
+        let Ok(baseline) = observe_taskbar_layout() else {
+            println!("タスクバーを観測できないためスキップ");
+            return;
+        };
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE);
+        let current = read_registry_state(&target.location()).expect("read TaskbarAl");
+        let original_value = if current.value_existed {
+            u32::from_le_bytes(current.raw_bytes[..4].try_into().unwrap_or([0; 4]))
+        } else {
+            1
+        };
+        let flipped = if original_value == 0 { 1u32 } else { 0u32 };
+
+        let backup =
+            prepare_registry_backup(target, REG_DWORD, flipped.to_le_bytes().to_vec(), 1, 26_200)
+                .expect("prepare backup");
+
+        // panic しても必ず元へ戻し、シェルも戻す。
+        struct Guard(crate::backup::RegistryBackup, bool);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                if !self.1 {
+                    let _ = restore_registry_backup(&self.0);
+                    let _ = crate::windows::restart_shell();
+                }
+            }
+        }
+        let mut guard = Guard(backup.clone(), false);
+
+        println!(
+            "before: TaskbarAl={original_value} start_center_ratio={:.3}",
+            baseline.start_center_ratio()
+        );
+
+        write_raw_value(&backup.location, REG_DWORD, &flipped.to_le_bytes()).expect("write flipped");
+        let restart1 = restart_shell().expect("restart shell after write");
+        println!("restart#1: {restart1:?}");
+        let after = settle();
+        let moved = match after {
+            Some(observation) => {
+                let delta = (observation.start_center_ratio() - baseline.start_center_ratio()).abs();
+                println!(
+                    "applied: start_center_ratio={:.3} delta={delta:.3}",
+                    observation.start_center_ratio()
+                );
+                delta > 0.05
+            }
+            None => {
+                println!("再起動後にタスクバーを観測できなかった");
+                false
+            }
+        };
+
+        // 元へ戻す。
+        let restored = restore_registry_backup(&backup).expect("restore original");
+        let restart2 = restart_shell().expect("restart shell after restore");
+        println!("restart#2: {restart2:?} restore={restored:?}");
+        let back = settle();
+        guard.1 = true;
+        drop(guard);
+
+        if let Some(observation) = back {
+            let delta = (observation.start_center_ratio() - baseline.start_center_ratio()).abs();
+            println!(
+                "restored: start_center_ratio={:.3} delta_from_baseline={delta:.3}",
+                observation.start_center_ratio()
+            );
+            assert!(delta <= 0.05, "元の配置へ戻ること");
+        }
+
+        if moved {
+            println!("EVIDENCE: シェル再起動で TaskbarAl は実UIへ反映される。候補の昇格が可能");
+        } else {
+            println!("EVIDENCE: シェル再起動でも反映されなかった。昇格の根拠にならない");
+        }
+    }
+
     #[test]
     #[ignore = "実機のタスクバーを一時的に変更する証拠取得用"]
     fn taskbar_alignment_write_actually_moves_the_start_button() {
