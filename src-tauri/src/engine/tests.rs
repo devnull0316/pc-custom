@@ -295,13 +295,22 @@ fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
         Ok(identity) => identity,
         Err(_) => return, // 実機以外では検出できないので何も主張しない
     };
-    // 対象外のビルドでは互換性ゲートが正しく読み取り専用へ倒す。
-    // その挙動は仕様どおりなので、ここで失敗と報告してはいけない。
-    // CI の windows ランナーは 26_100 より古く、実際にここで落ちていた。
-    if identity.base_build < 26_100 {
+    // この環境で変更が許される場合だけ、変更経路を検証する。
+    // 許されない場合に互換性ゲートが読み取り専用へ倒すのは**仕様どおり**なので、
+    // ここで失敗と報告してはいけない。
+    //
+    // 判定はビルド番号を自前で見ずに、製品と同じ `decision_for_identity` を使う。
+    // 一度ビルド番号で書いて CI がまだ落ちた。実際の理由は build ではなく
+    // product_type で、GitHub の windows ランナーは Windows Server（client でない）。
+    // 判定ルールを二重に書くと、こうして必ずずれる。
+    let decision = crate::compatibility::CompatibilityCatalog::decision_for_identity(&identity);
+    if !matches!(
+        decision.mode,
+        crate::compatibility::CompatibilityMode::TestedMutable
+    ) {
         println!(
-            "build {} は対象外のため、この経路は検証しない（互換性ゲートが読み取り専用へ倒す）",
-            identity.base_build
+            "この環境は変更対象外のため検証しない: build={} product_type={} 判定={:?}",
+            identity.base_build, identity.product_type, decision.mode
         );
         return;
     }
