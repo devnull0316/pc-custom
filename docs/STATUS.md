@@ -655,3 +655,23 @@ Action は64件から67件、ライブラリテストは256件（通常229成功
 既定アプリと音声切替をGuidedにする判断には同意する。前者はhash保護された`UserChoice`に対する
 文書化済み汎用setterがなく、後者の一般的な切替方法は非公開COMである。どちらも「書けた」だけを
 効果の証明にせず、PCカスタムは読み取り可能な事実だけを表示し、変更はWindows自身へ委ねる。
+
+### インストーラーの静的監査（2026-07-27）
+
+対話実行はできていないが、生成された `src-tauri/target/release/nsis/x64/installer.nsi`（892行）
+を読めば「何をするつもりのインストーラーか」は確定できる。読んだ。
+
+- `INSTALLMODE = currentUser`。**per-user 導入で、アプリ自体に管理者権限を要求しない。**
+  BRIEF の「アプリ全体を管理者で動かさない」姿勢と一致する。
+- 書き込むレジストリは `SHCTX`（currentUser では HKCU）配下のアンインストール登録のみ。
+  DisplayName / DisplayIcon / DisplayVersion / Publisher / InstallLocation /
+  UninstallString / NoModify / NoRepair / EstimatedSize。
+  **Run キーもサービスもシェル拡張も書かない。**
+- `ExecWait` は4箇所。2つは再インストール時に旧版のアンインストーラーを走らせるもの。
+  残り2つは **Microsoft の WebView2 ブートストラッパ**で、片方は `needsadmin=true` を渡す。
+  ただしこれは WebView2 が見つからない場合の分岐にのみ入る。
+  この実機には WebView2 **150.0.4078.99** が導入済みで、**この経路は走らない**。
+
+残る未検証は「実際に実行したときの画面と結果」だけであり、
+インストーラーが行おうとしている操作の内容は上記のとおり確定している。
+無人の `/S` 実行は、依頼のないソフト導入という副作用が出るため行わない。
