@@ -133,6 +133,7 @@ export interface CommitResult {
   transactionId: string;
   status: "succeeded" | "rolled_back" | "recovery_required";
   message: string;
+  details?: readonly string[];
 }
 
 export type TimelineStatus =
@@ -329,6 +330,15 @@ export interface InstallOutcome {
   summary: string;
 }
 
+export interface WindowLayoutStatus {
+  saved: boolean;
+  snapshotId?: string | null;
+  savedAtUnixMs?: number | null;
+  windowCount: number;
+  excludedGameWindows: number;
+  skippedWindows: number;
+}
+
 export function isMutationAllowed(
   mode: DataMode,
   bootstrap: BootstrapStatus | null,
@@ -344,7 +354,7 @@ export function isMutationAllowed(
 export function riskLabel(risk: RiskLevel): string {
   switch (risk) {
     case "safe":
-      return "安全";
+      return "低リスク";
     case "caution":
       return "注意";
     case "experimental":

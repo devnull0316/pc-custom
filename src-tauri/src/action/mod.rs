@@ -19,12 +19,13 @@ pub use parameters::{
 };
 pub use registry::{ActionRegistry, ACTION_REGISTRY};
 pub use state::{
-    AdvancedColorObservation, DefaultRenderAudioObservation, DetectedState,
-    GameReadinessObservation, KnownAppObservation, KnownAppState, KnownAppsObservation,
-    ObservationWarning, ObservedProcess, ObservedValue, PowerToysInstallationObservation,
-    PrimaryRefreshRateObservation, ReadinessComponent, StartupEntrySource, StartupEntryStatus,
-    StartupInventoryEntry, StartupInventoryObservation, StateEvidence, SystemDriveSpaceObservation,
-    TempFilesObservation, ThemeObservation, WindowColorPreset, WindowsUpdateStatusObservation,
+    AdvancedColorObservation, AudioOutputEndpointObservation, AudioOutputObservation,
+    DefaultRenderAudioObservation, DetectedState, GameReadinessObservation, KnownAppObservation,
+    KnownAppState, KnownAppsObservation, ObservationWarning, ObservedProcess, ObservedValue,
+    PowerToysInstallationObservation, PrimaryRefreshRateObservation, ReadinessComponent,
+    StartupEntrySource, StartupEntryStatus, StartupInventoryEntry, StartupInventoryObservation,
+    StateEvidence, SystemDriveSpaceObservation, TempFilesObservation, ThemeObservation,
+    WindowColorPreset, WindowsUpdateStatusObservation,
 };
 pub use traits::Action;
 pub use types::{

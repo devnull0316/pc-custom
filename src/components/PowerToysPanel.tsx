@@ -32,7 +32,7 @@ export function PowerToysPanel({
       <header className="powertoys-panel__header">
         <div>
           <span className="eyebrow">操作・普段使い</span>
-          <h1 id="everyday-title">やりたいことからPowerToysの機能を選ぶ</h1>
+          <h2 id="everyday-title">やりたいことからPowerToysの機能を選ぶ</h2>
           <p>日常操作は同等機能を作り直さず、Microsoft PowerToysとWindows標準機能を案内します。</p>
         </div>
         <div aria-live="polite" className="powertoys-status">

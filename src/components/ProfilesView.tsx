@@ -99,6 +99,7 @@ export function ProfilesView({
   const live = dataMode === "live";
   const selectable = useMemo(
     () => actions.filter((action) => {
+      if (action.id === "setup.window_layout") return false;
       if (action.availability !== "mutable") return false;
       if (mode === "game") {
         return action.autoApplyEligible === true

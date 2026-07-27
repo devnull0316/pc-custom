@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::action::{ActionId, PowerScheme, ProcessBindingParameters};
+use crate::window_layout::WindowLayoutBackup;
 
 use super::{Fingerprint, RegistryBackup};
 
@@ -106,6 +107,7 @@ pub enum BackupPayload {
     Observation(ObservationBackup),
     ProcessWatch(ProcessWatchBackup),
     PowerScheme(PowerSchemeBackup),
+    WindowLayout(WindowLayoutBackup),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

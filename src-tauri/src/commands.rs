@@ -3,7 +3,7 @@ use std::str::FromStr;
 use tauri::State;
 
 use crate::{
-    action::ActionId,
+    action::{ActionId, ActionParameters},
     bootstrap::ApplicationState,
     error::{CoreError, CoreResult},
     game_profile::{CreateProfileRequest, StoredProfile},
@@ -12,6 +12,7 @@ use crate::{
         ActionPresentation, BootstrapStatus, CommitPreviewRequest, CommitResult, DetectionResponse,
         PreviewActionsRequest, PreviewResponse, RollbackItemRequest,
     },
+    window_layout::WindowLayoutStatus,
 };
 
 #[tauri::command]
@@ -31,15 +32,55 @@ pub fn detect_action(
 ) -> CoreResult<DetectionResponse> {
     let action_id = ActionId::from_str(&action_id)
         .map_err(|_| CoreError::invalid_request("登録されていないAction IDです。"))?;
+    if action_id == ActionId::SetupWindowLayout {
+        let engine = state.engine()?;
+        return engine.detect_parameters(engine.window_layout_parameters()?);
+    }
     state.engine()?.detect_action(action_id)
 }
 
 #[tauri::command]
 pub fn preview_actions(
     state: State<'_, ApplicationState>,
-    request: PreviewActionsRequest,
+    mut request: PreviewActionsRequest,
 ) -> CoreResult<PreviewResponse> {
-    state.engine()?.preview(request)
+    let engine = state.engine()?;
+    for action in &mut request.actions {
+        if action.action_id == ActionId::SetupWindowLayout.as_str() {
+            if !action.parameters.is_empty() {
+                return Err(CoreError::invalid_request(
+                    "ウィンドウ配置の復元内容は保存済みデータからだけ作成できます。",
+                ));
+            }
+            let ActionParameters::SetupWindowLayout { invocation } =
+                engine.window_layout_parameters()?
+            else {
+                unreachable!("window layout helper returns the matching variant");
+            };
+            action.parameters.insert(
+                "invocation".to_owned(),
+                serde_json::to_value(invocation).map_err(|_| CoreError::storage())?,
+            );
+        }
+    }
+    engine.preview(request)
+}
+
+#[tauri::command]
+pub fn get_window_layout_status(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<WindowLayoutStatus> {
+    state.engine()?.window_layout_status()
+}
+
+#[tauri::command]
+pub fn save_window_layout(
+    state: State<'_, ApplicationState>,
+    unregistered_games_closed: bool,
+) -> CoreResult<WindowLayoutStatus> {
+    state
+        .engine()?
+        .save_window_layout(unregistered_games_closed)
 }
 
 #[tauri::command]
@@ -78,7 +119,7 @@ pub fn profile_create(
     state: State<'_, ApplicationState>,
     request: CreateProfileRequest,
 ) -> CoreResult<StoredProfile> {
-    state.profile_store()?.create(request)
+    state.engine()?.create_profile(request)
 }
 
 #[tauri::command]
@@ -107,7 +148,7 @@ pub fn profile_restore_now(
 }
 #[tauri::command]
 pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreResult<()> {
-    state.profile_store()?.delete(&id)
+    state.engine()?.delete_profile(&id)
 }
 
 #[tauri::command]
@@ -197,5 +238,5 @@ pub fn config_import_apply(
     state: State<'_, ApplicationState>,
     json: String,
 ) -> CoreResult<crate::game_profile::ImportResult> {
-    state.profile_store()?.import_apply(&json)
+    state.engine()?.import_profiles(&json)
 }

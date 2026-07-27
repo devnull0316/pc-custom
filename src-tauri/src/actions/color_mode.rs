@@ -1,10 +1,10 @@
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionMetadata, ActionParameters, ActionResult, ActionRiskLevel, ActionStage,
-        AppliedEvidence, ChangeExplanation, DetectedState, MethodClass, ObservedValue,
-        RollbackEvidence, ThemeColorMode, ThemeObservation, TroubleshootingStep,
-        ValidationReport, Verification, WindowsReleaseFamily,
+        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
+        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
+        ChangeExplanation, DetectedState, MethodClass, ObservedValue, RollbackEvidence,
+        ThemeColorMode, ThemeObservation, TroubleshootingStep, ValidationReport, Verification,
+        WindowsReleaseFamily,
     },
     backup::{
         classify_registry_backup, prepare_registry_backup, read_registry_state,
@@ -20,8 +20,7 @@ use super::common::{
     validate_backup, validate_backup_for_apply, validate_base, REG_DWORD_TYPE,
 };
 
-const PERSONALIZE_SUBKEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+const PERSONALIZE_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 const APPS_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(PERSONALIZE_SUBKEY, "AppsUseLightTheme");
 const SYSTEM_TARGET: RegistryTarget =
@@ -87,13 +86,9 @@ impl ColorModeAction {
         }
     }
 
-    fn read_theme_value(
-        target: RegistryTarget,
-        stage: ActionStage,
-    ) -> ActionResult<Option<u32>> {
-        let state = read_registry_state(&target.location()).map_err(|error| {
-            map_windows_error(stage, "action.color_mode.detect_failed", error)
-        })?;
+    fn read_theme_value(target: RegistryTarget, stage: ActionStage) -> ActionResult<Option<u32>> {
+        let state = read_registry_state(&target.location())
+            .map_err(|error| map_windows_error(stage, "action.color_mode.detect_failed", error))?;
         if !state.value_existed {
             return Ok(None);
         }
@@ -274,13 +269,7 @@ impl Action for ColorModeAction {
         context: &ActionContext<'_>,
         parameters: &ActionParameters,
     ) -> ActionResult<ValidationReport> {
-        let report = validate_base(
-            &METADATA,
-            context,
-            parameters,
-            true,
-            ActionStage::Validate,
-        )?;
+        let report = validate_base(&METADATA, context, parameters, true, ActionStage::Validate)?;
         let _ = Self::mode(parameters)?;
         Ok(report)
     }
@@ -300,7 +289,11 @@ impl Action for ColorModeAction {
             context.os_identity.base_build,
         )
         .map_err(|error| {
-            map_windows_error(ActionStage::Backup, "action.color_mode.backup_failed", error)
+            map_windows_error(
+                ActionStage::Backup,
+                "action.color_mode.backup_failed",
+                error,
+            )
         })?;
         let system = prepare_registry_backup(
             SYSTEM_TARGET,
@@ -310,14 +303,21 @@ impl Action for ColorModeAction {
             context.os_identity.base_build,
         )
         .map_err(|error| {
-            map_windows_error(ActionStage::Backup, "action.color_mode.backup_failed", error)
+            map_windows_error(
+                ActionStage::Backup,
+                "action.color_mode.backup_failed",
+                error,
+            )
         })?;
         let precondition_fingerprint = Fingerprint::of_parts([
             apps.original.fingerprint(&apps.location).0.as_slice(),
             system.original.fingerprint(&system.location).0.as_slice(),
         ]);
         let intended_fingerprint = Fingerprint::of_parts([
-            apps.intended_state().fingerprint(&apps.location).0.as_slice(),
+            apps.intended_state()
+                .fingerprint(&apps.location)
+                .0
+                .as_slice(),
             system
                 .intended_state()
                 .fingerprint(&system.location)
@@ -344,9 +344,11 @@ impl Action for ColorModeAction {
         validate_backup_for_apply(&METADATA, context, envelope)?;
         let desired = dword_bytes(Self::desired_value(Self::mode(parameters)?));
         let composite = Self::composite(envelope, ActionStage::Apply)?;
-        if composite.registry_entries.iter().any(|entry| {
-            entry.intended_type != REG_DWORD_TYPE || entry.intended_raw != desired
-        }) {
+        if composite
+            .registry_entries
+            .iter()
+            .any(|entry| entry.intended_type != REG_DWORD_TYPE || entry.intended_raw != desired)
+        {
             return Err(ActionError::recovery_required(
                 ActionStage::Apply,
                 "action.color_mode.backup_parameter_mismatch",
@@ -395,13 +397,7 @@ impl Action for ColorModeAction {
         parameters: &ActionParameters,
         envelope: &BackupEnvelope,
     ) -> ActionResult<RollbackEvidence> {
-        validate_base(
-            &METADATA,
-            context,
-            parameters,
-            true,
-            ActionStage::Rollback,
-        )?;
+        validate_base(&METADATA, context, parameters, true, ActionStage::Rollback)?;
         validate_backup(&METADATA, context, envelope, ActionStage::Rollback)?;
         let composite = Self::composite(envelope, ActionStage::Rollback)?;
 
@@ -477,10 +473,7 @@ impl Action for ColorModeAction {
         Ok(Verification { verified, observed })
     }
 
-    fn explain_changes(
-        &self,
-        parameters: &ActionParameters,
-    ) -> ActionResult<ChangeExplanation> {
+    fn explain_changes(&self, parameters: &ActionParameters) -> ActionResult<ChangeExplanation> {
         let mode = Self::mode(parameters)?;
         Ok(ChangeExplanation {
             action_id: METADATA.id,
@@ -491,8 +484,14 @@ impl Action for ColorModeAction {
                     ThemeColorMode::Dark => "ダーク",
                 }
             ),
-            method: "2つのHKCU値をcomposite backup後に変更し、WM_SETTINGCHANGEとSHChangeNotifyで通知".to_owned(),
-            resources: METADATA.resource_keys.iter().map(|v| (*v).to_owned()).collect(),
+            method:
+                "2つのHKCU値をcomposite backup後に変更し、WM_SETTINGCHANGEとSHChangeNotifyで通知"
+                    .to_owned(),
+            resources: METADATA
+                .resource_keys
+                .iter()
+                .map(|v| (*v).to_owned())
+                .collect(),
             requires_admin: false,
             requires_restart: false,
             windows_update_impact: METADATA.windows_update_impact.to_owned(),
@@ -558,10 +557,8 @@ mod tests {
         let (apps_target, system_target) = isolated_targets();
         let apps_location = apps_target.location();
         let system_location = system_target.location();
-        let _cleanup = IsolatedCompositeCleanup(vec![
-            apps_location.clone(),
-            system_location.clone(),
-        ]);
+        let _cleanup =
+            IsolatedCompositeCleanup(vec![apps_location.clone(), system_location.clone()]);
         write_raw_value(&apps_location, REG_DWORD_TYPE, &dword_bytes(1))
             .expect("seed isolated app theme value");
         write_raw_value(&system_location, REG_DWORD_TYPE, &dword_bytes(1))
@@ -607,8 +604,7 @@ mod tests {
             );
         }
         assert!(entries.iter().all(|entry| {
-            verify_registry_backup_restored(entry)
-                .expect("verify isolated composite rollback")
+            verify_registry_backup_restored(entry).expect("verify isolated composite rollback")
         }));
         assert_eq!(
             ColorModeAction::read_theme_value(apps_target, ActionStage::Detect)

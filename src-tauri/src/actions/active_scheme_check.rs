@@ -1,18 +1,17 @@
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionMetadata, ActionParameters, ActionResult, ActionRiskLevel, ActionStage,
-        AppliedEvidence, ChangeExplanation, DetectedState, MethodClass, ObservedValue,
-        RollbackEvidence, TroubleshootingStep, ValidationReport, Verification,
-        WindowsReleaseFamily,
+        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
+        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
+        ChangeExplanation, DetectedState, MethodClass, ObservedValue, RollbackEvidence,
+        TroubleshootingStep, ValidationReport, Verification, WindowsReleaseFamily,
     },
     backup::{BackupDraft, BackupEnvelope, BackupPayload, ObservationBackup},
     windows::active_power_scheme_guid,
 };
 
 use super::common::{
-    evidence, fingerprint_state, map_windows_error, validate_backup,
-    validate_backup_for_apply, validate_base,
+    evidence, fingerprint_state, map_windows_error, validate_backup, validate_backup_for_apply,
+    validate_base,
 };
 
 pub struct ActiveSchemeCheckAction;
@@ -96,13 +95,7 @@ impl Action for ActiveSchemeCheckAction {
         context: &ActionContext<'_>,
         parameters: &ActionParameters,
     ) -> ActionResult<ValidationReport> {
-        let report = validate_base(
-            &METADATA,
-            context,
-            parameters,
-            false,
-            ActionStage::Validate,
-        )?;
+        let report = validate_base(&METADATA, context, parameters, false, ActionStage::Validate)?;
         Self::ensure_parameters(parameters)?;
         Ok(report)
     }
@@ -194,16 +187,17 @@ impl Action for ActiveSchemeCheckAction {
         })
     }
 
-    fn explain_changes(
-        &self,
-        parameters: &ActionParameters,
-    ) -> ActionResult<ChangeExplanation> {
+    fn explain_changes(&self, parameters: &ActionParameters) -> ActionResult<ChangeExplanation> {
         Self::ensure_parameters(parameters)?;
         Ok(ChangeExplanation {
             action_id: METADATA.id,
             result: "現在のactive power schemeを表示します。OS設定は変更しません。".to_owned(),
             method: "PowerGetActiveScheme（読み取り専用）".to_owned(),
-            resources: METADATA.resource_keys.iter().map(|v| (*v).to_owned()).collect(),
+            resources: METADATA
+                .resource_keys
+                .iter()
+                .map(|v| (*v).to_owned())
+                .collect(),
             requires_admin: false,
             requires_restart: false,
             windows_update_impact: METADATA.windows_update_impact.to_owned(),
@@ -274,9 +268,11 @@ mod tests {
             .detect_current_state(&context, &parameters)
             .expect("detect active power scheme after rollback");
         assert_eq!(before.known_value(), after.known_value());
-        assert!(ACTIVE_SCHEME_CHECK_ACTION
-            .verify_rolled_back(&context, &parameters, &envelope)
-            .expect("verify read-only rollback")
-            .verified);
+        assert!(
+            ACTIVE_SCHEME_CHECK_ACTION
+                .verify_rolled_back(&context, &parameters, &envelope)
+                .expect("verify read-only rollback")
+                .verified
+        );
     }
 }

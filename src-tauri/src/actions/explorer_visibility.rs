@@ -1,10 +1,9 @@
 use crate::{
     action::{
-        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionMetadata, ActionParameters, ActionResult, ActionRiskLevel, ActionStage,
-        AppliedEvidence, ChangeExplanation, DetectedState, MethodClass, ObservedValue,
-        RollbackEvidence, TroubleshootingStep, ValidationReport, Verification,
-        WindowsReleaseFamily,
+        Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
+        ActionParameters, ActionResult, ActionRiskLevel, ActionStage, AppliedEvidence,
+        ChangeExplanation, DetectedState, MethodClass, ObservedValue, RollbackEvidence,
+        TroubleshootingStep, ValidationReport, Verification, WindowsReleaseFamily,
     },
     backup::{
         prepare_registry_backup, read_registry_state, restore_registry_backup,
@@ -19,16 +18,13 @@ use super::common::{
     validate_backup, validate_backup_for_apply, validate_base, REG_DWORD_TYPE,
 };
 
-const ADVANCED_SUBKEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+const ADVANCED_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 const EXTENSIONS_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "HideFileExt");
-const HIDDEN_TARGET: RegistryTarget =
-    RegistryTarget::current_user_64(ADVANCED_SUBKEY, "Hidden");
+const HIDDEN_TARGET: RegistryTarget = RegistryTarget::current_user_64(ADVANCED_SUBKEY, "Hidden");
 const CLOCK_SECONDS_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(ADVANCED_SUBKEY, "ShowSecondsInSystemClock");
-const PERSONALIZE_SUBKEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+const PERSONALIZE_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 const TRANSPARENCY_TARGET: RegistryTarget =
     RegistryTarget::current_user_64(PERSONALIZE_SUBKEY, "EnableTransparency");
 const TASK_VIEW_TARGET: RegistryTarget =
@@ -449,7 +445,6 @@ fn detect_setting(
     })
 }
 
-
 fn compensate_failed_apply(backup: &RegistryBackup) -> ActionResult<()> {
     match restore_registry_backup(backup).map_err(|error| {
         map_windows_error(
@@ -459,12 +454,10 @@ fn compensate_failed_apply(backup: &RegistryBackup) -> ActionResult<()> {
         )
     })? {
         RegistryRestoreOutcome::Restored | RegistryRestoreOutcome::AlreadyOriginal => Ok(()),
-        RegistryRestoreOutcome::RestoredValueKeyRetained => {
-            Err(ActionError::recovery_required(
-                ActionStage::Recovery,
-                "action.explorer.apply_compensation_key_retained",
-            ))
-        }
+        RegistryRestoreOutcome::RestoredValueKeyRetained => Err(ActionError::recovery_required(
+            ActionStage::Recovery,
+            "action.explorer.apply_compensation_key_retained",
+        )),
         RegistryRestoreOutcome::ExternalConflict => Err(ActionError::recovery_required(
             ActionStage::Recovery,
             "action.explorer.apply_compensation_conflict",
@@ -489,14 +482,9 @@ fn apply_registry_backup(backup: &RegistryBackup) -> ActionResult<()> {
             "action.apply.stale_preview",
         ));
     }
-    write_raw_value(
-        &backup.location,
-        backup.intended_type,
-        &backup.intended_raw,
-    )
-    .map_err(|error| {
-        map_windows_error(ActionStage::Apply, "action.explorer.apply_failed", error)
-    })?;
+    write_raw_value(&backup.location, backup.intended_type, &backup.intended_raw).map_err(
+        |error| map_windows_error(ActionStage::Apply, "action.explorer.apply_failed", error),
+    )?;
 
     let applied = match read_registry_state(&backup.location) {
         Ok(applied) => applied,
@@ -920,15 +908,8 @@ mod tests {
         };
 
         apply_registry_backup(&backup).expect("apply isolated Explorer action storage");
-        let detected = detect_setting(
-            &context,
-            parameters,
-            metadata,
-            target,
-            desired,
-            valid,
-        )
-        .expect("detect applied isolated Explorer setting");
+        let detected = detect_setting(&context, parameters, metadata, target, desired, valid)
+            .expect("detect applied isolated Explorer setting");
         assert!(matches!(
             detected.known_value(),
             Some(ObservedValue::RegistryDword {
@@ -940,17 +921,11 @@ mod tests {
             restore_registry_backup(&backup).expect("rollback isolated Explorer setting"),
             RegistryRestoreOutcome::Restored
         );
-        assert!(verify_registry_backup_restored(&backup)
-            .expect("verify isolated Explorer rollback"));
-        let restored = detect_setting(
-            &context,
-            parameters,
-            metadata,
-            target,
-            desired,
-            valid,
-        )
-        .expect("detect restored isolated Explorer setting");
+        assert!(
+            verify_registry_backup_restored(&backup).expect("verify isolated Explorer rollback")
+        );
+        let restored = detect_setting(&context, parameters, metadata, target, desired, valid)
+            .expect("detect restored isolated Explorer setting");
         assert!(matches!(
             restored.known_value(),
             Some(ObservedValue::RegistryDword { configured }) if *configured == original
@@ -1082,34 +1057,34 @@ mod compatibility_tests {
         assert_eq!(error.code.as_code(), "RECOVERY_REQUIRED");
     }
 
-#[cfg(all(test, windows))]
-mod demotion_tests {
-    use super::*;
+    #[cfg(all(test, windows))]
+    mod demotion_tests {
+        use super::*;
 
-    /// 実測で「書いてもWindows UIが変わらない」と分かった項目は、
-    /// 表示だけでなく**変更経路も**閉じていること。
-    #[test]
-    fn demoted_actions_refuse_to_mutate() {
-        use crate::action::{ActionKind, ACTION_REGISTRY};
-        for id in [
-            ActionId::TaskbarTaskView,
-            ActionId::TaskbarWidgets,
-            ActionId::ExplorerClockSeconds,
-            ActionId::ExplorerCompactView,
-            ActionId::ExplorerItemCheckboxes,
-            ActionId::ExplorerShowHidden,
-        ] {
-            let action = ACTION_REGISTRY.get(id).expect("registered");
-            assert_eq!(
-                action.metadata().kind,
-                ActionKind::Guided,
-                "{id:?} は実測結果にもとづき変更しない扱い"
-            );
-            assert!(
-                !action.metadata().auto_apply_eligible,
-                "{id:?} は自動適用の対象にしない"
-            );
+        /// 実測で「書いてもWindows UIが変わらない」と分かった項目は、
+        /// 表示だけでなく**変更経路も**閉じていること。
+        #[test]
+        fn demoted_actions_refuse_to_mutate() {
+            use crate::action::{ActionKind, ACTION_REGISTRY};
+            for id in [
+                ActionId::TaskbarTaskView,
+                ActionId::TaskbarWidgets,
+                ActionId::ExplorerClockSeconds,
+                ActionId::ExplorerCompactView,
+                ActionId::ExplorerItemCheckboxes,
+                ActionId::ExplorerShowHidden,
+            ] {
+                let action = ACTION_REGISTRY.get(id).expect("registered");
+                assert_eq!(
+                    action.metadata().kind,
+                    ActionKind::Guided,
+                    "{id:?} は実測結果にもとづき変更しない扱い"
+                );
+                assert!(
+                    !action.metadata().auto_apply_eligible,
+                    "{id:?} は自動適用の対象にしない"
+                );
+            }
         }
     }
-}
 }

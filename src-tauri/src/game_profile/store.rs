@@ -17,7 +17,10 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{CoreError, CoreResult};
+use crate::{
+    action::ProcessFileIdentity,
+    error::{CoreError, CoreResult},
+};
 
 const PROFILES_FILE_VERSION: u32 = 1;
 const MAX_PROFILES_FILE_BYTES: u64 = 1024 * 1024;
@@ -167,6 +170,43 @@ impl ProfileStore {
 
     pub fn list(&self) -> Vec<StoredProfile> {
         self.profiles.lock().clone()
+    }
+
+    /// Returns every identity that must be treated as a registered game for
+    /// window operations.
+    ///
+    /// The stored identity protects a profile across an executable replacement,
+    /// while the identity re-read from the current executable path protects the
+    /// replacement itself. An unreadable or malformed binding fails closed.
+    pub fn registered_game_file_identities(&self) -> CoreResult<Vec<ProcessFileIdentity>> {
+        let profiles = self.profiles.lock().clone();
+        let mut unique = HashSet::with_capacity(profiles.len().saturating_mul(2));
+        for profile in profiles {
+            if profile.is_manual() {
+                continue;
+            }
+            let (Some(path), Some(volume_serial_number), Some(file_id_hex)) = (
+                profile.executable_path.as_deref(),
+                profile.volume_serial_number,
+                profile.file_id_hex.as_deref(),
+            ) else {
+                return Err(game_identity_unavailable());
+            };
+            let bytes = hex::decode(file_id_hex).map_err(|_| game_identity_unavailable())?;
+            let file_id: [u8; 16] = bytes.try_into().map_err(|_| game_identity_unavailable())?;
+            unique.insert(ProcessFileIdentity {
+                volume_serial_number,
+                file_id,
+            });
+            unique.insert(current_registered_file_identity(path)?);
+        }
+        let mut identities = unique.into_iter().collect::<Vec<_>>();
+        identities.sort_by(|left, right| {
+            left.volume_serial_number
+                .cmp(&right.volume_serial_number)
+                .then_with(|| left.file_id.cmp(&right.file_id))
+        });
+        Ok(identities)
     }
 
     pub fn create(&self, request: CreateProfileRequest) -> CoreResult<StoredProfile> {
@@ -528,6 +568,12 @@ fn profiles_file_corrupt() -> CoreError {
     )
 }
 
+fn game_identity_unavailable() -> CoreError {
+    CoreError::recovery_required(
+        "登録ゲームの本人性を再確認できないため、ウィンドウ操作を停止しました。",
+    )
+}
+
 /// プロファイルはプロセス検知を起点に無人適用されるため、登録済みであることに加えて
 /// Action側が明示的に自動適用を許可していることを保存・有効化の境界で確認する。
 fn validate_automation_actions(actions: &[StoredProfileAction]) -> CoreResult<()> {
@@ -559,6 +605,11 @@ fn validate_manual_actions(actions: &[StoredProfileAction]) -> CoreResult<()> {
     }
     for stored in actions {
         let parameters = parse_stored_profile_action(stored)?;
+        if parameters.action_id() == crate::action::ActionId::SetupWindowLayout {
+            return Err(CoreError::invalid_request(
+                "ウィンドウ配置の復元は、配置画面で明示保存した内容だけを実行できます。",
+            ));
+        }
         let action = crate::action::ACTION_REGISTRY
             .get(parameters.action_id())
             .ok_or_else(|| CoreError::invalid_request("登録済みActionを解決できませんでした。"))?;
@@ -617,6 +668,12 @@ fn resolve_binding(_path: &str) -> CoreResult<(String, u64, [u8; 16])> {
         false,
         "PCカスタムはWindows 11専用です。",
     ))
+}
+
+fn current_registered_file_identity(path: &str) -> CoreResult<ProcessFileIdentity> {
+    crate::windows::registered_file_identity(path)
+        .map(|(_, identity)| identity)
+        .map_err(|_| game_identity_unavailable())
 }
 
 #[cfg(all(test, windows))]
@@ -710,6 +767,51 @@ mod tests {
             .unwrap()
             .list()
             .is_empty());
+    }
+
+    #[test]
+    fn game_exclusions_include_stored_and_fresh_executable_identities() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("profiles.json");
+        let profile = persisted_profile(Uuid::new_v4());
+        let stored = ProcessFileIdentity {
+            volume_serial_number: profile.volume_serial_number.expect("stored volume"),
+            file_id: hex::decode(profile.file_id_hex.as_deref().expect("stored file id"))
+                .expect("hex")
+                .try_into()
+                .expect("16-byte file id"),
+        };
+        ProfileStore::persist(&path, &[profile]).expect("write test profile");
+        let store = ProfileStore::open(path).expect("open test profile");
+
+        let identities = store
+            .registered_game_file_identities()
+            .expect("resolve stored and current identities");
+        let (_, current) =
+            crate::windows::registered_file_identity(&notepad()).expect("current notepad identity");
+        assert!(identities.contains(&stored));
+        assert!(identities.contains(&current));
+    }
+
+    #[test]
+    fn unreadable_registered_game_identity_fails_closed() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("profiles.json");
+        let mut profile = persisted_profile(Uuid::new_v4());
+        profile.executable_path = Some(
+            directory
+                .path()
+                .join("missing-game.exe")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        ProfileStore::persist(&path, &[profile]).expect("write test profile");
+        let store = ProfileStore::open(path).expect("open test profile");
+
+        let error = store
+            .registered_game_file_identities()
+            .expect_err("missing executable must stop window operations");
+        assert_eq!(error.code, "RECOVERY_REQUIRED");
     }
 
     #[test]

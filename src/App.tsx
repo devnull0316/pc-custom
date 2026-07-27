@@ -45,6 +45,28 @@ interface UiError {
   code: string;
 }
 
+const NOTICE_DETAIL_LIMIT = 3;
+const NOTICE_DETAIL_CHARACTER_LIMIT = 80;
+
+function shortenNoticeDetail(detail: string): string {
+  const characters = Array.from(detail);
+  if (characters.length <= NOTICE_DETAIL_CHARACTER_LIMIT) return detail;
+  return `${characters.slice(0, NOTICE_DETAIL_CHARACTER_LIMIT).join("")}…`;
+}
+
+function commitNotice(message: string, details: readonly string[] | undefined): string {
+  if (details === undefined || details.length === 0) return message;
+  const shown = details
+    .slice(0, NOTICE_DETAIL_LIMIT)
+    .map(shortenNoticeDetail)
+    .join(" ／ ");
+  const remainder =
+    details.length > NOTICE_DETAIL_LIMIT
+      ? ` ／ ほか${details.length - NOTICE_DETAIL_LIMIT}件`
+      : "";
+  return `${message} ${shown}${remainder}`;
+}
+
 function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "session.prevent_sleep") return { keepDisplayOn: false };
   if (actionId === "explorer.show_extensions") return { show: true };
@@ -110,6 +132,9 @@ function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "setup.powertoys_status") return {};
   if (actionId === "setup.launch_apps") return { bundle: "study" };
   if (actionId === "setup.windows_update_status") return {};
+  if (actionId === "setup.default_apps") return {};
+  if (actionId === "setup.window_layout") return {};
+  if (actionId === "setup.audio_output") return {};
   return {};
 }
 
@@ -137,6 +162,10 @@ export function App() {
   const [uiError, setUiError] = useState<UiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const initialLoadStarted = useRef(false);
+
+  const handleUiError = useCallback((error: unknown) => {
+    setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+  }, []);
 
   const refreshSnapshot = useCallback(async (showLoading: boolean) => {
     if (showLoading) setDataMode("loading");
@@ -272,7 +301,7 @@ export function App() {
     try {
       const result = await commitPreview({ previewToken: preview.previewToken });
       if (result.status === "succeeded") {
-        setNotice(result.message);
+        setNotice(commitNotice(result.message, result.details));
       } else {
         setUiError({ message: result.message, code: result.status.toLocaleUpperCase("en-US") });
       }
@@ -424,17 +453,25 @@ export function App() {
           {view === "home" ? (
             <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onOpenView={(target) => setView(target)} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
           ) : view === "actions" ? (
-            <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
+            <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onError={handleUiError} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
           ) : view === "profiles" ? (
             <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} profiles={profiles} />
           ) : view === "setup" ? (
             <SetupView
+              actions={actions}
+              bootstrap={bootstrap}
               dataMode={dataMode}
+              detectionPendingId={detectionPendingId}
+              onDetect={(id) => void handleDetect(id)}
+              onError={handleUiError}
+              onNotice={setNotice}
               onPowerToysDetect={() => void handleDetect("setup.powertoys_status")}
               onPowerToysLaunch={() => void requestPowerToysLaunch()}
+              onPreview={(action) => void requestPreview(action)}
               powerToysAction={powerToysAction}
               powerToysDetecting={detectionPendingId === "setup.powertoys_status"}
               powerToysLaunching={previewPendingId === "setup.launch_apps"}
+              previewPendingId={previewPendingId}
             />
           ) : (
             <TimelineView bootstrap={bootstrap} dataMode={dataMode} items={timeline} onOpenActions={() => navigate("actions")} onRequestRollback={setRollbackTarget} onRetryRecovery={() => void runReconcile()} recoveryBusy={recoveryBusy} rollbackPendingId={rollbackPendingId} />
@@ -452,7 +489,7 @@ export function App() {
           width="wide"
         >
           <div className="preview-list">
-            {preview.changes.map((change) => <article className="preview-change" key={change.actionId}><header><span className={`risk-label risk-label--${change.riskLevel}`}>{change.riskLevel === "safe" ? "安全" : change.riskLevel === "caution" ? "注意" : "実験的"}</span><h3>{change.title}</h3></header><div><span><small>現在</small><strong>{change.before}</strong></span><Icon name="arrow" /><span><small>適用後</small><strong>{change.after}</strong></span></div><p>{change.method}</p><small>対象: {change.resourceLabel} ／ {change.reversible ? "元に戻せます" : "変更はありません"}</small></article>)}
+            {preview.changes.map((change) => <article className="preview-change" key={change.actionId}><header><span className={`risk-label risk-label--${change.riskLevel}`}>{change.riskLevel === "safe" ? "低リスク" : change.riskLevel === "caution" ? "注意" : "実験的"}</span><h3>{change.title}</h3></header><div><span><small>現在</small><strong>{change.before}</strong></span><Icon name="arrow" /><span><small>適用後</small><strong>{change.after}</strong></span></div><p>{change.method}</p><small>対象: {change.resourceLabel} ／ {change.reversible ? "元に戻せます" : "変更はありません"}</small></article>)}
           </div>
           {preview.warnings.length === 0 ? null : <div className="preview-warnings"><strong><Icon name="warning" />確認事項</strong><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
           <label className="confirmation-check"><input checked={previewConfirmed} onChange={(event) => setPreviewConfirmed(event.target.checked)} type="checkbox" /><span>変更前の状態が保存され、失敗時は逆順で復元されることを確認しました。</span></label>

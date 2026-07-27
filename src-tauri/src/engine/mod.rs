@@ -17,17 +17,21 @@ use uuid::Uuid;
 use crate::{
     action::{
         Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionParameters, ActionStage, DetectedState, Verification, ACTION_REGISTRY,
+        ActionParameters, ActionStage, DetectedState, ObservedValue, Verification, ACTION_REGISTRY,
     },
     backup::{BackupEnvelope, Fingerprint},
     compatibility::{CompatibilityCatalog, CompatibilityMode, OsIdentity},
     error::{CoreError, CoreResult},
-    journal::{JournalDatabase, ReconcileResult, RecoveryClassification, TimelineItem},
+    game_profile::{CreateProfileRequest, ImportResult, ProfileStore, StoredProfile},
+    journal::{
+        ItemState, JournalDatabase, ReconcileResult, RecoveryClassification, TimelineItem,
+    },
     presentation::{
         action_presentation, default_parameters, listing_parameters, os_label,
         parse_action_request, preview_change, state_to_ui, ActionPresentation, BootstrapStatus,
         CommitResult, DetectionResponse, PreviewActionsRequest, PreviewResponse,
     },
+    window_layout::{WindowLayoutInvocation, WindowLayoutStatus, WindowLayoutStore},
 };
 
 const PREVIEW_TTL_MS: u64 = 5 * 60 * 1_000;
@@ -51,6 +55,8 @@ struct WorkItem {
 pub struct PcCustomEngine {
     journal: Arc<JournalDatabase>,
     initial_identity: Option<OsIdentity>,
+    profile_store: Option<Arc<ProfileStore>>,
+    window_layout_store: Option<Arc<WindowLayoutStore>>,
     previews: Mutex<HashMap<String, PreviewRecord>>,
     mutation_gate: Mutex<()>,
 }
@@ -60,15 +66,116 @@ impl PcCustomEngine {
         journal: Arc<JournalDatabase>,
         initial_identity: Option<OsIdentity>,
     ) -> CoreResult<Self> {
+        Self::new_with_runtime_stores(journal, initial_identity, None, None)
+    }
+
+    pub fn new_with_runtime_stores(
+        journal: Arc<JournalDatabase>,
+        initial_identity: Option<OsIdentity>,
+        profile_store: Option<Arc<ProfileStore>>,
+        window_layout_store: Option<Arc<WindowLayoutStore>>,
+    ) -> CoreResult<Self> {
         ACTION_REGISTRY.validate().map_err(CoreError::from)?;
         let engine = Self {
             journal,
             initial_identity,
+            profile_store,
+            window_layout_store,
             previews: Mutex::new(HashMap::new()),
             mutation_gate: Mutex::new(()),
         };
         engine.reconcile_now()?;
         Ok(engine)
+    }
+
+    pub fn window_layout_parameters(&self) -> CoreResult<ActionParameters> {
+        let store = self.window_layout_store.as_ref().ok_or_else(|| {
+            CoreError::recovery_required(
+                "ウィンドウ配置の保存領域を初期化できなかったため、操作を停止しました。",
+            )
+        })?;
+        let snapshot_id = store.current_snapshot_id()?;
+        let invocation = WindowLayoutInvocation {
+            desired: store.snapshot(snapshot_id)?,
+            excluded_game_file_identities: self
+                .profile_store
+                .as_ref()
+                .ok_or_else(|| {
+                    CoreError::recovery_required(
+                        "登録ゲームを確認できなかったため、ウィンドウ操作を停止しました。",
+                    )
+                })?
+                .registered_game_file_identities()?,
+        };
+        invocation.validate()?;
+        Ok(ActionParameters::SetupWindowLayout { invocation })
+    }
+
+    pub fn window_layout_status(&self) -> CoreResult<WindowLayoutStatus> {
+        self.window_layout_store
+            .as_ref()
+            .map(|store| store.status())
+            .ok_or_else(|| {
+                CoreError::recovery_required(
+                    "ウィンドウ配置の保存領域を初期化できなかったため、操作を停止しました。",
+                )
+            })
+    }
+
+    pub fn save_window_layout(
+        &self,
+        unregistered_games_closed: bool,
+    ) -> CoreResult<WindowLayoutStatus> {
+        if !unregistered_games_closed {
+            return Err(CoreError::invalid_request(
+                "未登録のウィンドウゲームを閉じたことを確認してから保存してください。",
+            ));
+        }
+        let _mutation_guard = self.mutation_gate.lock();
+        let _process_guard =
+            crate::windows::acquire_core_mutation_lock().map_err(core_mutation_lock_error)?;
+        if self.journal.recovery_count()? > 0 {
+            return Err(CoreError::recovery_required(
+                "未復元の変更があるため、現在の混合状態を配置として保存しません。",
+            ));
+        }
+        let profile_store = self.profile_store.as_ref().ok_or_else(|| {
+            CoreError::recovery_required(
+                "登録ゲームを確認できなかったため、ウィンドウ操作を停止しました。",
+            )
+        })?;
+        let window_layout_store = self.window_layout_store.as_ref().ok_or_else(|| {
+            CoreError::recovery_required(
+                "ウィンドウ配置の保存領域を初期化できなかったため、操作を停止しました。",
+            )
+        })?;
+        let exclusions = profile_store.registered_game_file_identities()?;
+        let snapshot = crate::windows::capture_window_layout(&exclusions)
+            .map_err(window_layout_windows_error)?;
+        if profile_store.registered_game_file_identities()? != exclusions {
+            return Err(CoreError::new(
+                "STALE_GAME_IDENTITY",
+                "WINDOW_LAYOUT",
+                true,
+                "保存中に登録ゲームの実行ファイルが変わったため、配置を保存しませんでした。もう一度確認してください。",
+            ));
+        }
+        window_layout_store.replace(snapshot)
+    }
+
+    pub fn create_profile(&self, request: CreateProfileRequest) -> CoreResult<StoredProfile> {
+        let _mutation_guard = self.mutation_gate.lock();
+        self.runtime_profile_store()?.create(request)
+    }
+
+    pub fn delete_profile(&self, id: &str) -> CoreResult<()> {
+        let _mutation_guard = self.mutation_gate.lock();
+        self.runtime_profile_store()?.delete(id)
+    }
+
+    pub fn import_profiles(&self, json: &str) -> CoreResult<ImportResult> {
+        let _mutation_guard = self.mutation_gate.lock();
+        self.runtime_profile_store()?.import_apply(json)
     }
 
     pub fn bootstrap_status(&self) -> CoreResult<BootstrapStatus> {
@@ -142,11 +249,16 @@ impl PcCustomEngine {
     }
 
     pub fn detect_action(&self, action_id: ActionId) -> CoreResult<DetectionResponse> {
-        let identity = self.identity_for_read()?;
-        let action = registered_action(action_id)?;
         let parameters = default_parameters(action_id).ok_or_else(|| {
             CoreError::invalid_request("ゲーム監視には確認済みの実行ファイルbindingが必要です。")
         })?;
+        self.detect_parameters(parameters)
+    }
+
+    pub fn detect_parameters(&self, parameters: ActionParameters) -> CoreResult<DetectionResponse> {
+        let identity = self.identity_for_read()?;
+        let action_id = parameters.action_id();
+        let action = registered_action(action_id)?;
         CompatibilityCatalog::ensure_detect_allowed(&identity, action.metadata())
             .map_err(CoreError::from)?;
         let context = action_context(&identity, Uuid::nil(), Uuid::nil());
@@ -178,6 +290,7 @@ impl PcCustomEngine {
                 .map(parse_action_request)
                 .collect::<CoreResult<Vec<_>>>()?,
         )?;
+        self.ensure_layout_invocations_current(&invocations)?;
         let mut before = HashMap::with_capacity(invocations.len());
         let mut changes = Vec::with_capacity(invocations.len());
         let mut warnings = Vec::new();
@@ -194,10 +307,15 @@ impl PcCustomEngine {
                 .explain_changes(parameters)
                 .map_err(CoreError::from)?;
             if !action.metadata().auto_apply_eligible {
-                warnings.push(format!(
-                    "{} は実機スモーク完了まで無人適用には使いません。",
-                    action.metadata().name
-                ));
+                warnings.push(if action.metadata().id == ActionId::SetupWindowLayout {
+                    "ウィンドウ配置の復元は、登録ゲームへの操作を避けるため明示操作だけで実行します。"
+                        .to_owned()
+                } else {
+                    format!(
+                        "{} は実機スモーク完了まで無人適用には使いません。",
+                        action.metadata().name
+                    )
+                });
             }
             before.insert(parameters.action_id(), state_fingerprint(&state)?);
             changes.push(preview_change(action.metadata(), &state, &explanation));
@@ -251,6 +369,14 @@ impl PcCustomEngine {
         })
     }
 
+    fn runtime_profile_store(&self) -> CoreResult<&ProfileStore> {
+        self.profile_store.as_deref().ok_or_else(|| {
+            CoreError::recovery_required(
+                "プロファイル保存領域を初期化できなかったため、操作を停止しました。",
+            )
+        })
+    }
+
     fn identity_for_commit(&self) -> CoreResult<OsIdentity> {
         #[cfg(test)]
         {
@@ -271,6 +397,66 @@ impl PcCustomEngine {
             Ok(current)
         }
     }
+
+    fn ensure_layout_invocations_current(
+        &self,
+        invocations: &[ActionParameters],
+    ) -> CoreResult<()> {
+        for parameters in invocations {
+            let ActionParameters::SetupWindowLayout { invocation } = parameters else {
+                continue;
+            };
+            if let Some(store) = &self.window_layout_store {
+                let current_snapshot_id = store
+                    .current_snapshot_id()
+                    .map_err(|_| stale_window_layout_preview())?;
+                if current_snapshot_id != invocation.desired.snapshot_id {
+                    return Err(stale_window_layout_preview());
+                }
+            }
+            if let Some(store) = &self.profile_store {
+                let current = store.registered_game_file_identities()?;
+                if current != invocation.excluded_game_file_identities {
+                    return Err(stale_window_layout_preview());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn recovery_parameters(&self, parameters: &ActionParameters) -> CoreResult<ActionParameters> {
+        let ActionParameters::SetupWindowLayout { invocation } = parameters else {
+            return Ok(parameters.clone());
+        };
+        let Some(profile_store) = &self.profile_store else {
+            return Ok(parameters.clone());
+        };
+        let mut effective = invocation.clone();
+        effective
+            .excluded_game_file_identities
+            .extend(profile_store.registered_game_file_identities()?);
+        effective
+            .excluded_game_file_identities
+            .sort_by(|left, right| {
+                left.volume_serial_number
+                    .cmp(&right.volume_serial_number)
+                    .then_with(|| left.file_id.cmp(&right.file_id))
+            });
+        effective.excluded_game_file_identities.dedup();
+        effective.validate()?;
+        Ok(ActionParameters::SetupWindowLayout {
+            invocation: effective,
+        })
+    }
+}
+
+fn stale_window_layout_preview() -> CoreError {
+    CoreError::new(
+        "STALE_PREVIEW",
+        "VALIDATE",
+        false,
+        "保存済みの配置または登録ゲームが変わりました。差分を確認し直してください。",
+    )
 }
 
 fn registered_action(action_id: ActionId) -> CoreResult<&'static dyn Action> {
@@ -335,13 +521,71 @@ fn classify_action(
     }
     match action.verify_applied(context, parameters, backup) {
         Ok(Verification { verified: true, .. }) => RecoveryClassification::Applied,
-        Ok(Verification { observed, .. }) => match observed {
-            DetectedState::Known { .. }
-            | DetectedState::NeedsRestart { .. }
-            | DetectedState::Conflict { .. } => RecoveryClassification::Third,
-            _ => RecoveryClassification::Unknown,
-        },
+        Ok(Verification { observed, .. }) => {
+            if parameters.action_id() == ActionId::SetupWindowLayout {
+                return match crate::actions::classify_recoverable_window_layout(
+                    parameters,
+                    backup,
+                ) {
+                    Ok(
+                        crate::windows::WindowLayoutTransactionState::Desired
+                        | crate::windows::WindowLayoutTransactionState::MixedOwned,
+                    ) => RecoveryClassification::Applied,
+                    Ok(crate::windows::WindowLayoutTransactionState::Original) => {
+                        RecoveryClassification::Original
+                    }
+                    Ok(crate::windows::WindowLayoutTransactionState::Third) => {
+                        RecoveryClassification::Third
+                    }
+                    Err(_) => RecoveryClassification::Unknown,
+                };
+            }
+            match observed {
+                DetectedState::Known { .. }
+                | DetectedState::NeedsRestart { .. }
+                | DetectedState::Conflict { .. } => RecoveryClassification::Third,
+                _ => RecoveryClassification::Unknown,
+            }
+        }
         Err(_) => RecoveryClassification::Unknown,
+    }
+}
+
+/// Once a layout item has crossed PREPARED, an immediate Original read does
+/// not prove that a synchronous SetWindowPlacement call was never entered
+/// before a crash. Recovery reasserts the original placement and verifies it
+/// before terminalizing the journal item.
+fn needs_original_rollback_fence(action_id: ActionId, state: ItemState) -> bool {
+    action_id == ActionId::SetupWindowLayout && state != ItemState::Prepared
+}
+
+#[cfg(test)]
+mod original_rollback_fence_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_layout_has_no_dispatch_but_every_later_state_requires_a_fence() {
+        assert!(!needs_original_rollback_fence(
+            ActionId::SetupWindowLayout,
+            ItemState::Prepared
+        ));
+        for state in [
+            ItemState::Applying,
+            ItemState::Applied,
+            ItemState::ApplyFailed,
+            ItemState::RollingBack,
+            ItemState::RollbackFailed,
+            ItemState::RecoveryRequired,
+        ] {
+            assert!(needs_original_rollback_fence(
+                ActionId::SetupWindowLayout,
+                state
+            ));
+        }
+        assert!(!needs_original_rollback_fence(
+            ActionId::PowerActiveSchemeCheck,
+            ItemState::Applying
+        ));
     }
 }
 
@@ -371,6 +615,16 @@ fn core_mutation_lock_error(error: crate::windows::WindowsError) -> CoreError {
         "LOCK_RESOURCES",
         retryable,
         "別のPCカスタム処理が進行中か、安全な排他を取得できませんでした。変更していません。",
+    )
+}
+
+fn window_layout_windows_error(error: crate::windows::WindowsError) -> CoreError {
+    let retryable = error.kind == crate::windows::WindowsErrorKind::ResourceLimit;
+    CoreError::new(
+        "WINDOW_LAYOUT_API_FAILURE",
+        "WINDOW_LAYOUT",
+        retryable,
+        "ウィンドウ配置を安全に確認できませんでした。対象は変更していません。",
     )
 }
 

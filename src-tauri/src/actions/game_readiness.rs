@@ -468,6 +468,8 @@ mod readiness_items_tests {
             assert!(line.contains(" — "), "項目名と値が並ぶ: {line}");
         }
         println!("readiness items:");
-        for line in &view { println!("  {line}"); }
+        for line in &view {
+            println!("  {line}");
+        }
     }
 }

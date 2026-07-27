@@ -24,6 +24,7 @@ import type {
   RollbackItemRequest,
   StoredProfile,
   TimelineItem,
+  WindowLayoutStatus,
 } from "./model";
 
 export interface CoreSnapshot {
@@ -94,6 +95,9 @@ const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "setup.powertoys_status": "setup",
   "setup.launch_apps": "setup",
   "setup.windows_update_status": "setup",
+  "setup.default_apps": "setup",
+  "setup.window_layout": "setup",
+  "setup.audio_output": "setup",
   "storage.free_space_check": "storage",
   "storage.temp_files_check": "storage",
   "appearance.accent_color_check": "appearance",
@@ -253,6 +257,18 @@ export function configSnapshotExport(): Promise<string> {
 
 export function openWindowsSettings(actionId: string): Promise<string> {
   return call<string>("open_windows_settings", { actionId });
+}
+
+export function getWindowLayoutStatus(): Promise<WindowLayoutStatus> {
+  return call<WindowLayoutStatus>("get_window_layout_status");
+}
+
+export function saveWindowLayout(
+  unregisteredGamesClosed: boolean,
+): Promise<WindowLayoutStatus> {
+  return call<WindowLayoutStatus>("save_window_layout", {
+    unregisteredGamesClosed,
+  });
 }
 
 export function setupCatalog(): Promise<readonly SetupAppDto[]> {

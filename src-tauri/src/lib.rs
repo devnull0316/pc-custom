@@ -15,6 +15,7 @@ pub mod settings_link;
 pub mod setup;
 pub mod theme_schedule;
 pub mod windows;
+pub mod window_layout;
 
 use tauri::Manager;
 
@@ -67,6 +68,8 @@ pub fn run() {
             commands::storage_temp_cleanup_plan,
             commands::storage_temp_cleanup_apply,
             commands::open_windows_settings,
+            commands::get_window_layout_status,
+            commands::save_window_layout,
         ])
         .run(tauri::generate_context!())
         .expect("PCカスタム runtime terminated unexpectedly");

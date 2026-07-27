@@ -26,20 +26,21 @@ impl PcCustomEngine {
             ));
         }
         let context = action_context(&identity, item.transaction_id, item.item_id);
-        match classify_action(action, &context, &item.parameters, &item.backup) {
-            RecoveryClassification::Original => {
+        let parameters = self.recovery_parameters(&item.parameters)?;
+        match classify_action(action, &context, &parameters, &item.backup) {
+            RecoveryClassification::Original
+                if !needs_original_rollback_fence(parameters.action_id(), item.state) =>
+            {
                 self.journal
                     .mark_item_rolled_back(item.transaction_id, item.item_id, now_ms())?;
             }
-            RecoveryClassification::Applied => {
+            RecoveryClassification::Original | RecoveryClassification::Applied => {
                 ensure_backup_mutation_allowed(&identity, action, &item.backup)?;
                 self.journal
                     .mark_item_rolling_back(item.transaction_id, item.item_id, now_ms())?;
                 let verification = action
-                    .rollback(&context, &item.parameters, &item.backup)
-                    .and_then(|_| {
-                        action.verify_rolled_back(&context, &item.parameters, &item.backup)
-                    });
+                    .rollback(&context, &parameters, &item.backup)
+                    .and_then(|_| action.verify_rolled_back(&context, &parameters, &item.backup));
                 match verification {
                     Ok(Verification { verified: true, .. }) => {
                         self.journal.mark_item_rolled_back(
@@ -71,6 +72,7 @@ impl PcCustomEngine {
                             status: "recovery_required".to_owned(),
                             message: "復元を確認できない項目があります。新しい変更を停止しました。"
                                 .to_owned(),
+                            details: Vec::new(),
                         });
                     }
                 }
@@ -93,6 +95,7 @@ impl PcCustomEngine {
             transaction_id: item.transaction_id,
             status: "rolled_back".to_owned(),
             message: "この項目を変更直前の状態へ戻し、再確認しました。".to_owned(),
+            details: Vec::new(),
         })
     }
 
@@ -146,8 +149,23 @@ impl PcCustomEngine {
                     continue;
                 };
                 let context = action_context(identity, transaction.transaction_id, item.item_id);
-                let classification =
-                    classify_action(action, &context, &item.parameters, &item.backup);
+                let parameters = match self.recovery_parameters(&item.parameters) {
+                    Ok(parameters) => parameters,
+                    Err(_) => {
+                        self.journal.record_recovery_item(
+                            transaction.transaction_id,
+                            item.item_id,
+                            RecoveryClassification::Unknown,
+                            item.error_code.as_deref(),
+                            None,
+                            now_ms(),
+                        )?;
+                        recovery_failure = true;
+                        remaining = remaining.saturating_add(1);
+                        continue;
+                    }
+                };
+                let classification = classify_action(action, &context, &parameters, &item.backup);
                 if item.state == ItemState::Prepared
                     && classification != RecoveryClassification::Original
                 {
@@ -173,7 +191,12 @@ impl PcCustomEngine {
                     continue;
                 }
                 match classification {
-                    RecoveryClassification::Original => {
+                    RecoveryClassification::Original
+                        if !needs_original_rollback_fence(
+                            parameters.action_id(),
+                            item.state,
+                        ) =>
+                    {
                         self.journal.mark_item_rolled_back(
                             transaction.transaction_id,
                             item.item_id,
@@ -181,7 +204,7 @@ impl PcCustomEngine {
                         )?;
                         recovered = recovered.saturating_add(1);
                     }
-                    RecoveryClassification::Applied => {
+                    RecoveryClassification::Original | RecoveryClassification::Applied => {
                         if ensure_backup_mutation_allowed(identity, action, &item.backup).is_err() {
                             self.journal.record_recovery_item(
                                 transaction.transaction_id,
@@ -201,9 +224,9 @@ impl PcCustomEngine {
                             now_ms(),
                         )?;
                         let result = action
-                            .rollback(&context, &item.parameters, &item.backup)
+                            .rollback(&context, &parameters, &item.backup)
                             .and_then(|_| {
-                                action.verify_rolled_back(&context, &item.parameters, &item.backup)
+                                action.verify_rolled_back(&context, &parameters, &item.backup)
                             });
                         match result {
                             Ok(Verification { verified: true, .. }) => {

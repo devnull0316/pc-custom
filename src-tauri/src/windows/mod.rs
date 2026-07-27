@@ -1,6 +1,7 @@
 //! Narrow Windows primitives. No function accepts a shell command or user-selected registry path.
 
 mod app_launch;
+mod audio;
 mod broadcast;
 mod execution_state;
 mod observations;
@@ -13,12 +14,14 @@ mod transaction_lock;
 mod ui_probe;
 mod update_status;
 mod window_effects;
+mod window_placement;
 mod wmi_process;
 
 pub use app_launch::{
     apps_for_bundle, launch_known_apps, observe_known_apps, resolve_known_app,
     resolve_powertoys_app_path, KnownApp,
 };
+pub use audio::read_audio_output_observation;
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
 pub use observations::{
@@ -45,6 +48,17 @@ pub use transaction_lock::{
 };
 pub use update_status::read_windows_update_status;
 pub use window_effects::{apply_mica_backdrop, system_accent_color, AccentColor};
+pub use window_placement::{
+    capture_window_layout, capture_window_layout_originals,
+    classify_window_layout_transaction, observe_original_window_placements,
+    observe_window_layout, restore_window_layout, restore_window_placement_entries,
+    verify_captured_window_layout_originals, WindowLayoutTransactionState,
+};
+#[cfg(all(test, windows))]
+pub(crate) use window_placement::{
+    allow_own_window_candidates_for_test, capture_window_entry_for_test,
+    read_window_placement_for_test,
+};
 pub use wmi_process::wmi_process_ids;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +69,9 @@ pub enum WindowsErrorKind {
     ResourceLimit,
     InvalidData,
     ChannelClosed,
+    /// A primitive dispatched at least one write and could not prove that its
+    /// bounded inverse compensation completed.
+    RecoveryRequired,
 }
 
 #[derive(Debug, thiserror::Error)]

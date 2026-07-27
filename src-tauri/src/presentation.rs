@@ -143,6 +143,7 @@ pub struct CommitResult {
     pub transaction_id: Uuid,
     pub status: String,
     pub message: String,
+    pub details: Vec<String>,
 }
 
 pub fn action_presentation(
@@ -182,12 +183,22 @@ pub fn action_presentation(
             "起動したアプリを勝手に終了しないため、このActionは元に戻せません。".to_owned(),
             "ゲームプロファイルの自動適用対象にはしません。".to_owned(),
         ]
-    } else if metadata.kind == ActionKind::Guided {
+    } else if metadata.kind == ActionKind::Guided
+        && metadata.method_class == MethodClass::UnverifiedStorage
+    {
         vec![
             "setterの一次資料と対象buildの実機UI試験が未承認のため、変更処理を実行しません。"
                 .to_owned(),
             "表示するのは固定HKCU DWORDの保存値であり、Windows UIの有効状態を示しません。"
                 .to_owned(),
+            "validate・backup・applyの各handlerで明示的に変更を拒否します。".to_owned(),
+            "ゲームプロファイルの自動適用対象にはしません。".to_owned(),
+        ]
+    } else if metadata.kind == ActionKind::Guided {
+        vec![
+            "Windowsが公開している変更APIがないため、PCカスタムから設定値を変更しません。"
+                .to_owned(),
+            "Windows自身の設定画面を開き、利用者がそこで選択します。".to_owned(),
             "validate・backup・applyの各handlerで明示的に変更を拒否します。".to_owned(),
             "ゲームプロファイルの自動適用対象にはしません。".to_owned(),
         ]
@@ -234,7 +245,9 @@ pub fn action_presentation(
     ActionPresentation {
         id: metadata.id.as_str().to_owned(),
         action_version: metadata.action_version,
-        name: if metadata.kind == ActionKind::Guided {
+        name: if metadata.kind == ActionKind::Guided
+            && metadata.method_class == MethodClass::UnverifiedStorage
+        {
             format!("設計候補: {}", metadata.name)
         } else {
             metadata.name.to_owned()
@@ -530,6 +543,9 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
             bundle: AppLaunchBundle::Study,
         },
         ActionId::SetupWindowsUpdateStatus => ActionParameters::SetupWindowsUpdateStatus {},
+        ActionId::SetupDefaultApps => ActionParameters::SetupDefaultApps {},
+        ActionId::SetupWindowLayout => return None,
+        ActionId::SetupAudioOutput => ActionParameters::SetupAudioOutput {},
     })
 }
 
@@ -545,6 +561,8 @@ pub fn listing_parameters(action_id: ActionId) -> Option<ActionParameters> {
             | ActionId::AppearanceAccentColorCheck
             | ActionId::GamesReadinessCheck
             | ActionId::SetupWindowsUpdateStatus
+            | ActionId::SetupAudioOutput
+            | ActionId::SetupWindowLayout
     ) {
         None
     } else {
@@ -621,7 +639,10 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::SetupStartupInventory
         | ActionId::SetupPowerToysStatus
         | ActionId::SetupLaunchApps
-        | ActionId::SetupWindowsUpdateStatus => "setup",
+        | ActionId::SetupWindowsUpdateStatus
+        | ActionId::SetupDefaultApps
+        | ActionId::SetupWindowLayout
+        | ActionId::SetupAudioOutput => "setup",
         ActionId::StorageFreeSpaceCheck | ActionId::StorageTempFilesCheck => "storage",
         ActionId::AppearanceAccentColorCheck | ActionId::AppearanceWindowColor => "appearance",
         ActionId::NotificationsUsbErrors
@@ -718,6 +739,15 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::SetupWindowsUpdateStatus => {
             "更新確認日時と再起動保留だけを変更せず確認したい人向け"
         }
+        ActionId::SetupDefaultApps => {
+            "ファイルやリンクを開く既定アプリをWindows自身の画面で選びたい人向け"
+        }
+        ActionId::SetupWindowLayout => {
+            "いま開いている通常のアプリ窓を、同じ位置と表示状態へ戻したい人向け"
+        }
+        ActionId::SetupAudioOutput => {
+            "現在の音声出力先を確認し、Windows自身の画面で切り替えたい人向け"
+        }
     }
 }
 
@@ -788,11 +818,18 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::SetupPowerToysStatus => "変更せず、PowerToysの導入状況とバージョンを確認",
         ActionId::SetupLaunchApps => "固定allowlistのアプリを、起動中でなければ直接開く",
         ActionId::SetupWindowsUpdateStatus => "Windows Update Agentの状態を変更せず確認",
+        ActionId::SetupDefaultApps => "Windowsの既定のアプリ画面で利用者が選択",
+        ActionId::SetupWindowLayout => {
+            "明示保存した、現在開いている対象ウィンドウの位置と表示状態"
+        }
+        ActionId::SetupAudioOutput => "公開APIで出力先を確認し、Windowsのサウンド画面で選択",
     }
 }
 
 fn desired_state_for(metadata: &ActionMetadata) -> &'static str {
-    if metadata.kind == ActionKind::Guided {
+    if metadata.kind == ActionKind::Guided
+        && metadata.method_class == MethodClass::UnverifiedStorage
+    {
         "setter根拠の承認待ち（変更は実行しません）"
     } else {
         desired_state(metadata.id)
@@ -846,6 +883,13 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
             "App Pathsと固定System32候補を検証し、Command::spawnで直接起動"
         }
         ActionId::SetupWindowsUpdateStatus => "Windows Update Agent公開COMプロパティの読み取り",
+        ActionId::SetupDefaultApps => "固定ms-settings URIでWindowsの既定のアプリ画面を開く",
+        ActionId::SetupWindowLayout => {
+            "EnumWindows・GetWindowPlacement・SetWindowPlacementによる明示保存と復元"
+        }
+        ActionId::SetupAudioOutput => {
+            "MMDeviceEnumeratorの読み取りと固定ms-settings URIによる案内"
+        }
         _ => method_name(method),
     }
 }
@@ -955,6 +999,22 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             ));
             format!("Windows Update: {known} / 2項目を確認")
         }
+        ObservedValue::AudioOutput(value) => {
+            let defaults = value
+                .endpoints
+                .iter()
+                .filter(|endpoint| endpoint.is_default)
+                .count();
+            format!(
+                "音声出力 {}件・既定{}",
+                value.endpoints.len(),
+                if defaults == 1 { "あり" } else { "なし" }
+            )
+        }
+        ObservedValue::WindowLayout(value) => format!(
+            "保存{}件・一致{}件・復元{}件",
+            value.saved_window_count, value.matched_window_count, value.positioned_window_count
+        ),
         ObservedValue::AccentColor { hex, .. } => format!("アクセントカラー {hex}"),
         ObservedValue::NoOsChange => "OS設定の変更なし".to_owned(),
     }
@@ -1043,6 +1103,11 @@ fn observed_detail(value: &ObservedValue) -> String {
         ObservedValue::PowerToysInstallation(_) => "導入判定はPowerToys.exeのApp Paths登録と実ファイルの解決で行います。バージョンはアンインストール登録から取得できた場合だけ表示します。PowerToysの設定ファイルは読み書きしません。".to_owned(),
         ObservedValue::KnownApps(_) => "固定allowlistの既知アプリについて、App Paths解決可否とプロセス名だけを確認します。".to_owned(),
         ObservedValue::WindowsUpdateStatus(_) => "Windows Update Agentの読み取り専用プロパティです。Updateの停止・変更・検索開始は行いません。".to_owned(),
+        ObservedValue::AudioOutput(_) => "Windows公開Core Audio APIでactiveな再生デバイスと現在の既定を読み取りました。切り替えはWindowsのサウンド画面で行います。".to_owned(),
+        ObservedValue::WindowLayout(value) => format!(
+            "公開Win32 APIで照合しました。復元できなかった対象は{}件です。ゲーム登録済み・判定不能・非標準の窓は操作しません。",
+            value.issues.len()
+        ),
         ObservedValue::AccentColor { hex, opaque_blend } => format!(
             "Windowsが現在使っている色は {hex} です。透明の混ぜ方: {}。この値は読み取るだけで変更しません。",
             if *opaque_blend { "不透明" } else { "半透明" }
@@ -1123,6 +1188,36 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
                 }
             ),
         ],
+        ObservedValue::AudioOutput(value) => value
+            .endpoints
+            .iter()
+            .map(|endpoint| {
+                if endpoint.is_default {
+                    format!("{} — 現在の既定", endpoint.friendly_name)
+                } else {
+                    endpoint.friendly_name.clone()
+                }
+            })
+            .collect(),
+        ObservedValue::WindowLayout(value) => value
+            .issues
+            .iter()
+            .map(|issue| {
+                let reason = match issue.reason {
+                    crate::window_layout::WindowLayoutIssueReason::NotRunning => "見つかりません",
+                    crate::window_layout::WindowLayoutIssueReason::AmbiguousMatch => {
+                        "同じ候補が複数あるため操作しません"
+                    }
+                    crate::window_layout::WindowLayoutIssueReason::GameExcluded => {
+                        "登録ゲームのため操作しません"
+                    }
+                    crate::window_layout::WindowLayoutIssueReason::VerificationMismatch => {
+                        "復元結果を確認できません"
+                    }
+                };
+                format!("{} — {reason}", issue.target)
+            })
+            .collect(),
         ObservedValue::GameReadiness(readiness) => {
             vec![
                 format!(
@@ -1428,6 +1523,32 @@ mod tests {
             .expect("storage state")
             .label
             .contains("検索ボックス"));
+    }
+
+    #[test]
+    fn official_windows_guides_are_not_presented_as_unverified_registry_candidates() {
+        for id in [ActionId::SetupDefaultApps, ActionId::SetupAudioOutput] {
+            let metadata = ACTION_REGISTRY.get(id).expect("registered guide").metadata();
+            let ui = action_presentation(
+                metadata,
+                CompatibilityCatalog::decision_for_build(26_100),
+                None,
+            );
+            let combined = format!(
+                "{} {} {} {}",
+                ui.name,
+                ui.desired_state,
+                ui.method_summary,
+                ui.detail_points.join(" ")
+            );
+            assert_eq!(ui.kind, "guided");
+            assert_eq!(ui.method_class, "public_api");
+            assert!(ui.settings_page.is_some());
+            assert!(!combined.contains("設計候補"));
+            assert!(!combined.contains("固定HKCU"));
+            assert!(!combined.contains("setter根拠"));
+            assert!(combined.contains("Windows"));
+        }
     }
 
     #[test]

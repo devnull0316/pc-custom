@@ -583,5 +583,58 @@ Defender/Firewall/Windows Update停止、pagefile、HPET/BCD、大量サービ�
 - 上の「インストーラー未検証」節に出てくる `Totonoe_0.1.0_x64-setup.exe` は、改名前に実際に
   生成された成果物の名前。記録として正しいのでそのまま残す。今後のビルドは
   `PCCustom_0.1.0_x64-setup.exe` になる。
-- 未監査ブランチ `codex-brief4-unaudited` は改名前の名前を含んだままである。
-  取り込むときは同じ置換をもう一度かけること。
+- ブランチ `codex-brief4-unaudited` は改名前の名前を含んだまま作られたため、
+  master へ取り込む際に同じ置換をもう一度かけている。
+
+## BRIEF §4 残り3機能を完了（2026-07-26）
+
+Action は64件から67件、ライブラリテストは256件（通常229成功、明示実機27件）になった。
+
+1. **`setup.default_apps` — Guided**
+   `UserChoice` のhashを生成・偽装せず、固定 `ms-settings:defaultapps` でWindows自身の画面へ案内する。
+   UIにも「Windowsの仕様で、ここから直接は変更できません」と明記した。
+2. **`setup.window_layout` — Persistent / 明示操作専用**
+   「現在の配置を保存」を押したときだけ、公開API
+   `EnumWindows` / `GetWindowPlacement` / `GetWindowRect` で対象を保存する。
+   復元は `SetWindowPlacement`、適用前の各配置をjournalへ耐久記録し、適用・検証・rollback・再検証を
+   Action traitの同じ契約で行う。登録ゲームの保存済みfile identityと現在の実行ファイルidentity、
+   本人性を読めないprocess、通常表示の全画面・popup・tool・owned・cloaked等の窓はfail-closedで除外する
+   （文書化された最大化状態 `showCmd=3` は全画面ゲームと混同せず保存対象にできる）。
+   閉じた窓・曖昧一致・ゲーム除外はアプリ名だけの構造化結果で返す。タイトルは保存と照合に必要だが、
+   専用型の`Debug`を常にredactし、ログ・エラー・完了結果へ出さない。
+   公開APIには未登録ゲームを一般アプリから汎用判定する契約がないため、その限界をUIで明記し、
+   「未登録のウィンドウゲームを閉じた」という明示確認をUIとbackendの両方で保存の必須条件にした。
+3. **`setup.audio_output` — 読み取り＋Guided**
+   公開 `IMMDeviceEnumerator` でactive render endpointとeConsole既定を読み取る。
+   非公開 `IPolicyConfig` は使わず、切り替えは固定 `ms-settings:sound` でWindows自身の画面へ案内する。
+
+### 実機の外部観測
+
+- ウィンドウ配置: テスト所有窓だけをprivate storeへ保存し、
+  `saved=(120,140 520x360 showCmd=1)` → `moved=(300,270)` →
+  `restored=(120,140 520x360 showCmd=1)` を `GetWindowRect` / `GetWindowPlacement` で確認。
+  matched 1、positioned 1、issue 0。既存の利用者ウィンドウとタイトルは出力していない。
+- さらにAction本体の変更ライフサイクルをテスト所有窓だけで実行し、
+  保存位置 `A=(120,140 520x360)`、適用直前位置 `B=(310,280 520x360)` に対して
+  `apply → detect` でA、`rollback → detect` でBへ戻ることを外部APIでも再確認した。
+- 音声: 最終実行時のactive render endpoint **6件**、既定 endpoint **あり**。
+  実機smokeは件数と既定有無だけを出力し、デバイス名・endpoint IDは出力していない。
+
+### 最終安全監査で追加した配置トランザクション境界
+
+- 観測fingerprintへ対象ごとのPID・process creation time・opaque HWND・`WINDOWPLACEMENT`・
+  `GetWindowRect`結果をhash化して含めた。件数が同じでも外部移動はstaleとして検出する。
+- applyは、耐久backupを取得できたentry IDと同一process/window instanceだけを変更する。
+  各`SetWindowPlacement`直前にも同じ対象と元座標を再読取する。
+- 途中失敗時は、実際にdispatch成功した対象だけを逆順補償する。第三の座標へ外部変更された対象は
+  上書きせず`recovery_required`に止める。
+- crashで一部だけ適用済みになっても、各対象を「元 / 適用値 / 第三値」に個別分類する。
+  元と適用値だけの混合なら安全なrollbackを再開し、第三値が1つでもあれば自動上書きしない。
+- 配置保存、preview/commit、プロファイルidentity変更を同じmutation gateで直列化した。
+  未復元journalが残る間は混合配置の保存自体を拒否する。
+  保存snapshot IDまたは登録ゲーム集合がpreview後に変わればcommitをstaleとして拒否する。
+  private storeのfile置換とmemory世代更新も1つのmutex区間にした。
+
+既定アプリと音声切替をGuidedにする判断には同意する。前者はhash保護された`UserChoice`に対する
+文書化済み汎用setterがなく、後者の一般的な切替方法は非公開COMである。どちらも「書けた」だけを
+効果の証明にせず、PCカスタムは読み取り可能な事実だけを表示し、変更はWindows自身へ委ねる。

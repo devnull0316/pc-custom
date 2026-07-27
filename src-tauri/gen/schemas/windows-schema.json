@@ -177,10 +177,10 @@
       "description": "Permission identifier",
       "oneOf": [
         {
-          "description": "Allows the main window to call Totonoe typed catalog, preview, transaction, recovery, and timeline commands.",
+          "description": "Allows the main window to call Totonoe's fixed typed commands for catalog, setup, profiles, transactions, recovery, and read-only exports.",
           "type": "string",
           "const": "application-commands",
-          "markdownDescription": "Allows the main window to call Totonoe typed catalog, preview, transaction, recovery, and timeline commands."
+          "markdownDescription": "Allows the main window to call Totonoe's fixed typed commands for catalog, setup, profiles, transactions, recovery, and read-only exports."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

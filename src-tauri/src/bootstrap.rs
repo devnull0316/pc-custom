@@ -170,10 +170,18 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
         // RECOVERY_REQUIRED and every mutation gate remains closed.
         Err(_identity_error) => None,
     };
-    let engine = PcCustomEngine::new(database, identity)?;
     let profile_store = Arc::new(crate::game_profile::ProfileStore::open(
         data_directory.join("profiles.json"),
     )?);
+    let window_layout_store = Arc::new(crate::window_layout::WindowLayoutStore::open(
+        data_directory.join("window-layout.json"),
+    )?);
+    let engine = PcCustomEngine::new_with_runtime_stores(
+        database,
+        identity,
+        Some(profile_store.clone()),
+        Some(window_layout_store.clone()),
+    )?;
     let theme_schedule_store = Arc::new(crate::theme_schedule::ThemeScheduleStore::open(
         data_directory.join("theme-schedule.json"),
     )?);
@@ -189,7 +197,9 @@ fn data_directory() -> CoreResult<PathBuf> {
             "ユーザー用データ保存先を確認できないため、変更操作を停止しています。",
         )
     })?;
-    Ok(PathBuf::from(local_app_data).join("PCカスタム").join("data"))
+    // 保存先はASCIIに保つ。実行ファイル名(PCCustom)と揃うほうが追いやすく、
+    // 日本語パスは起動時にしか通らず、この環境では実地確認ができないため。
+    Ok(PathBuf::from(local_app_data).join("PCCustom").join("data"))
 }
 
 fn ensure_private_directory(path: &Path) -> CoreResult<()> {
