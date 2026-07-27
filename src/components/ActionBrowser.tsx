@@ -225,13 +225,13 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
 
   return (
     <div className="action-detail__inner">
+      {/* いちばん大事なのは「何ができるか」。以前はここに危険度チップと内部ID(session.prevent_sleep)と
+          v1 が先に来て、名前が3番目だった。内部IDとバージョンは詳細の中へ移した。 */}
       <div className="detail-title-row">
         <div>
-          <div className="detail-kicker"><span className={`risk-label risk-label--${action.riskLevel}`}>{riskLabel(action.riskLevel)}</span><code>{action.id}</code></div>
           <h2>{action.name}</h2>
           <p>{action.description}</p>
         </div>
-        <span className="detail-version">v{action.actionVersion}</span>
       </div>
       <p className="audience-line"><Icon name="info" size={16} />{action.audience}</p>
       <div aria-label="現在と適用後の状態" className="state-comparison">
@@ -252,7 +252,6 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         <div className="state-panel state-panel--desired">
           <span>{guidedCandidate ? "設計状態" : action.kind === "guided" ? "案内先" : action.kind === "observation" ? "確認する内容" : "適用後"}</span>
           <strong>{action.desiredState}</strong>
-          <small>{action.methodSummary}</small>
         </div>
       </div>
       <div aria-label="Action属性" className="attribute-chips">
@@ -267,6 +266,8 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           <div><span className="detail-disclosure__label">{observationLike ? "確認方法" : "変更方法"}</span><p>{action.methodSummary}</p></div>
           <ul>{action.detailPoints.map((point) => <li key={point}>{point}</li>)}</ul>
           <dl className="compatibility-grid">
+            <div><dt>内部ID</dt><dd><code>{action.id}</code></dd></div>
+            <div><dt>版</dt><dd>v{action.actionVersion}</dd></div>
             <div><dt>最小build</dt><dd>{action.minimumBuild}</dd></div>
             <div><dt>試験上限</dt><dd>{action.maximumTestedBuild ?? "実機確認待ち"}</dd></div>
             <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : guidedCandidate ? "設計候補（変更不可）" : action.kind === "guided" ? "Windows設定案内（PCカスタム変更なし）" : "観測"}</dd></div>
@@ -282,7 +283,15 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         ) : (
           <button className="primary-button" disabled={!mutationAllowed || previewing} onClick={onPreview} type="button">{previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}{previewing ? "プレビュー作成中" : "適用プレビュー"}</button>
         )}
-        <button className="secondary-button" disabled={inDraft || !profileEligible} onClick={onAddToDraft} type="button"><Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : profileEligible ? "プロファイルへ追加" : "自動適用の対象外"}</button>
+        {/* 「自動適用の対象外」は永久に押せないボタンだった。押せないものはボタンではなく状態なので、
+            文で書く。押せる可能性があるときだけボタンを出す。 */}
+        {profileEligible ? (
+          <button className="secondary-button" disabled={inDraft} onClick={onAddToDraft} type="button">
+            <Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : "プロファイルへ追加"}
+          </button>
+        ) : (
+          <span className="detail-note">この項目はモードの自動適用には入れられません</span>
+        )}
         {action.settingsPage ? (
           <button
             className="secondary-button"
