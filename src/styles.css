@@ -617,3 +617,19 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
 .automation-sentence strong { font-weight: 600; }
+
+/* 反映にエクスプローラー再起動が要る項目の案内。押す前に何が起きるか全部見せる。 */
+.restart-panel { display: grid; gap: .7rem; margin-top: .9rem; padding: .85rem .95rem;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-card);
+  background: var(--surface-muted); }
+.restart-panel__head { display: flex; gap: .6rem; align-items: flex-start; }
+.restart-panel__head strong { display: block; font-size: .86rem; }
+.restart-panel__head p { margin: .25rem 0 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
+.restart-panel__facts p { margin: 0 0 .35rem; font-size: .78rem; }
+.restart-panel__facts ul { margin: 0 0 .5rem; padding-left: 1.15rem; color: var(--text-secondary);
+  font-size: .78rem; line-height: 1.65; }
+.restart-panel__caution { display: flex; gap: .45rem; align-items: flex-start; margin: 0;
+  padding: .5rem .6rem; border-radius: var(--radius-control);
+  color: var(--text); background: var(--caution-soft); font-size: .76rem; line-height: 1.6; }
+.restart-panel__actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.restart-panel__message { margin: 0; color: var(--text-secondary); font-size: .8rem; }

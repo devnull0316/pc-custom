@@ -3,6 +3,7 @@ identifier = "application-commands"
 description = "Allows the main window to call Totonoe's fixed typed commands for catalog, setup, profiles, transactions, recovery, and read-only exports."
 commands.allow = [
   "get_bootstrap_status",
+  "restart_explorer_shell",
   "list_actions",
   "detect_action",
   "preview_actions",

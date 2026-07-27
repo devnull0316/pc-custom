@@ -10,8 +10,7 @@ mod powertoys;
 mod process;
 mod readiness;
 mod registry;
-// 42件の候補を反映させるにはシェル再起動が要る。まずは実測用に入れる。
-#[cfg(test)]
+// 反映にはシェル再起動が要る項目がある。利用者が明示的に選んだときだけ実行する。
 mod shell_restart;
 mod transaction_lock;
 // 検証専用の計器。実UIを外から読むためにエクスプローラーの窓を開き、シェル設定を書き、
@@ -49,7 +48,6 @@ pub use registry::delete_key_if_empty;
 pub use registry::{
     delete_value, read_value_state, write_raw_value, RawRegistryValue, RawRegistryValueState,
 };
-#[cfg(test)]
 pub use shell_restart::{restart_shell, ShellRestartOutcome};
 pub use transaction_lock::{
     acquire_app_instance_lock, acquire_core_mutation_lock, AppInstanceGuard, CoreMutationGuard,

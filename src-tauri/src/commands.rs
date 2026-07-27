@@ -240,3 +240,21 @@ pub fn config_import_apply(
 ) -> CoreResult<crate::game_profile::ImportResult> {
     state.engine()?.import_profiles(&json)
 }
+
+/// エクスプローラー(シェル)を再起動する。
+///
+/// 一部の設定はレジストリへ書いただけでは画面が変わらず、シェルを再起動して初めて反映される。
+/// これは**利用者が明示的に押したときだけ**呼ばれる。適用処理が自動で呼ぶことはない。
+///
+/// 引数を取らない。フロントから渡せるものが無いので、経路として悪用しようがない。
+#[tauri::command]
+pub fn restart_explorer_shell() -> CoreResult<crate::windows::ShellRestartOutcome> {
+    crate::windows::restart_shell().map_err(|_error| {
+        CoreError::new(
+            "SHELL_RESTART_FAILED",
+            "APPLY",
+            true,
+            "エクスプローラーを再起動できませんでした。手動で再起動するか、サインインし直してください。",
+        )
+    })
+}

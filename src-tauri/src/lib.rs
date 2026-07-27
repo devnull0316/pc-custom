@@ -44,6 +44,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap_status,
+            commands::restart_explorer_shell,
             commands::list_actions,
             commands::detect_action,
             commands::preview_actions,

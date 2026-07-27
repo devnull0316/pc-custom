@@ -25,6 +25,7 @@ import type {
   StoredProfile,
   TimelineItem,
   WindowLayoutStatus,
+  ShellRestartOutcome,
 } from "./model";
 
 export interface CoreSnapshot {
@@ -277,6 +278,10 @@ export function setupCatalog(): Promise<readonly SetupAppDto[]> {
 
 export function setupInstall(appId: string): Promise<InstallOutcome> {
   return call<InstallOutcome>("setup_app_install", { appId });
+}
+
+export function restartExplorerShell(): Promise<ShellRestartOutcome> {
+  return call<ShellRestartOutcome>("restart_explorer_shell", {});
 }
 
 export function publicErrorMessage(error: unknown): string {

@@ -393,7 +393,7 @@ const REGISTRY_FALLBACKS = [
   {
     id: "taskbar.search_mode",
     name: "タスクバー検索の表示方法を選ぶ",
-    description: "検索を隠す、アイコン、ラベル付き、検索ボックスから選びます。固定HKCU値だけを変更します。",
+    description: "検索を隠す、アイコンだけ、ラベル付き、検索ボックスから選びます。反映にはエクスプローラーの再起動が必要です。",
     category: "appearance",
     riskLevel: "caution",
     desiredState: "検索ボックスを表示する",
@@ -401,7 +401,7 @@ const REGISTRY_FALLBACKS = [
   {
     id: "taskbar.alignment",
     name: "タスクバーを左寄せ／中央寄せにする",
-    description: "Windows 11のタスクバー配置を選びます。タスクバーを終了せず設定変更通知だけを送ります。",
+    description: "スタートボタンとアイコンを左端か中央に置きます。反映にはエクスプローラーの再起動が必要です。",
     category: "appearance",
     riskLevel: "caution",
     desiredState: "タスクバーを左寄せにする",
@@ -465,7 +465,7 @@ const REGISTRY_FALLBACKS = [
   {
     id: "taskbar.show_desktop",
     name: "タスクバー右端のデスクトップ表示を切り替える",
-    description: "タスクバー右端を選んでデスクトップを表示する操作を切り替えます。",
+    description: "タスクバー右端の、押すとデスクトップが見える細い領域を出すか消すかを選びます。反映にはエクスプローラーの再起動が必要です。",
     category: "appearance",
     riskLevel: "caution",
     desiredState: "タスクバー右端のデスクトップ表示を有効にする",

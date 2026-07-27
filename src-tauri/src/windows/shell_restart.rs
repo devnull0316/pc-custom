@@ -25,7 +25,8 @@ use super::{WindowsError, WindowsErrorKind, WindowsResult};
 const SHELL_RETURN_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ShellRestartOutcome {
     /// 終了させた explorer.exe の数。0 なら元から動いていなかった。
     pub terminated: usize,

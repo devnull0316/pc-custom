@@ -9,6 +9,7 @@ import type {
   DataMode,
 } from "../model";
 import { isMutationAllowed, riskLabel } from "../model";
+import { ExplorerRestartPanel } from "./ExplorerRestartPanel";
 import { Icon } from "./Icon";
 import { TempCleanupPanel } from "./TempCleanupPanel";
 import { ThemeSchedulePanel } from "./ThemeSchedulePanel";
@@ -293,6 +294,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           </button>
         ) : null}
       </div>
+      {action.requiresExplorerRestart ? <ExplorerRestartPanel dataMode={dataMode} /> : null}
       {action.settingsPage && action.availability !== "mutable" ? (
         <p className="blocked-reason"><Icon name="info" size={15} />この項目はWindowsの設定画面から変更できます。PCカスタムは設定画面を案内し、OS設定は変更しません。</p>
       ) : null}

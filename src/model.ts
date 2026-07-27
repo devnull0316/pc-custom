@@ -378,3 +378,13 @@ export function timelineStatusLabel(status: TimelineStatus): string {
       return "復元中";
   }
 }
+
+/** エクスプローラー(シェル)再起動の結果。 */
+export interface ShellRestartOutcome {
+  /** 終了させた explorer.exe の数。0 なら元から動いていなかった。 */
+  terminated: number;
+  /** タスクバーの復帰を確認できたか。false ならサインインし直しが要る。 */
+  shellReturned: boolean;
+  /** Windows の自動復帰では戻らず、こちらから起動し直したか。 */
+  relaunched: boolean;
+}
