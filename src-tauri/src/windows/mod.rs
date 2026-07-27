@@ -11,6 +11,9 @@ mod process;
 mod readiness;
 mod registry;
 mod transaction_lock;
+// 検証専用の計器。実UIを外から読むためにエクスプローラーの窓を開き、シェル設定を書き、
+// 窓を閉じる処理を含む。製品側からは一度も呼ばれないので、出荷バイナリへは入れない。
+#[cfg(test)]
 mod ui_probe;
 mod update_status;
 mod window_effects;
@@ -111,4 +114,5 @@ impl WindowsError {
 
 pub type WindowsResult<T> = Result<T, WindowsError>;
 
+#[cfg(test)]
 pub use ui_probe::{observe_taskbar_layout, TaskbarLayoutObservation};
