@@ -95,7 +95,10 @@ fn shell_process_ids() -> WindowsResult<Vec<u32>> {
             let same_session = unsafe { ProcessIdToSessionId(entry.th32ProcessID, &mut session) }
                 .is_ok()
                 && session == own_session;
-            if same_session {
+            // セッションが同じで、かつ実体が %WINDIR%\explorer.exe のものだけ。
+            // 名前だけで判断すると、利用者が自分のプログラムを explorer.exe と
+            // 名付けて動かしていた場合にそれを落とす。
+            if same_session && is_windows_shell_image(entry.th32ProcessID) {
                 ids.push(entry.th32ProcessID);
             }
         }
@@ -103,6 +106,51 @@ fn shell_process_ids() -> WindowsResult<Vec<u32>> {
     }
     let _ = unsafe { windows::Win32::Foundation::CloseHandle(snapshot) };
     Ok(ids)
+}
+
+/// プロセスの実行ファイルの実体が `%WINDIR%\explorer.exe` かを確かめる。
+///
+/// スナップショットが返すのはファイル名だけで、置き場所は分からない。
+/// 名前が一致しただけで終了させると、利用者が自分のプログラムを explorer.exe と
+/// 名付けて動かしていた場合にそれを落とす。実体を確かめられないものには触らない。
+#[cfg(windows)]
+fn is_windows_shell_image(process_id: u32) -> bool {
+    use windows::{
+        core::PWSTR,
+        Win32::{
+            Foundation::{CloseHandle, MAX_PATH},
+            System::Threading::{
+                OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+                PROCESS_QUERY_LIMITED_INFORMATION,
+            },
+        },
+    };
+    let Some(windir) = std::env::var_os("WINDIR") else {
+        return false;
+    };
+    let expected = std::path::Path::new(&windir).join("explorer.exe");
+
+    let Ok(handle) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) })
+    else {
+        return false;
+    };
+    let mut buffer = [0u16; MAX_PATH as usize];
+    let mut length = buffer.len() as u32;
+    let queried = unsafe {
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        )
+    }
+    .is_ok();
+    let _ = unsafe { CloseHandle(handle) };
+    if !queried {
+        return false;
+    }
+    let actual = String::from_utf16_lossy(&buffer[..length as usize]);
+    std::path::Path::new(&actual) == expected
 }
 
 #[cfg(windows)]
