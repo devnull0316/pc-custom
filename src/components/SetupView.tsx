@@ -118,8 +118,15 @@ export function SetupView({
     }
   }
 
+  // 1画面に「Windowsの仕上げ」「普段使いの機能」「アプリ導入」を全部並べていたため、
+  // 2400文字・79個の箱が同時に見えていた。目的を1つずつに切る。
+  const [tab, setTab] = useState<"essentials" | "everyday" | "apps">("essentials");
+
   function showPowerToysInstall() {
-    document.getElementById("setup-app-powertoys")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTab("apps");
+    window.setTimeout(() => {
+      document.getElementById("setup-app-powertoys")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
   }
 
   return (
@@ -132,6 +139,27 @@ export function SetupView({
           それぞれ内容を確認しながら進めます。
         </p>
       </header>
+
+      <div aria-label="セットアップの内容" className="segmented" role="tablist">
+        {([
+          ["essentials", "Windowsの仕上げ"],
+          ["everyday", "普段使いの機能"],
+          ["apps", "アプリを入れる"],
+        ] as const).map(([id, label]) => (
+          <button
+            aria-selected={tab === id}
+            className="segmented__item"
+            key={id}
+            onClick={() => setTab(id)}
+            role="tab"
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab !== "essentials" ? null : (
       <SetupEssentialsPanel
         audioAction={actions.find((action) => action.id === "setup.audio_output")}
         bootstrap={bootstrap}
@@ -145,6 +173,9 @@ export function SetupView({
         previewingId={previewPendingId}
         windowLayoutAction={actions.find((action) => action.id === "setup.window_layout")}
       />
+      )}
+
+      {tab !== "everyday" ? null : (
       <PowerToysPanel
         action={powerToysAction}
         dataMode={dataMode}
@@ -154,6 +185,10 @@ export function SetupView({
         onLaunch={onPowerToysLaunch}
         onShowInstall={showPowerToysInstall}
       />
+      )}
+
+      {tab !== "apps" ? null : (
+      <>
       <section aria-labelledby="setup-apps-title" className="setup-apps">
         <header className="setup-apps__header">
           <h2 id="setup-apps-title">よく使うアプリをまとめて入れる</h2>
@@ -239,10 +274,13 @@ export function SetupView({
         </div>
       </div>
 
-      {message === null ? null : <p className="setup-view__message" role="status">{message}</p>}
       <p className="muted small">
         導入はMicrosoftのWinGetカタログ経由で、ユーザー範囲で行います。一部アプリは管理者確認が出る場合があります。
       </p>
+      </>
+      )}
+
+      {message === null ? null : <p className="setup-view__message" role="status">{message}</p>}
     </section>
   );
 }

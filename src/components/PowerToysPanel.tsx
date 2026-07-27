@@ -60,20 +60,31 @@ export function PowerToysPanel({
         </button>
       </div>
 
-      <ul aria-label="操作・普段使いの機能一覧" className="everyday-feature-list">
-        {EVERYDAY_FEATURE_GUIDES.map((guide) => (
-          <li className="everyday-feature-card" key={guide.id}>
-            <div className="everyday-feature-card__title">
-              <strong>{guide.result}</strong>
-              <span className={`provider-badge provider-badge--${guide.provider}`}>
-                {guide.provider === "powertoys" ? "PowerToys" : "Windows標準"}
-              </span>
-            </div>
-            <span className="everyday-feature-card__feature">{guide.featureName}</span>
-            <p>{guide.description}</p>
-          </li>
-        ))}
-      </ul>
+      {/* 提供元は12回繰り返さず、2つのグループに分けて1回ずつ言う。
+          同じ文字が12個並ぶのは情報ではなく雑音で、目が拾う場所を12箇所に増やすだけだった。 */}
+      {([
+        ["powertoys", "PowerToys の機能"],
+        ["builtin", "Windows 標準の機能"],
+      ] as const).map(([provider, heading]) => {
+        const items = EVERYDAY_FEATURE_GUIDES.filter((guide) => guide.provider === provider);
+        if (items.length === 0) return null;
+        return (
+          <div className="everyday-group" key={provider}>
+            <h3 className="everyday-group__heading">{heading}<span>{items.length}</span></h3>
+            <ul className="everyday-list">
+              {items.map((guide) => (
+                <li className="everyday-row" key={guide.id}>
+                  <div className="everyday-row__main">
+                    <strong>{guide.result}</strong>
+                    <p>{guide.description}</p>
+                  </div>
+                  <span className="everyday-row__feature">{guide.featureName}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
 
       <div className="inline-note" role="note">
         <Icon name="info" />
