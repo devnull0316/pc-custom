@@ -137,6 +137,22 @@ pub fn taskbar_element_names() -> WindowsResult<Vec<String>> {
             let mut names = Vec::new();
             for index in 0..count {
                 if let Ok(element) = all.GetElement(index) {
+                    // UIA は**非表示の要素も列挙する**。存在するかではなく見えているかで判定したいので、
+                    // 画面外扱いのものと、面積を持たないものを落とす。
+                    // これを入れる前は「ステータスバーを消したのに要素は残る」ため、
+                    // 反映されていないのか隠れているだけなのかを区別できなかった。
+                    if element
+                        .CurrentIsOffscreen()
+                        .map(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+                    if let Ok(rect) = element.CurrentBoundingRectangle() {
+                        if rect.right <= rect.left || rect.bottom <= rect.top {
+                            continue;
+                        }
+                    }
                     if let Ok(name) = element.CurrentName() {
                         let text = name.to_string();
                         if !text.trim().is_empty() {
@@ -1701,6 +1717,197 @@ mod tests {
             other => println!("EVIDENCE: 再起動後にZ順を判定できなかった {other:?}"),
         }
         assert!(alive, "オーバーレイ自体はシェル再起動で消えないこと");
+    }
+
+    /// エクスプローラー系の候補を、**新しく開いた自分の窓**で一括判定する。
+    ///
+    /// エクスプローラーの表示設定は、既に開いている窓には効かない。
+    /// 設定を変えたあとに新しい窓を開いて読む必要がある。
+    /// （同一プロセス内のキャッシュで誤判定した過去があるため、必ず新しい窓で見る）
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "設定を変えて自分の窓を開き、戻す。既存の窓には触れない"]
+    fn batch_measure_explorer_candidates() {
+        use crate::backup::{prepare_registry_backup, restore_registry_backup, RegistryTarget};
+        use crate::windows::write_raw_value;
+        use std::fs;
+
+        const REG_DWORD: u32 = 4;
+        const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+
+        struct Candidate {
+            id: &'static str,
+            value_name: &'static str,
+            flipped: u32,
+            marker: &'static str,
+        }
+        // marker が要素名に含まれるかで有無を見る。
+        let candidates = [
+            Candidate {
+                id: "explorer.status_bar",
+                value_name: "ShowStatusBar",
+                flipped: 0,
+                marker: "ステータス バー",
+            },
+            Candidate {
+                id: "explorer.always_show_menus",
+                value_name: "AlwaysShowMenus",
+                flipped: 1,
+                marker: "ファイル(F)",
+            },
+        ];
+
+        fn read_names(label: &str) -> Vec<String> {
+            let Ok(dir) = tempfile::tempdir() else {
+                return Vec::new();
+            };
+            let title = format!("pcc-x-{}", uuid::Uuid::new_v4().simple());
+            let target = dir.path().join(&title);
+            if fs::create_dir(&target).is_err() {
+                return Vec::new();
+            }
+            let _ = fs::write(target.join("a.txt"), b"a");
+            match OwnedExplorerWindow::open(&target, &title) {
+                Ok(window) => {
+                    let names = window
+                        .handle
+                        .and_then(|h| explorer_window_item_names(h).ok())
+                        .unwrap_or_default();
+                    println!("  ({label}) 要素数={}", names.len());
+                    names
+                }
+                Err(error) => {
+                    println!("  ({label}) 窓を開けなかった: {error:?}");
+                    Vec::new()
+                }
+            }
+        }
+        fn has(names: &[String], marker: &str) -> bool {
+            names.iter().any(|name| name.contains(marker))
+        }
+
+        let before = read_names("変更前");
+        if before.is_empty() {
+            println!("観測できないためスキップ");
+            return;
+        }
+        for candidate in &candidates {
+            println!(
+                "before: {} present={}",
+                candidate.id,
+                has(&before, candidate.marker)
+            );
+        }
+
+        let mut backups = Vec::new();
+        for candidate in &candidates {
+            let target = RegistryTarget::current_user_64(ADVANCED, candidate.value_name);
+            match prepare_registry_backup(
+                target,
+                REG_DWORD,
+                candidate.flipped.to_le_bytes().to_vec(),
+                1,
+                26_200,
+            ) {
+                Ok(backup) => backups.push((candidate, backup)),
+                Err(error) => println!("{}: backup不可 {error:?}", candidate.id),
+            }
+        }
+        struct Guard(Vec<crate::backup::RegistryBackup>, bool);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                if !self.1 {
+                    for b in &self.0 {
+                        let _ = restore_registry_backup(b);
+                    }
+                }
+            }
+        }
+        let mut guard = Guard(backups.iter().map(|(_, b)| b.clone()).collect(), false);
+
+        for (candidate, backup) in &backups {
+            let _ = write_raw_value(
+                &backup.location,
+                REG_DWORD,
+                &candidate.flipped.to_le_bytes(),
+            );
+        }
+        let after = read_names("変更後");
+
+        let mut verdicts = Vec::new();
+        for (candidate, _) in &backups {
+            let was = has(&before, candidate.marker);
+            let now = has(&after, candidate.marker);
+            println!("applied: {} present {was} -> {now}", candidate.id);
+            verdicts.push((candidate.id, was != now));
+        }
+
+        for (_, backup) in &backups {
+            let _ = restore_registry_backup(backup);
+        }
+        guard.1 = true;
+        drop(guard);
+        let restored = read_names("復元後");
+        for (candidate, _) in &backups {
+            assert_eq!(
+                has(&restored, candidate.marker),
+                has(&before, candidate.marker),
+                "{} が元へ戻ること",
+                candidate.id
+            );
+        }
+
+        println!("---- 判定 ----");
+        for (id, changed) in verdicts {
+            if changed {
+                println!("EVIDENCE: {id} は新しい窓へ反映される。昇格可能");
+            } else {
+                println!("EVIDENCE: {id} は反映を確認できなかった。昇格しない");
+            }
+        }
+    }
+
+    /// 自分で開いたエクスプローラーの窓に、UIA から何が見えるかを出す。
+    /// エクスプローラー系の候補で、何を判定材料に使えるかの下調べ。
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "自分の窓を1枚開いて要素名を出す。設定は変更しない"]
+    fn dump_owned_explorer_element_names() {
+        use std::fs;
+        let dir = match tempfile::tempdir() {
+            Ok(dir) => dir,
+            Err(_) => {
+                println!("作業フォルダーを作れないためスキップ");
+                return;
+            }
+        };
+        let _ = fs::write(dir.path().join("sample-note.txt"), b"probe");
+        let title = format!("pcc-dump-{}", uuid::Uuid::new_v4().simple());
+        let target = dir.path().join(&title);
+        if fs::create_dir(&target).is_err() {
+            println!("フォルダーを作れないためスキップ");
+            return;
+        }
+        let _ = fs::write(target.join("a.txt"), b"a");
+        let window = match OwnedExplorerWindow::open(&target, &title) {
+            Ok(window) => window,
+            Err(error) => {
+                println!("窓を開けないためスキップ: {error:?}");
+                return;
+            }
+        };
+        match window
+            .handle
+            .and_then(|h| explorer_window_item_names(h).ok())
+        {
+            Some(names) => {
+                println!("要素数={}", names.len());
+                for name in names.iter().take(60) {
+                    println!("  [{name}]");
+                }
+            }
+            None => println!("要素を読めなかった"),
+        }
     }
 
     /// オーバーレイが**他の最前面ウィンドウに前へ出られたとき**どうなるか。
