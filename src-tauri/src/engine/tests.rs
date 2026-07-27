@@ -295,6 +295,16 @@ fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
         Ok(identity) => identity,
         Err(_) => return, // 実機以外では検出できないので何も主張しない
     };
+    // 対象外のビルドでは互換性ゲートが正しく読み取り専用へ倒す。
+    // その挙動は仕様どおりなので、ここで失敗と報告してはいけない。
+    // CI の windows ランナーは 26_100 より古く、実際にここで落ちていた。
+    if identity.base_build < 26_100 {
+        println!(
+            "build {} は対象外のため、この経路は検証しない（互換性ゲートが読み取り専用へ倒す）",
+            identity.base_build
+        );
+        return;
+    }
     let journal = Arc::new(JournalDatabase::open_in_memory().expect("open journal"));
     let engine = PcCustomEngine::new(journal, Some(identity)).expect("start engine");
 
