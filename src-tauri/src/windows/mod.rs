@@ -4,6 +4,8 @@ mod app_launch;
 mod audio;
 mod broadcast;
 mod execution_state;
+// 実行ファイルを手で打たせない。Windows自身の選択画面を開く。
+mod file_picker;
 mod observations;
 mod power;
 mod powertoys;
@@ -29,6 +31,7 @@ pub use app_launch::{
 pub use audio::read_audio_output_observation;
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
+pub use file_picker::pick_executable;
 pub use observations::{
     delete_user_temp_files, plan_user_temp_cleanup, read_startup_inventory,
     read_system_drive_space, read_user_temp_inventory, TempCleanupOutcome, TempCleanupPlan,

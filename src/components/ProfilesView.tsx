@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { exportConfig, importApply, importPreview, publicErrorMessage } from "../backend";
+import { exportConfig, importApply, importPreview, pickGameExecutable, publicErrorMessage } from "../backend";
 import type {
   ActionPresentation,
   CreateProfileRequest,
@@ -51,6 +51,20 @@ export function ProfilesView({
   const [previewItems, setPreviewItems] = useState<readonly ImportPreviewItem[] | null>(null);
   const [ioBusy, setIoBusy] = useState(false);
   const [ioMessage, setIoMessage] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+
+  /// 実行ファイルは手で打たせない。打ち間違えれば別のファイルが登録される。
+  async function chooseExecutable() {
+    setPicking(true);
+    try {
+      const chosen = await pickGameExecutable();
+      if (chosen !== null) setExePath(chosen);
+    } catch (error: unknown) {
+      setIoMessage(publicErrorMessage(error));
+    } finally {
+      setPicking(false);
+    }
+  }
 
   async function doExport() {
     setIoBusy(true);
@@ -209,14 +223,24 @@ export function ProfilesView({
           {mode === "game" ? (
             <label className="field">
               <span>ゲームの実行ファイル</span>
-              <input
-                disabled={!live || busy}
-                onChange={(event) => setExePath(event.target.value)}
-                placeholder={String.raw`例: C:\Riot Games\VALORANT\live\VALORANT.exe`}
-                spellCheck={false}
-                type="text"
-                value={exePath}
-              />
+              <div className="file-pick">
+                <input
+                  disabled={!live || busy}
+                  onChange={(event) => setExePath(event.target.value)}
+                  placeholder="「選ぶ」から探せます"
+                  spellCheck={false}
+                  type="text"
+                  value={exePath}
+                />
+                <button
+                  className="secondary-button"
+                  disabled={!live || busy || picking}
+                  onClick={() => void chooseExecutable()}
+                  type="button"
+                >
+                  {picking ? <Icon className="spin" name="spinner" /> : <Icon name="explorer" />}選ぶ
+                </button>
+              </div>
               <small>このPC上に実在する実行ファイルだけを登録できます。別のファイルに差し替わっていないか、起動のたびに確かめます。</small>
             </label>
           ) : null}

@@ -719,3 +719,8 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .category-chip[aria-pressed="true"] .category-count { color: var(--text); }
 /* 一覧が主役になったので、縦を目一杯使う。 */
 .action-list { padding: 10px 8px 12px; max-height: 590px; overflow-y: auto; }
+
+/* 実行ファイルは打たせず選ばせる。打ち間違いは別ファイルの登録につながる。 */
+.file-pick { display: flex; gap: 8px; align-items: stretch; }
+.file-pick input { flex: 1; min-width: 0; }
+.file-pick button { flex: none; }

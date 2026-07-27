@@ -258,3 +258,20 @@ pub fn restart_explorer_shell() -> CoreResult<crate::windows::ShellRestartOutcom
         )
     })
 }
+
+/// ゲームの実行ファイルを利用者に選んでもらう。
+///
+/// **引数を取らない。** フロントから開き先や絞り込みを操作できないので、
+/// 経路として悪用する余地がない。返るのは利用者が実際に選んだ 1 件のパスだけで、
+/// 取り消された場合は `None`（取り消しは失敗ではない）。
+#[tauri::command]
+pub fn pick_game_executable() -> CoreResult<Option<String>> {
+    crate::windows::pick_executable().map_err(|_| {
+        CoreError::new(
+            "FILE_PICKER_FAILED",
+            "DETECT",
+            true,
+            "ファイル選択画面を開けませんでした。パスを直接入力することもできます。",
+        )
+    })
+}

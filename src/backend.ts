@@ -288,6 +288,11 @@ export function listTimeline(): Promise<readonly TimelineItem[]> {
   return call<readonly TimelineItem[]>("list_timeline");
 }
 
+/** ゲームの実行ファイルを利用者に選んでもらう。取り消しは null。 */
+export function pickGameExecutable(): Promise<string | null> {
+  return call<string | null>("pick_game_executable", {});
+}
+
 export function publicErrorMessage(error: unknown): string {
   if (error instanceof SafeCoreError) {
     return error.message;
