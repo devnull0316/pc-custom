@@ -179,6 +179,11 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
         Some(profile_store.clone()),
         Some(window_layout_store.clone()),
     )?;
+    // 試用したまま閉じられた変更を、開き直した時点で元へ戻す。
+    // 失敗しても起動は止めない（通常の復旧経路が残りを拾う）。
+    if let Err(error) = engine.revert_expired_trials() {
+        eprintln!("expired trial revert failed: {error:?}");
+    }
     let theme_schedule_store = Arc::new(crate::theme_schedule::ThemeScheduleStore::open(
         data_directory.join("theme-schedule.json"),
     )?);

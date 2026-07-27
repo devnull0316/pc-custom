@@ -493,6 +493,75 @@ impl JournalDatabase {
         })
     }
 
+    /// 試用として適用したことを記録する。期限までに確定されなければ、起動時に戻す対象になる。
+    pub fn begin_trial(
+        &self,
+        transaction_id: Uuid,
+        expires_at_unix_ms: u64,
+        now_unix_ms: u64,
+    ) -> CoreResult<()> {
+        self.with_connection(|database| {
+            database
+                .execute(
+                    "INSERT OR REPLACE INTO trials
+                       (transaction_id, expires_at_unix_ms, confirmed_at_unix_ms, created_at_unix_ms)
+                     VALUES (?1, ?2, NULL, ?3)",
+                    rusqlite::params![
+                        transaction_id.to_string(),
+                        expires_at_unix_ms as i64,
+                        now_unix_ms as i64
+                    ],
+                )
+                ?;
+            Ok(())
+        })
+    }
+
+    /// 利用者が「保存する」を押した。以後この試用は自動で戻さない。
+    pub fn confirm_trial(&self, transaction_id: Uuid, now_unix_ms: u64) -> CoreResult<bool> {
+        self.with_connection(|database| {
+            let changed = database.execute(
+                "UPDATE trials SET confirmed_at_unix_ms = ?2
+                     WHERE transaction_id = ?1 AND confirmed_at_unix_ms IS NULL",
+                rusqlite::params![transaction_id.to_string(), now_unix_ms as i64],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// 期限を過ぎても確定されていない試用。起動時にこれを元へ戻す。
+    pub fn expired_trials(&self, now_unix_ms: u64) -> CoreResult<Vec<Uuid>> {
+        self.with_connection(|database| {
+            let mut statement = database.prepare(
+                "SELECT transaction_id FROM trials
+                     WHERE confirmed_at_unix_ms IS NULL AND expires_at_unix_ms <= ?1
+                     ORDER BY expires_at_unix_ms",
+            )?;
+            let rows = statement.query_map(rusqlite::params![now_unix_ms as i64], |row| {
+                row.get::<_, String>(0)
+            })?;
+            let mut ids = Vec::new();
+            for row in rows {
+                let raw = row?;
+                if let Ok(id) = Uuid::parse_str(&raw) {
+                    ids.push(id);
+                }
+            }
+            Ok(ids)
+        })
+    }
+
+    /// 戻し終えた、または確定済みになった試用を片付ける。
+    pub fn clear_trial(&self, transaction_id: Uuid) -> CoreResult<()> {
+        self.with_connection(|database| {
+            database.execute(
+                "DELETE FROM trials WHERE transaction_id = ?1",
+                rusqlite::params![transaction_id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn recovery_count(&self) -> CoreResult<u32> {
         self.with_connection(|database| {
             let count: i64 = database.query_row(

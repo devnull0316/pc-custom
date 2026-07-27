@@ -275,3 +275,26 @@ pub fn pick_game_executable() -> CoreResult<Option<String>> {
         )
     })
 }
+
+/// 試用として適用する。`holdSeconds` 以内に確定されなければ、次の起動で元へ戻る。
+#[tauri::command]
+pub fn commit_preview_as_trial(
+    state: State<'_, ApplicationState>,
+    request: CommitPreviewRequest,
+    hold_seconds: u32,
+) -> CoreResult<CommitResult> {
+    state
+        .engine()?
+        .commit_preview_as_trial(&request.preview_token, hold_seconds)
+}
+
+/// 試用を確定する。以後この変更は自動で戻さない。
+#[tauri::command]
+pub fn confirm_trial(
+    state: State<'_, ApplicationState>,
+    transaction_id: String,
+) -> CoreResult<bool> {
+    let parsed = uuid::Uuid::parse_str(&transaction_id)
+        .map_err(|_| CoreError::invalid_request("指定された変更のまとまりが見つかりません。"))?;
+    state.engine()?.confirm_trial(parsed)
+}

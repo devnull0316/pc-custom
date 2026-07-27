@@ -293,6 +293,19 @@ export function pickGameExecutable(): Promise<string | null> {
   return call<string | null>("pick_game_executable", {});
 }
 
+/** 試用として適用する。確定しなければ、次に開いたときに元へ戻る。 */
+export function commitPreviewAsTrial(
+  request: CommitPreviewRequest,
+  holdSeconds: number,
+): Promise<CommitResult> {
+  return call<CommitResult>("commit_preview_as_trial", { request, holdSeconds });
+}
+
+/** 試用を確定する。以後この変更は自動で戻らない。 */
+export function confirmTrial(transactionId: string): Promise<boolean> {
+  return call<boolean>("confirm_trial", { transactionId });
+}
+
 export function publicErrorMessage(error: unknown): string {
   if (error instanceof SafeCoreError) {
     return error.message;

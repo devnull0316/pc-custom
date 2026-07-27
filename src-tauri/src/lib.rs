@@ -50,6 +50,8 @@ pub fn run() {
             commands::detect_action,
             commands::preview_actions,
             commands::commit_preview,
+            commands::commit_preview_as_trial,
+            commands::confirm_trial,
             commands::list_timeline,
             commands::rollback_item,
             commands::reconcile_now,

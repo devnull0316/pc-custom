@@ -101,6 +101,37 @@ impl PcCustomEngine {
         })
     }
 
+    /// 期限までに「保存する」が押されなかった試用を、元へ戻す。
+    ///
+    /// 起動時に呼ぶ。試用中にアプリが落ちても、次に開いたときに戻る。
+    /// **戻せなかったものは黙って消さない。** trials に残したままにして、
+    /// 通常の復旧経路が拾えるようにする。
+    pub fn revert_expired_trials(&self) -> CoreResult<u32> {
+        let expired = self.journal.expired_trials(now_ms())?;
+        let mut reverted = 0u32;
+        for transaction_id in expired {
+            let items = self.journal.list_timeline(200)?;
+            let mut all_ok = true;
+            for item in items
+                .iter()
+                .filter(|item| item.transaction_id == transaction_id)
+            {
+                if !item.rollback_available {
+                    continue;
+                }
+                if self.rollback_item(item.item_id).is_err() {
+                    all_ok = false;
+                } else {
+                    reverted += 1;
+                }
+            }
+            if all_ok {
+                self.journal.clear_trial(transaction_id)?;
+            }
+        }
+        Ok(reverted)
+    }
+
     pub fn reconcile_now(&self) -> CoreResult<ReconcileResult> {
         let _mutation_guard = self.mutation_gate.lock();
         let _process_guard =

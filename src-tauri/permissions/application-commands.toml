@@ -9,6 +9,8 @@ commands.allow = [
   "detect_action",
   "preview_actions",
   "commit_preview",
+  "commit_preview_as_trial",
+  "confirm_trial",
   "list_timeline",
   "rollback_item",
   "reconcile_now",

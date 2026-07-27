@@ -371,3 +371,52 @@ fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
         .expect("同じ項目が残る");
     assert_eq!(restored.status, "rolled_back", "履歴に復元済みとして残る");
 }
+
+/// 試用は、確定しなければ期限切れとして拾われる。確定すれば拾われない。
+///
+/// 実際のロールバックまでは走らせない（実機の設定を触るため）。
+/// ここで確かめるのは **期限の判定と確定の記録** で、そこが壊れると
+/// 「保存したのに戻る」または「戻るはずが戻らない」のどちらかになる。
+#[test]
+fn trial_expires_and_is_reverted_unless_confirmed() {
+    use crate::journal::JournalDatabase;
+
+    let journal = JournalDatabase::open_in_memory().expect("journal");
+    let transaction_id = Uuid::new_v4();
+    // trials は transactions を参照するので、先に1件用意する。
+    journal
+        .record_prepared_transaction(transaction_id, "trial-test", "test", "26200", &[], 0)
+        .expect("prepare transaction");
+
+    // 期限が過去のものは拾われる。
+    journal
+        .begin_trial(transaction_id, 1_000, 500)
+        .expect("begin");
+    let expired = journal.expired_trials(2_000).expect("list");
+    assert!(expired.contains(&transaction_id), "期限切れは拾われること");
+
+    // まだ先のものは拾われない。
+    journal
+        .begin_trial(transaction_id, 9_000, 500)
+        .expect("begin again");
+    let not_yet = journal.expired_trials(2_000).expect("list");
+    assert!(!not_yet.contains(&transaction_id), "期限前は拾わないこと");
+
+    // 確定したものは、期限を過ぎても拾われない。
+    journal
+        .begin_trial(transaction_id, 1_000, 500)
+        .expect("begin third");
+    assert!(journal
+        .confirm_trial(transaction_id, 1_500)
+        .expect("confirm"));
+    let after_confirm = journal.expired_trials(9_999).expect("list");
+    assert!(
+        !after_confirm.contains(&transaction_id),
+        "確定済みは自動で戻さないこと"
+    );
+
+    // 二重確定は false を返す（既に確定済みで、何も変えない）。
+    assert!(!journal
+        .confirm_trial(transaction_id, 2_000)
+        .expect("second confirm"));
+}

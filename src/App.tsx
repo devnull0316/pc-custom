@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  commitPreview,
+  commitPreviewAsTrial,
+  confirmTrial,
   createProfile,
   deleteProfile,
   detectAction,
@@ -166,6 +167,9 @@ export function App() {
   // 以前は適用後にタイムラインへ強制移動しており、戻すのに画面移動と項目探しが必要だった。
   const [justApplied, setJustApplied] = useState<CommitItem[]>([]);
   const [undoPending, setUndoPending] = useState(false);
+  // 試用中の変更。残り時間が0になる前に「保存する」を押さなければ、次の起動で元へ戻る。
+  const [trial, setTrial] = useState<{ transactionId: string; endsAt: number } | null>(null);
+  const [trialLeft, setTrialLeft] = useState(0);
   const initialLoadStarted = useRef(false);
 
   const handleUiError = useCallback((error: unknown) => {
@@ -311,11 +315,19 @@ export function App() {
     setCommitPending(true);
     setUiError(null);
     try {
-      const result = await commitPreview({ previewToken: preview.previewToken });
+      // 見た目に関わる変更は、説明を読んでも良し悪しが判断できない。
+      // 実際に適用した状態を見てから決められるよう、既定を試用にする。
+      const HOLD_SECONDS = 30;
+      const result = await commitPreviewAsTrial(
+        { previewToken: preview.previewToken },
+        HOLD_SECONDS,
+      );
       if (result.status === "succeeded") {
         setNotice(commitNotice(result.message, result.details));
         // 戻す手段をその場に置く。画面は動かさない。
         setJustApplied(result.items ?? []);
+        setTrial({ transactionId: result.transactionId, endsAt: Date.now() + HOLD_SECONDS * 1000 });
+        setTrialLeft(HOLD_SECONDS);
       } else {
         setUiError({ message: result.message, code: result.status.toLocaleUpperCase("en-US") });
         setJustApplied([]);
@@ -332,6 +344,16 @@ export function App() {
 
   /// 直前に適用した分を、その場でまとめて元へ戻す。
   /// 逆順に戻すのは、適用が順序を持つため（後に適用したものから解く）。
+  // 残り時間の表示だけを更新する。実際の復帰は起動時に journal が判断する。
+  useEffect(() => {
+    if (trial === null) return;
+    const timer = window.setInterval(() => {
+      const left = Math.max(0, Math.ceil((trial.endsAt - Date.now()) / 1000));
+      setTrialLeft(left);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [trial]);
+
   async function undoJustApplied() {
     if (justApplied.length === 0) return;
     setUndoPending(true);
@@ -351,6 +373,20 @@ export function App() {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
     } finally {
       setUndoPending(false);
+    }
+  }
+
+  /// 試用を確定する。押さなければ次の起動で元へ戻る。
+  async function keepTrial() {
+    if (trial === null) return;
+    try {
+      await confirmTrial(trial.transactionId);
+      setNotice("この変更を保存しました。");
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setTrial(null);
+      setJustApplied([]);
     }
   }
 
@@ -560,9 +596,14 @@ export function App() {
         <div aria-live="polite" className="undo-bar">
           <Icon name="check" size={16} />
           <span>
-            適用しました
+            {trial === null ? "適用しました" : `試しに適用しています（保存しなければ元に戻ります・残り${trialLeft}秒）`}
             <strong>{justApplied.map((item) => item.name).join("、")}</strong>
           </span>
+          {trial === null ? null : (
+            <button className="primary-button" onClick={() => void keepTrial()} type="button">
+              <Icon name="check" />この変更を保存する
+            </button>
+          )}
           <button className="secondary-button" disabled={undoPending} onClick={() => void undoJustApplied()} type="button">
             {undoPending ? <Icon className="spin" name="spinner" /> : <Icon name="undo" />}元に戻す
           </button>

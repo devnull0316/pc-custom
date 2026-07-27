@@ -2,6 +2,33 @@ use super::*;
 use crate::journal::{PreparedItem, TransactionState};
 
 impl PcCustomEngine {
+    /// 試用として適用する。`hold_seconds` 以内に `confirm_trial` が来なければ、
+    /// 次の起動時に自動で元へ戻す。
+    ///
+    /// 見た目に関わる設定は、説明を読んでも良し悪しが判断できない。
+    /// 実際に適用した状態を見てから決められるようにするための経路。
+    /// 期限は**メモリではなく journal に持つ**ので、途中でアプリが落ちても取り残されない。
+    pub fn commit_preview_as_trial(
+        &self,
+        preview_token: &str,
+        hold_seconds: u32,
+    ) -> CoreResult<CommitResult> {
+        // 上限を設ける。長すぎる試用は「戻るはずだったのに戻らない」と同じ体験になる。
+        let hold = hold_seconds.clamp(10, 300);
+        let result = self.commit_preview(preview_token)?;
+        if result.status == "succeeded" {
+            let now = now_ms();
+            self.journal
+                .begin_trial(result.transaction_id, now + u64::from(hold) * 1000, now)?;
+        }
+        Ok(result)
+    }
+
+    /// 利用者が「保存する」を押した。以後この変更は自動で戻さない。
+    pub fn confirm_trial(&self, transaction_id: Uuid) -> CoreResult<bool> {
+        self.journal.confirm_trial(transaction_id, now_ms())
+    }
+
     pub fn commit_preview(&self, preview_token: &str) -> CoreResult<CommitResult> {
         let preview = self.previews.lock().remove(preview_token).ok_or_else(|| {
             CoreError::invalid_request("プレビューが期限切れか、既に使用されています。")
