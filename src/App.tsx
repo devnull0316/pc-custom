@@ -447,7 +447,10 @@ export function App() {
           <button aria-label="コマンドパレットを開く" className="command-trigger" onClick={() => setCommandOpen(true)} type="button"><Icon name="search" /><span>結果を検索</span><kbd>Ctrl K</kbd></button>
         </header>
         {uiError === null ? null : (
-          <div className="error-banner" role="alert"><Icon name="warning" /><div><strong>{dataMode === "catalog" ? "閲覧モードで開いています" : "処理を完了できませんでした"}</strong><span>{uiError.message}</span><code>{uiError.code}</code></div><button aria-label="エラーを閉じる" onClick={() => setUiError(null)} type="button"><Icon name="close" /></button></div>
+          <div className="error-banner" role="alert"><Icon name="warning" /><div><strong>{dataMode === "catalog" ? "閲覧モードで開いています" : "処理を完了できませんでした"}</strong><span>{uiError.message}</span>
+            {/* エラーコードは記録と問い合わせのためのもので、利用者が読む情報ではない。
+                いきなり見せず、必要な人だけ開けるようにする。 */}
+            <details className="error-banner__code"><summary>問い合わせ用の情報</summary><code>{uiError.code}</code></details></div><button aria-label="エラーを閉じる" onClick={() => setUiError(null)} type="button"><Icon name="close" /></button></div>
         )}
         <main aria-busy={dataMode === "loading"} id="main-content">
           {view === "home" ? (

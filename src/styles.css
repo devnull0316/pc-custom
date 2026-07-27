@@ -670,3 +670,8 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 
 /* 押せないボタンではなく、状態を伝える文。 */
 .detail-note { align-self: center; color: var(--text-tertiary); font-size: var(--fs-sm); }
+
+/* 問い合わせ用のコードは、必要な人だけ開く。 */
+.error-banner__code { margin-top: .3rem; }
+.error-banner__code summary { color: var(--text-tertiary); font-size: var(--fs-xs); cursor: pointer; }
+.error-banner__code code { display: block; margin-top: .25rem; font-size: var(--fs-xs); }
