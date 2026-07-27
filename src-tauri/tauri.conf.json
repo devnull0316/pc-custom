@@ -41,6 +41,7 @@
       "nsis"
     ],
     "category": "Utility",
+    "publisher": "PCカスタム",
     "shortDescription": "Windows の設定を変更し、1件ずつ元へ戻す",
     "longDescription": "PCカスタム は、利用場面に合わせた Windows の設定変更を事前確認・記録し、項目ごとに元へ戻せる per-user アプリです。",
     "windows": {
