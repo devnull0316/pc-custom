@@ -51,16 +51,16 @@ pub use transaction_lock::{
 };
 pub use update_status::read_windows_update_status;
 pub use window_effects::{apply_mica_backdrop, system_accent_color, AccentColor};
-pub use window_placement::{
-    capture_window_layout, capture_window_layout_originals,
-    classify_window_layout_transaction, observe_original_window_placements,
-    observe_window_layout, restore_window_layout, restore_window_placement_entries,
-    verify_captured_window_layout_originals, WindowLayoutTransactionState,
-};
 #[cfg(all(test, windows))]
 pub(crate) use window_placement::{
     allow_own_window_candidates_for_test, capture_window_entry_for_test,
     read_window_placement_for_test,
+};
+pub use window_placement::{
+    capture_window_layout, capture_window_layout_originals, classify_window_layout_transaction,
+    observe_original_window_placements, observe_window_layout, restore_window_layout,
+    restore_window_placement_entries, verify_captured_window_layout_originals,
+    WindowLayoutTransactionState,
 };
 pub use wmi_process::wmi_process_ids;
 

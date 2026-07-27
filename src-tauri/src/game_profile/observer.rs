@@ -48,7 +48,7 @@ impl ProcessMatcher {
             profile_id,
             MatchBinding {
                 canonical_path_lower: binding.canonical_path.to_ascii_lowercase(),
-                file_identity: binding.file_identity.clone(),
+                file_identity: binding.file_identity,
             },
         );
         self.seen.entry(profile_id).or_default();
@@ -159,7 +159,7 @@ impl ProcessMatcher {
                 current.clone()
             };
             for instance in previous.difference(&current) {
-                if confirmed_exits.map_or(true, |confirmed| confirmed.contains(instance)) {
+                if confirmed_exits.is_none_or(|confirmed| confirmed.contains(instance)) {
                     events.push(ObservedEvent::Exited {
                         profile: *profile_id,
                         instance: *instance,
@@ -285,7 +285,7 @@ mod tests {
             canonical_path: path.to_owned(),
             file_identity: Some(identity(7)),
         };
-        let events = m.observe(&[reused.clone()]);
+        let events = m.observe(std::slice::from_ref(&reused));
         assert!(events.contains(&ObservedEvent::Exited {
             profile: p,
             instance: pid(100)

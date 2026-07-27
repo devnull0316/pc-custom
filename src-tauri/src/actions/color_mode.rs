@@ -205,7 +205,10 @@ impl ColorModeAction {
             }
         }
 
+        // touched は「書き込みに成功した件数」で、ループ位置ではない。enumerate へ置き換えると
+        // 両者が同一視され、途中に continue が入った瞬間に補償ロールバックの範囲がずれる。
         let mut touched = 0usize;
+        #[allow(clippy::explicit_counter_loop)]
         for entry in entries {
             let current = match read_registry_state(&entry.location) {
                 Ok(current) => current,

@@ -11,8 +11,8 @@ pub mod validation;
 pub use contract::{
     nonce_to_lower_hex, BooleanParameter, ChoiceParameter, ElevatedActionRequest,
     ElevatedRequestEnvelope, FileIdentity, IntegrityLevel, MandatoryIntegrity,
-    OneShotNamedPipePolicy, PeerEvidence, PeerExpectation, TypedActionParameters,
-    TypedParameter, TypedParameterValue, UnsignedParameter, ValidatedElevatedRequest, ValidatedPeer,
+    OneShotNamedPipePolicy, PeerEvidence, PeerExpectation, TypedActionParameters, TypedParameter,
+    TypedParameterValue, UnsignedParameter, ValidatedElevatedRequest, ValidatedPeer,
     IPC_PROTOCOL_VERSION, MAX_ENVELOPE_BYTES, NONCE_BYTES, ONE_SHOT_NAMED_PIPE_POLICY,
 };
 pub use validation::{

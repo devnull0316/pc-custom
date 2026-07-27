@@ -115,10 +115,7 @@ impl WindowColorAction {
         }
     }
 
-    fn composite<'a>(
-        envelope: &'a BackupEnvelope,
-        stage: ActionStage,
-    ) -> ActionResult<&'a CompositeBackup> {
+    fn composite(envelope: &BackupEnvelope, stage: ActionStage) -> ActionResult<&CompositeBackup> {
         let BackupPayload::Composite(composite) = &envelope.payload else {
             return Err(ActionError::recovery_required(
                 stage,
@@ -155,7 +152,9 @@ impl WindowColorAction {
 
     /// 2値を順に書き込む。途中で失敗したら、書けた分を元へ戻してから中断する。
     fn apply_entries(entries: &[RegistryBackup]) -> ActionResult<()> {
+        // written は「書き込みに成功した件数」で、ループ位置ではない。理由は color_mode と同じ。
         let mut written = 0usize;
+        #[allow(clippy::explicit_counter_loop)]
         for entry in entries {
             let current = read_registry_state(&entry.location).map_err(|error| {
                 map_windows_error(

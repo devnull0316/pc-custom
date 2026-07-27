@@ -819,9 +819,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::SetupLaunchApps => "固定allowlistのアプリを、起動中でなければ直接開く",
         ActionId::SetupWindowsUpdateStatus => "Windows Update Agentの状態を変更せず確認",
         ActionId::SetupDefaultApps => "Windowsの既定のアプリ画面で利用者が選択",
-        ActionId::SetupWindowLayout => {
-            "明示保存した、現在開いている対象ウィンドウの位置と表示状態"
-        }
+        ActionId::SetupWindowLayout => "明示保存した、現在開いている対象ウィンドウの位置と表示状態",
         ActionId::SetupAudioOutput => "公開APIで出力先を確認し、Windowsのサウンド画面で選択",
     }
 }
@@ -887,9 +885,7 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::SetupWindowLayout => {
             "EnumWindows・GetWindowPlacement・SetWindowPlacementによる明示保存と復元"
         }
-        ActionId::SetupAudioOutput => {
-            "MMDeviceEnumeratorの読み取りと固定ms-settings URIによる案内"
-        }
+        ActionId::SetupAudioOutput => "MMDeviceEnumeratorの読み取りと固定ms-settings URIによる案内",
         _ => method_name(method),
     }
 }
@@ -1528,7 +1524,10 @@ mod tests {
     #[test]
     fn official_windows_guides_are_not_presented_as_unverified_registry_candidates() {
         for id in [ActionId::SetupDefaultApps, ActionId::SetupAudioOutput] {
-            let metadata = ACTION_REGISTRY.get(id).expect("registered guide").metadata();
+            let metadata = ACTION_REGISTRY
+                .get(id)
+                .expect("registered guide")
+                .metadata();
             let ui = action_presentation(
                 metadata,
                 CompatibilityCatalog::decision_for_build(26_100),

@@ -38,7 +38,8 @@ pub fn observe_taskbar_layout() -> WindowsResult<TaskbarLayoutObservation> {
         COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants, UIA_NamePropertyId,
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+        UIA_NamePropertyId,
     };
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowRect};
 
@@ -166,7 +167,11 @@ pub fn observe_taskbar_clock_text() -> WindowsResult<String> {
         .into_iter()
         .find(|name| name.starts_with("時計") || name.starts_with("Clock"))
         .ok_or_else(|| {
-            WindowsError::new(WindowsErrorKind::InvalidData, "clock element not found", None)
+            WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "clock element not found",
+                None,
+            )
         })
 }
 
@@ -269,10 +274,7 @@ pub fn find_explorer_window_by_title(needle: &str) -> WindowsResult<isize> {
         found: None,
     };
     unsafe {
-        let _ = EnumWindows(
-            Some(callback),
-            LPARAM(&mut search as *mut Search as isize),
-        );
+        let _ = EnumWindows(Some(callback), LPARAM(&mut search as *mut Search as isize));
     }
     search.found.ok_or_else(|| {
         WindowsError::new(
@@ -412,9 +414,7 @@ mod tests {
         prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryBackup,
         RegistryRestoreOutcome, RegistryTarget,
     };
-    use crate::windows::{
-        notify_explorer_settings_changed, notify_theme_changed, write_raw_value,
-    };
+    use crate::windows::{notify_explorer_settings_changed, notify_theme_changed, write_raw_value};
     use std::{
         collections::HashSet,
         path::Path,
@@ -424,7 +424,7 @@ mod tests {
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE, WPARAM};
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetPixel,
-        GetWindowDC, ReleaseDC, SelectObject, HDC, CLR_INVALID,
+        GetWindowDC, ReleaseDC, SelectObject, CLR_INVALID, HDC,
     };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
@@ -471,9 +471,13 @@ mod tests {
             for entry in &self.entries {
                 write_raw_value(&entry.location, entry.intended_type, &entry.intended_raw)
                     .expect("write probe value");
-                let applied = read_registry_state(&entry.location)
-                    .expect("read applied probe value");
-                assert_eq!(applied, entry.applied_state(), "probe value was applied exactly");
+                let applied =
+                    read_registry_state(&entry.location).expect("read applied probe value");
+                assert_eq!(
+                    applied,
+                    entry.applied_state(),
+                    "probe value was applied exactly"
+                );
             }
             self.notify();
         }
@@ -488,25 +492,33 @@ mod tests {
             }
             self.notify();
             for entry in &self.entries {
-                let restored = read_registry_state(&entry.location)
-                    .expect("read restored probe value");
-                assert_eq!(restored, entry.original,
-                    "value, type, bytes, and absence must be restored exactly");
+                let restored =
+                    read_registry_state(&entry.location).expect("read restored probe value");
+                assert_eq!(
+                    restored, entry.original,
+                    "value, type, bytes, and absence must be restored exactly"
+                );
             }
             self.restored = true;
         }
 
         fn notify(&self) {
             match self.notification {
-                ProbeNotification::Explorer => { let _ = notify_explorer_settings_changed(); }
-                ProbeNotification::Theme => { let _ = notify_theme_changed(); }
+                ProbeNotification::Explorer => {
+                    let _ = notify_explorer_settings_changed();
+                }
+                ProbeNotification::Theme => {
+                    let _ = notify_theme_changed();
+                }
             }
         }
     }
 
     impl Drop for RegistryRestoreGuard {
         fn drop(&mut self) {
-            if self.restored { return; }
+            if self.restored {
+                return;
+            }
             for entry in self.entries.iter().rev() {
                 if let Err(error) = restore_registry_backup(entry) {
                     eprintln!("emergency probe restoration failed: {error}");
@@ -525,16 +537,22 @@ mod tests {
     fn explorer_windows() -> Vec<ExplorerWindowInfo> {
         unsafe extern "system" fn callback(window: HWND, param: LPARAM) -> BOOL {
             let result = &mut *(param.0 as *mut Vec<ExplorerWindowInfo>);
-            if !IsWindowVisible(window).as_bool() { return TRUE; }
+            if !IsWindowVisible(window).as_bool() {
+                return TRUE;
+            }
             let mut class_buffer = [0u16; 128];
             let class_len = GetClassNameW(window, &mut class_buffer);
-            if class_len <= 0 { return TRUE; }
+            if class_len <= 0 {
+                return TRUE;
+            }
             if String::from_utf16_lossy(&class_buffer[..class_len as usize]) != "CabinetWClass" {
                 return TRUE;
             }
             let mut title_buffer = [0u16; 512];
             let title_len = GetWindowTextW(window, &mut title_buffer);
-            if title_len <= 0 { return TRUE; }
+            if title_len <= 0 {
+                return TRUE;
+            }
             result.push(ExplorerWindowInfo {
                 handle: window.0 as isize,
                 title: String::from_utf16_lossy(&title_buffer[..title_len as usize]),
@@ -544,8 +562,10 @@ mod tests {
 
         let mut result = Vec::new();
         unsafe {
-            let _ = EnumWindows(Some(callback),
-                LPARAM(&mut result as *mut Vec<ExplorerWindowInfo> as isize));
+            let _ = EnumWindows(
+                Some(callback),
+                LPARAM(&mut result as *mut Vec<ExplorerWindowInfo> as isize),
+            );
         }
         result
     }
@@ -556,8 +576,10 @@ mod tests {
 
     impl OwnedExplorerWindow {
         fn open(path: &Path, title_needle: &str) -> WindowsResult<Self> {
-            let existing: HashSet<isize> = explorer_windows().into_iter()
-                .map(|window| window.handle).collect();
+            let existing: HashSet<isize> = explorer_windows()
+                .into_iter()
+                .map(|window| window.handle)
+                .collect();
             std::process::Command::new("explorer.exe")
                 .arg(format!("/n,{}", path.display()))
                 .spawn()
@@ -574,12 +596,17 @@ mod tests {
                         let _ = SetForegroundWindow(handle);
                     }
                     sleep(Duration::from_millis(700));
-                    return Ok(Self { handle: Some(window.handle) });
+                    return Ok(Self {
+                        handle: Some(window.handle),
+                    });
                 }
             }
             eprintln!("Explorer windows after launch: {:?}", explorer_windows());
-            Err(WindowsError::new(WindowsErrorKind::InvalidData,
-                "new owned Explorer window not found", None))
+            Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "new owned Explorer window not found",
+                None,
+            ))
         }
 
         fn handle(&self) -> isize {
@@ -602,13 +629,19 @@ mod tests {
 
     fn close_owned_explorer_window(handle: isize, assert_closed: bool) {
         let window = HWND(handle as *mut core::ffi::c_void);
-        unsafe { let _ = PostMessageW(window, WM_CLOSE, WPARAM(0), LPARAM(0)); }
+        unsafe {
+            let _ = PostMessageW(window, WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
-            if !unsafe { IsWindow(window) }.as_bool() { return; }
+            if !unsafe { IsWindow(window) }.as_bool() {
+                return;
+            }
             sleep(Duration::from_millis(100));
         }
-        if assert_closed { panic!("owned Explorer window did not close"); }
+        if assert_closed {
+            panic!("owned Explorer window did not close");
+        }
         eprintln!("owned Explorer window did not close during emergency cleanup");
     }
 
@@ -633,29 +666,42 @@ mod tests {
                 let automation: IUIAutomation =
                     CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
                         .map_err(|_| fail("CoCreateInstance"))?;
-                let root: IUIAutomationElement = automation.ElementFromHandle(window)
+                let root: IUIAutomationElement = automation
+                    .ElementFromHandle(window)
                     .map_err(|_| fail("ElementFromHandle explorer"))?;
-                let condition = automation.CreateTrueCondition()
+                let condition = automation
+                    .CreateTrueCondition()
                     .map_err(|_| fail("CreateTrueCondition"))?;
-                let all = root.FindAll(TreeScope_Descendants, &condition)
+                let all = root
+                    .FindAll(TreeScope_Descendants, &condition)
                     .map_err(|_| fail("FindAll"))?;
                 let count = all.Length().map_err(|_| fail("Length"))?;
                 for index in 0..count {
-                    let Ok(element) = all.GetElement(index) else { continue; };
-                    let Ok(name) = element.CurrentName() else { continue; };
-                    if name.to_string() != exact_name
+                    let Ok(element) = all.GetElement(index) else {
+                        continue;
+                    };
+                    let Ok(name) = element.CurrentName() else {
+                        continue;
+                    };
+                    if name != exact_name
                         || element.CurrentControlType().ok() != Some(UIA_ListItemControlTypeId)
                     {
                         continue;
                     }
-                    let bounds = element.CurrentBoundingRectangle()
+                    let bounds = element
+                        .CurrentBoundingRectangle()
                         .map_err(|_| fail("CurrentBoundingRectangle"))?;
                     return Ok(ExplorerItemObservation { bounds });
                 }
-                Err(WindowsError::new(WindowsErrorKind::InvalidData,
-                    "requested Explorer list item not found", None))
+                Err(WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "requested Explorer list item not found",
+                    None,
+                ))
             })();
-            if owns_com { CoUninitialize(); }
+            if owns_com {
+                CoUninitialize();
+            }
             result
         }
     }
@@ -685,11 +731,13 @@ mod tests {
         }
         pitches.sort_unstable();
         let Some(row_pitch) = pitches.get(pitches.len() / 2).copied() else {
-            return Err(WindowsError::new(WindowsErrorKind::InvalidData,
-                "Explorer items are not in a measurable vertical list", None));
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "Explorer items are not in a measurable vertical list",
+                None,
+            ));
         };
-        let mut heights: Vec<i32> = bounds.iter()
-            .map(|rect| rect.bottom - rect.top).collect();
+        let mut heights: Vec<i32> = bounds.iter().map(|rect| rect.bottom - rect.top).collect();
         heights.sort_unstable();
         Ok(ExplorerRowLayout {
             item_height: heights[heights.len() / 2],
@@ -751,8 +799,7 @@ mod tests {
         Ok(PixelStats {
             samples: colors.len(),
             luminance_mean,
-            luminance_variance: (luminance_square_sum / count
-                - luminance_mean * luminance_mean)
+            luminance_variance: (luminance_square_sum / count - luminance_mean * luminance_mean)
                 .max(0.0),
             saturation_mean,
             saturation_variance: (saturation_square_sum / count
@@ -776,8 +823,7 @@ mod tests {
             ));
         }
         let mut rect = RECT::default();
-        unsafe { GetWindowRect(taskbar, &mut rect) }
-            .map_err(|_| fail("GetWindowRect taskbar"))?;
+        unsafe { GetWindowRect(taskbar, &mut rect) }.map_err(|_| fail("GetWindowRect taskbar"))?;
         let width = rect.right - rect.left;
         let height = rect.bottom - rect.top;
         if width < 20 || height < 20 {
@@ -803,7 +849,9 @@ mod tests {
                 }
             }
         }
-        unsafe { let _ = ReleaseDC(HWND::default(), screen); }
+        unsafe {
+            let _ = ReleaseDC(HWND::default(), screen);
+        }
         pixel_stats(&colors)
     }
 
@@ -831,7 +879,9 @@ mod tests {
         }
         let memory = unsafe { CreateCompatibleDC(source) };
         if memory.0.is_null() {
-            unsafe { let _ = ReleaseDC(window, source); }
+            unsafe {
+                let _ = ReleaseDC(window, source);
+            }
             return Err(fail("CreateCompatibleDC Explorer"));
         }
         let bitmap = unsafe { CreateCompatibleBitmap(source, width, height) };
@@ -890,20 +940,25 @@ mod tests {
 
     fn current_boolean_value(target: RegistryTarget) -> u32 {
         let state = read_registry_state(&target.location()).expect("read current probe value");
-        if state.value_existed && state.value_type == Some(REG_DWORD) && state.raw_bytes.len() == 4 {
+        if state.value_existed && state.value_type == Some(REG_DWORD) && state.raw_bytes.len() == 4
+        {
             let value = u32::from_le_bytes(state.raw_bytes[..4].try_into().expect("DWORD bytes"));
-            if value <= 1 { return value; }
+            if value <= 1 {
+                return value;
+            }
         }
         0
     }
 
     fn prepare_boolean_probe(target: RegistryTarget, desired: u32) -> RegistryBackup {
-        prepare_registry_backup(target, REG_DWORD, desired.to_le_bytes().to_vec(),
-            1, 26_200).expect("prepare typed probe backup")
+        prepare_registry_backup(target, REG_DWORD, desired.to_le_bytes().to_vec(), 1, 26_200)
+            .expect("prepare typed probe backup")
     }
 
     fn probe_folder(prefix: &str, item_names: &[&str]) -> tempfile::TempDir {
-        let dir = tempfile::Builder::new().prefix(prefix).tempdir()
+        let dir = tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir()
             .expect("create unique probe directory");
         for name in item_names {
             std::fs::write(dir.path().join(name), b"probe").expect("create probe item");
@@ -912,8 +967,11 @@ mod tests {
     }
 
     fn probe_title(dir: &tempfile::TempDir) -> String {
-        dir.path().file_name().expect("probe directory name")
-            .to_string_lossy().into_owned()
+        dir.path()
+            .file_name()
+            .expect("probe directory name")
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// **この観測は判定に使えない**（記録として残す）。
@@ -926,8 +984,7 @@ mod tests {
     #[test]
     #[ignore = "記録用: UIA名は拡張子表示設定に鈍感なため判定に使わないこと"]
     fn show_extensions_write_changes_the_fresh_explorer_listing() {
-        const SUBKEY: &str =
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
         const STEM: &str = "ext-row-9b41";
 
         let dir = probe_folder("totonoe-ext-probe-", &["ext-row-9b41.txt"]);
@@ -965,7 +1022,9 @@ mod tests {
         // HideFileExt: 0 = 拡張子を表示 / 1 = 隠す
         let desired: u32 = if before { 1 } else { 0 };
         let mut guard = RegistryRestoreGuard::new(
-            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+            vec![prepare_boolean_probe(target, desired)],
+            ProbeNotification::Explorer,
+        );
         guard.apply();
         sleep(Duration::from_millis(500));
 
@@ -981,15 +1040,23 @@ mod tests {
             }
         };
         guard.restore_and_assert();
-        assert_eq!(current_boolean_value(target), original, "元の値へ正確に戻す");
+        assert_eq!(
+            current_boolean_value(target),
+            original,
+            "元の値へ正確に戻す"
+        );
 
         match applied {
             Some(seen) => {
                 println!("applied: extension_shown={seen} (desired HideFileExt={desired})");
                 if seen != before {
-                    println!("EVIDENCE: show_extensions changed what a fresh Explorer window lists");
+                    println!(
+                        "EVIDENCE: show_extensions changed what a fresh Explorer window lists"
+                    );
                 } else {
-                    println!("EVIDENCE: show_extensions did not change a fresh Explorer window listing");
+                    println!(
+                        "EVIDENCE: show_extensions did not change a fresh Explorer window listing"
+                    );
                 }
             }
             None => println!("EVIDENCE: inconclusive"),
@@ -1001,8 +1068,7 @@ mod tests {
     #[test]
     #[ignore = "temporarily changes hidden-file visibility and opens only an owned Explorer window"]
     fn show_hidden_write_changes_the_fresh_explorer_listing() {
-        const SUBKEY: &str =
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
         const VISIBLE: &str = "plain-row-5c2e";
         const SECRET: &str = "secret-row-5c2e";
 
@@ -1010,7 +1076,10 @@ mod tests {
         let title = probe_title(&dir);
         // 片方だけ隠し属性にする。属性が付かなければ判定できないので確認する。
         let secret_path = dir.path().join(SECRET);
-        let _ = std::process::Command::new("attrib").arg("+h").arg(&secret_path).output();
+        let _ = std::process::Command::new("attrib")
+            .arg("+h")
+            .arg(&secret_path)
+            .output();
         let hidden_attribute_set = {
             use std::os::windows::fs::MetadataExt;
             std::fs::metadata(&secret_path)
@@ -1022,9 +1091,7 @@ mod tests {
             return;
         }
 
-        let sees_secret = |handle: isize| {
-            explorer_item_observation(handle, SECRET).is_ok()
-        };
+        let sees_secret = |handle: isize| explorer_item_observation(handle, SECRET).is_ok();
 
         let before_window = match OwnedExplorerWindow::open(dir.path(), &title) {
             Ok(window) => window,
@@ -1048,7 +1115,9 @@ mod tests {
         // 1 = 隠しファイルを表示 / 2 = 表示しない
         let desired: u32 = if before { 2 } else { 1 };
         let mut guard = RegistryRestoreGuard::new(
-            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+            vec![prepare_boolean_probe(target, desired)],
+            ProbeNotification::Explorer,
+        );
         guard.apply();
         sleep(Duration::from_millis(500));
 
@@ -1074,7 +1143,9 @@ mod tests {
                 if seen != before {
                     println!("EVIDENCE: show_hidden changed what a fresh Explorer window lists");
                 } else {
-                    println!("EVIDENCE: show_hidden did not change a fresh Explorer window listing");
+                    println!(
+                        "EVIDENCE: show_hidden did not change a fresh Explorer window listing"
+                    );
                 }
             }
             None => println!("EVIDENCE: inconclusive"),
@@ -1084,8 +1155,7 @@ mod tests {
     #[test]
     #[ignore = "temporarily changes item checkboxes and opens only an owned Explorer window"]
     fn explorer_item_checkboxes_write_changes_the_fresh_explorer_ui() {
-        const SUBKEY: &str =
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
         const ITEMS: &[&str] = &[
             "checkbox-row-a-7f3a",
             "checkbox-row-b-7f3a",
@@ -1119,7 +1189,9 @@ mod tests {
         let original = current_boolean_value(target);
         let desired = u32::from(original == 0);
         let mut guard = RegistryRestoreGuard::new(
-            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+            vec![prepare_boolean_probe(target, desired)],
+            ProbeNotification::Explorer,
+        );
         guard.apply();
         sleep(Duration::from_millis(500));
 
@@ -1174,7 +1246,10 @@ mod tests {
             }
         };
         restored_window.close_and_assert();
-        assert_eq!(restored, before, "restored Explorer item left edges must equal baseline");
+        assert_eq!(
+            restored, before,
+            "restored Explorer item left edges must equal baseline"
+        );
 
         if deltas.iter().any(|delta| *delta != 0) {
             println!("EVIDENCE: item checkbox setting shifted Explorer item left edges");
@@ -1186,11 +1261,12 @@ mod tests {
     #[test]
     #[ignore = "temporarily changes compact view and opens only an owned Explorer window"]
     fn explorer_compact_view_write_changes_the_fresh_explorer_row_spacing() {
-        const SUBKEY: &str =
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
         const ITEMS: &[&str] = &[
-            "compact-row-a-71c2", "compact-row-b-71c2",
-            "compact-row-c-71c2", "compact-row-d-71c2",
+            "compact-row-a-71c2",
+            "compact-row-b-71c2",
+            "compact-row-c-71c2",
+            "compact-row-d-71c2",
         ];
         let target = RegistryTarget::current_user_64(SUBKEY, "UseCompactMode");
         let dir = probe_folder("totonoe-compact-probe-", ITEMS);
@@ -1211,7 +1287,9 @@ mod tests {
         let original = current_boolean_value(target);
         let desired = u32::from(original == 0);
         let mut guard = RegistryRestoreGuard::new(
-            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Explorer);
+            vec![prepare_boolean_probe(target, desired)],
+            ProbeNotification::Explorer,
+        );
         guard.apply();
         sleep(Duration::from_millis(500));
 
@@ -1229,10 +1307,15 @@ mod tests {
         let restored = explorer_row_layout(restored_window.handle(), ITEMS)
             .expect("observe restored Explorer row spacing");
         restored_window.close_and_assert();
-        assert_eq!(restored, before, "restored Explorer row spacing must equal baseline");
+        assert_eq!(
+            restored, before,
+            "restored Explorer row spacing must equal baseline"
+        );
 
         if applied.list_height != before.list_height {
-            println!("EVIDENCE: compact view changed four-item list height in a fresh Explorer window");
+            println!(
+                "EVIDENCE: compact view changed four-item list height in a fresh Explorer window"
+            );
         } else {
             println!("EVIDENCE: compact view did not change measurable four-item list height");
         }
@@ -1241,8 +1324,7 @@ mod tests {
     #[test]
     #[ignore = "temporarily changes transparency and samples taskbar pixels"]
     fn appearance_transparency_write_changes_taskbar_pixel_variance() {
-        const SUBKEY: &str =
-            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
         let target = RegistryTarget::current_user_64(SUBKEY, "EnableTransparency");
         let before = match taskbar_pixel_stats() {
             Ok(observation) => observation,
@@ -1263,7 +1345,9 @@ mod tests {
         );
 
         let mut guard = RegistryRestoreGuard::new(
-            vec![prepare_boolean_probe(target, desired)], ProbeNotification::Theme);
+            vec![prepare_boolean_probe(target, desired)],
+            ProbeNotification::Theme,
+        );
         guard.apply();
         sleep(Duration::from_millis(1_500));
         let applied = match taskbar_pixel_stats() {
@@ -1307,14 +1391,15 @@ mod tests {
                 return;
             }
         }
-        println!("EVIDENCE: taskbar pixel statistics captured before and after transparency change");
+        println!(
+            "EVIDENCE: taskbar pixel statistics captured before and after transparency change"
+        );
     }
 
     #[test]
     #[ignore = "temporarily changes color mode and samples only an owned Explorer window"]
     fn theme_color_mode_write_changes_a_fresh_explorer_window_luminance() {
-        const SUBKEY: &str =
-            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
         let apps = RegistryTarget::current_user_64(SUBKEY, "AppsUseLightTheme");
         let system = RegistryTarget::current_user_64(SUBKEY, "SystemUsesLightTheme");
         let dir = probe_folder("totonoe-theme-probe-", &["theme-sample-82d1"]);
@@ -1340,10 +1425,13 @@ mod tests {
         let desired = u32::from(before < 128);
         println!("before: luminance={before} desired_light={desired}");
 
-        let mut guard = RegistryRestoreGuard::new(vec![
-            prepare_boolean_probe(apps, desired),
-            prepare_boolean_probe(system, desired),
-        ], ProbeNotification::Theme);
+        let mut guard = RegistryRestoreGuard::new(
+            vec![
+                prepare_boolean_probe(apps, desired),
+                prepare_boolean_probe(system, desired),
+            ],
+            ProbeNotification::Theme,
+        );
         guard.apply();
         sleep(Duration::from_millis(700));
 
@@ -1393,13 +1481,17 @@ mod tests {
             }
         };
         restored_window.close_and_assert();
-        assert!(restored.abs_diff(before) <= 25,
-            "restored Explorer luminance must return near baseline: {before} -> {restored}");
+        assert!(
+            restored.abs_diff(before) <= 25,
+            "restored Explorer luminance must return near baseline: {before} -> {restored}"
+        );
 
         if applied.abs_diff(before) >= 60 {
             println!("EVIDENCE: fresh Explorer luminance changed from {before} to {applied}");
         } else {
-            println!("EVIDENCE: fresh Explorer luminance stayed near baseline: {before} -> {applied}");
+            println!(
+                "EVIDENCE: fresh Explorer luminance stayed near baseline: {before} -> {applied}"
+            );
         }
     }
 
@@ -1439,8 +1531,8 @@ mod tests {
     #[ignore = "実機のタスクバーを一時的に変更する証拠取得用"]
     fn taskbar_alignment_write_actually_moves_the_start_button() {
         use crate::backup::{
-            prepare_registry_backup, read_registry_state, restore_registry_backup, RegistryTarget,
-            RegistryRestoreOutcome,
+            prepare_registry_backup, read_registry_state, restore_registry_backup,
+            RegistryRestoreOutcome, RegistryTarget,
         };
         use crate::windows::{notify_explorer_settings_changed, write_raw_value};
         use std::{thread::sleep, time::Duration};
@@ -1471,21 +1563,17 @@ mod tests {
             }
         };
         let current = read_registry_state(&target.location()).expect("read TaskbarAl");
-        let original_value = current
-            .value_existed
-            .then(|| u32::from_le_bytes(current.raw_bytes[..4].try_into().unwrap_or([0; 4])))
-            .unwrap_or(1);
+        let original_value = if current.value_existed {
+            u32::from_le_bytes(current.raw_bytes[..4].try_into().unwrap_or([0; 4]))
+        } else {
+            1
+        };
         // 0 = 左寄せ, 1 = 中央寄せ。いまと反対側へ動かす。
         let flipped = if original_value == 0 { 1u32 } else { 0u32 };
 
-        let backup = prepare_registry_backup(
-            target,
-            REG_DWORD,
-            flipped.to_le_bytes().to_vec(),
-            1,
-            26_200,
-        )
-        .expect("prepare backup before evidence run");
+        let backup =
+            prepare_registry_backup(target, REG_DWORD, flipped.to_le_bytes().to_vec(), 1, 26_200)
+                .expect("prepare backup before evidence run");
 
         println!(
             "before: TaskbarAl={original_value} start_center_ratio={:.3}",
@@ -1508,7 +1596,9 @@ mod tests {
             "元の状態へ戻せること: {restored:?}"
         );
         let after_restore = wait_for_layout_change(
-            moved.map(|m| m.start_center_ratio()).unwrap_or(baseline.start_center_ratio()),
+            moved
+                .map(|m| m.start_center_ratio())
+                .unwrap_or(baseline.start_center_ratio()),
         );
 
         match moved {
@@ -1534,7 +1624,10 @@ mod tests {
 
         // 復元の正確性は既存の検証で担保する。
         let final_state = read_registry_state(&backup.location).expect("read back");
-        assert_eq!(final_state, backup.original, "値・型・有無まで元どおりに戻す");
+        assert_eq!(
+            final_state, backup.original,
+            "値・型・有無まで元どおりに戻す"
+        );
     }
 
     /// アクセントカラーは DwmGetColorizationColor で**実効色**を読めるため、
@@ -1567,10 +1660,15 @@ mod tests {
         );
 
         // 元の色から十分離れた色を選ぶ（判定を確実にするため）。
-        let probe: u32 = if before.red > 128 { 0xC4_20_60_A0 } else { 0xC4_C0_50_20 };
+        let probe: u32 = if before.red > 128 {
+            0xC4_20_60_A0
+        } else {
+            0xC4_C0_50_20
+        };
         let target = RegistryTarget::current_user_64(DWM_SUBKEY, VALUE);
-        let backup = prepare_registry_backup(target, REG_DWORD, probe.to_le_bytes().to_vec(), 1, 26_200)
-            .expect("prepare accent backup");
+        let backup =
+            prepare_registry_backup(target, REG_DWORD, probe.to_le_bytes().to_vec(), 1, 26_200)
+                .expect("prepare accent backup");
 
         write_raw_value(&backup.location, REG_DWORD, &probe.to_le_bytes())
             .expect("write probe colour");
@@ -1609,7 +1707,10 @@ mod tests {
         }
 
         let final_state = read_registry_state(&backup.location).expect("read back");
-        assert_eq!(final_state, backup.original, "値・型・有無まで元どおりに戻す");
+        assert_eq!(
+            final_state, backup.original,
+            "値・型・有無まで元どおりに戻す"
+        );
     }
 
     /// すでに「変更可能」として出荷しているタスクバー系Actionが、本当に効いているか。
@@ -1635,7 +1736,10 @@ mod tests {
             }
         };
         let current = read_registry_state(&target.location()).expect("read ShowTaskViewButton");
-        println!("before: present={before_present} value_exists={}", current.value_existed);
+        println!(
+            "before: present={before_present} value_exists={}",
+            current.value_existed
+        );
 
         let flipped: u32 = if before_present { 0 } else { 1 };
         let backup = prepare_registry_backup(target, 4, flipped.to_le_bytes().to_vec(), 1, 26_200)
@@ -1717,7 +1821,11 @@ mod tests {
         assert_eq!(after, backup.original, "元どおりに戻す");
         println!(
             "EVIDENCE: 出荷中のウィジェット切替は実UIへ{}",
-            if changed { "反映される" } else { "反映されなかった" }
+            if changed {
+                "反映される"
+            } else {
+                "反映されなかった"
+            }
         );
     }
 
@@ -1827,18 +1935,24 @@ mod tests {
         };
         use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
         unsafe {
-            let taskbar: HWND = FindWindowW(windows::core::w!("Shell_TrayWnd"), None).expect("taskbar");
+            let taskbar: HWND =
+                FindWindowW(windows::core::w!("Shell_TrayWnd"), None).expect("taskbar");
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             let automation: IUIAutomation =
                 CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).expect("uia");
             let root: IUIAutomationElement = automation.ElementFromHandle(taskbar).expect("root");
             let condition = automation.CreateTrueCondition().expect("cond");
-            let all = root.FindAll(TreeScope_Descendants, &condition).expect("all");
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .expect("all");
             let count = all.Length().unwrap_or(0);
             println!("要素数: {count}");
             for index in 0..count {
                 if let Ok(element) = all.GetElement(index) {
-                    let name = element.CurrentName().map(|n| n.to_string()).unwrap_or_default();
+                    let name = element
+                        .CurrentName()
+                        .map(|n| n.to_string())
+                        .unwrap_or_default();
                     if !name.trim().is_empty() {
                         println!("[{index}] {name}");
                     }
@@ -1888,13 +2002,23 @@ mod tests {
                 .arg("+h")
                 .arg(&hidden)
                 .output();
-            let _ = std::fs::OpenOptions::new().read(true).share_mode(3).open(&hidden);
+            let _ = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(3)
+                .open(&hidden);
         }
 
         // Explorerで開く。
         let path = HSTRING::from(dir.as_os_str());
         unsafe {
-            ShellExecuteW(None, windows::core::w!("open"), &path, None, None, SW_SHOWNORMAL);
+            ShellExecuteW(
+                None,
+                windows::core::w!("open"),
+                &path,
+                None,
+                None,
+                SW_SHOWNORMAL,
+            );
         }
         sleep(Duration::from_millis(2500));
 
@@ -1918,7 +2042,10 @@ mod tests {
             }
         };
         let before_visible = listed(&before_names);
-        println!("before: hidden_file_listed={before_visible} items={}", before_names.len());
+        println!(
+            "before: hidden_file_listed={before_visible} items={}",
+            before_names.len()
+        );
 
         let target = RegistryTarget::current_user_64(SUBKEY, "Hidden");
         // 1 = 隠しファイルを表示, 2 = 表示しない。
@@ -1948,7 +2075,14 @@ mod tests {
         let mut fresh_window_reflects = None;
         if !changed {
             unsafe {
-                ShellExecuteW(None, windows::core::w!("open"), &path, None, None, SW_SHOWNORMAL);
+                ShellExecuteW(
+                    None,
+                    windows::core::w!("open"),
+                    &path,
+                    None,
+                    None,
+                    SW_SHOWNORMAL,
+                );
             }
             sleep(Duration::from_millis(2500));
             if let Ok(handle) = find_explorer_window_by_title(PROBE_DIR) {
@@ -1982,11 +2116,13 @@ mod tests {
         assert_eq!(after, backup.original, "元どおりに戻す");
         match (changed, fresh_window_reflects) {
             (true, _) => println!("EVIDENCE: 隠しファイル表示は開いている窓へ即座に反映される"),
-            (false, Some(true)) => println!(
-                "EVIDENCE: 開いている窓には反映されないが、新しく開いた窓には反映される"
-            ),
+            (false, Some(true)) => {
+                println!("EVIDENCE: 開いている窓には反映されないが、新しく開いた窓には反映される")
+            }
             (false, Some(false)) => println!("EVIDENCE: 新しく開いた窓にも反映されない"),
-            (false, None) => println!("EVIDENCE: 開いている窓には反映されず、新窓の確認はできなかった"),
+            (false, None) => {
+                println!("EVIDENCE: 開いている窓には反映されず、新窓の確認はできなかった")
+            }
         }
     }
 
@@ -2006,14 +2142,24 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let hidden = dir.join("zz-secret-item.txt");
         std::fs::write(&hidden, b"probe").expect("create probe");
-        let _ = std::process::Command::new("attrib").arg("+h").arg(&hidden).output();
+        let _ = std::process::Command::new("attrib")
+            .arg("+h")
+            .arg(&hidden)
+            .output();
 
         let original = shell_state_show_hidden().expect("read shell state");
         println!("before: shell_state_show_hidden={original}");
 
         let path = HSTRING::from(dir.as_os_str());
         unsafe {
-            ShellExecuteW(None, windows::core::w!("open"), &path, None, None, SW_SHOWNORMAL);
+            ShellExecuteW(
+                None,
+                windows::core::w!("open"),
+                &path,
+                None,
+                None,
+                SW_SHOWNORMAL,
+            );
         }
         sleep(Duration::from_millis(2500));
 
@@ -2026,7 +2172,9 @@ mod tests {
             }
         };
         let listed = |names: &[String]| names.iter().any(|n| n.contains("zz-secret-item"));
-        let before_listed = explorer_window_item_names(window).map(|n| listed(&n)).unwrap_or(false);
+        let before_listed = explorer_window_item_names(window)
+            .map(|n| listed(&n))
+            .unwrap_or(false);
         println!("before: hidden_listed={before_listed}");
 
         set_shell_state_show_hidden(!original).expect("set via documented API");
@@ -2055,7 +2203,11 @@ mod tests {
         assert_eq!(restored, original, "元の設定へ戻す");
         println!(
             "EVIDENCE: 文書化APIでの変更は開いているExplorerへ{}",
-            if changed { "反映される" } else { "反映されない" }
+            if changed {
+                "反映される"
+            } else {
+                "反映されない"
+            }
         );
     }
 }

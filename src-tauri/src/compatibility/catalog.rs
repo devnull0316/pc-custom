@@ -1,8 +1,6 @@
 use serde::Serialize;
 
-use crate::action::{
-    ActionError, ActionErrorCode, ActionKind, ActionMetadata, ActionStage,
-};
+use crate::action::{ActionError, ActionErrorCode, ActionKind, ActionMetadata, ActionStage};
 
 use super::{Architecture, OsIdentity};
 
@@ -66,7 +64,10 @@ impl CompatibilityCatalog {
                 evidence_id: "totonoe.non-client-windows",
             };
         }
-        if !matches!(os_identity.architecture, Architecture::X64 | Architecture::Arm64) {
+        if !matches!(
+            os_identity.architecture,
+            Architecture::X64 | Architecture::Arm64
+        ) {
             return CompatibilityDecision {
                 mode: CompatibilityMode::Unsupported,
                 rollback_across_unknown_build: false,
@@ -75,7 +76,10 @@ impl CompatibilityCatalog {
         }
         // Professional/Professional N and the four consumer Core (Home) SKUs.
         // Enterprise/Education stay read-only outside the Task 2 test matrix.
-        if !matches!(os_identity.operating_system_sku, 48 | 49 | 98 | 99 | 100 | 101) {
+        if !matches!(
+            os_identity.operating_system_sku,
+            48 | 49 | 98 | 99 | 100 | 101
+        ) {
             return CompatibilityDecision {
                 mode: CompatibilityMode::TestedDetectOnly,
                 rollback_across_unknown_build: false,
@@ -85,18 +89,7 @@ impl CompatibilityCatalog {
         Self::decision_for_build(os_identity.base_build)
     }
 
-
-
-
-
-
-
-
-
-    pub fn evaluate(
-        os_identity: &OsIdentity,
-        metadata: &ActionMetadata,
-    ) -> CompatibilityDecision {
+    pub fn evaluate(os_identity: &OsIdentity, metadata: &ActionMetadata) -> CompatibilityDecision {
         let mut decision = Self::decision_for_identity(os_identity);
         if matches!(decision.mode, CompatibilityMode::TestedMutable)
             && (os_identity.base_build < metadata.minimumBuild

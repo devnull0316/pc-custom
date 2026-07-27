@@ -41,12 +41,7 @@ impl CoreError {
     }
 
     pub fn recovery_required(message: impl Into<String>) -> Self {
-        Self::new(
-            "RECOVERY_REQUIRED",
-            "RECOVERY",
-            false,
-            message,
-        )
+        Self::new("RECOVERY_REQUIRED", "RECOVERY", false, message)
     }
 
     pub fn invalid_request(message: impl Into<String>) -> Self {
@@ -70,9 +65,7 @@ impl From<ActionError> for CoreError {
                 "適用後に別の変更を検出したため、自動では上書きしません。"
             }
             ActionErrorCode::AccessDenied => "Windowsからこの操作が拒否されました。",
-            ActionErrorCode::StateUnknown => {
-                "現在の状態を確認できないため、変更を停止しました。"
-            }
+            ActionErrorCode::StateUnknown => "現在の状態を確認できないため、変更を停止しました。",
             _ => "Windows操作を完了できませんでした。変更履歴を確認してください。",
         };
         Self {

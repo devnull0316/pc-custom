@@ -23,9 +23,7 @@ use crate::{
     compatibility::{CompatibilityCatalog, CompatibilityMode, OsIdentity},
     error::{CoreError, CoreResult},
     game_profile::{CreateProfileRequest, ImportResult, ProfileStore, StoredProfile},
-    journal::{
-        ItemState, JournalDatabase, ReconcileResult, RecoveryClassification, TimelineItem,
-    },
+    journal::{ItemState, JournalDatabase, ReconcileResult, RecoveryClassification, TimelineItem},
     presentation::{
         action_presentation, default_parameters, listing_parameters, os_label,
         parse_action_request, preview_change, state_to_ui, ActionPresentation, BootstrapStatus,
@@ -380,7 +378,7 @@ impl PcCustomEngine {
     fn identity_for_commit(&self) -> CoreResult<OsIdentity> {
         #[cfg(test)]
         {
-            return self.identity_for_read();
+            self.identity_for_read()
         }
         #[cfg(not(test))]
         {
@@ -523,10 +521,8 @@ fn classify_action(
         Ok(Verification { verified: true, .. }) => RecoveryClassification::Applied,
         Ok(Verification { observed, .. }) => {
             if parameters.action_id() == ActionId::SetupWindowLayout {
-                return match crate::actions::classify_recoverable_window_layout(
-                    parameters,
-                    backup,
-                ) {
+                return match crate::actions::classify_recoverable_window_layout(parameters, backup)
+                {
                     Ok(
                         crate::windows::WindowLayoutTransactionState::Desired
                         | crate::windows::WindowLayoutTransactionState::MixedOwned,
@@ -557,36 +553,6 @@ fn classify_action(
 /// before terminalizing the journal item.
 fn needs_original_rollback_fence(action_id: ActionId, state: ItemState) -> bool {
     action_id == ActionId::SetupWindowLayout && state != ItemState::Prepared
-}
-
-#[cfg(test)]
-mod original_rollback_fence_tests {
-    use super::*;
-
-    #[test]
-    fn prepared_layout_has_no_dispatch_but_every_later_state_requires_a_fence() {
-        assert!(!needs_original_rollback_fence(
-            ActionId::SetupWindowLayout,
-            ItemState::Prepared
-        ));
-        for state in [
-            ItemState::Applying,
-            ItemState::Applied,
-            ItemState::ApplyFailed,
-            ItemState::RollingBack,
-            ItemState::RollbackFailed,
-            ItemState::RecoveryRequired,
-        ] {
-            assert!(needs_original_rollback_fence(
-                ActionId::SetupWindowLayout,
-                state
-            ));
-        }
-        assert!(!needs_original_rollback_fence(
-            ActionId::PowerActiveSchemeCheck,
-            ItemState::Applying
-        ));
-    }
 }
 
 fn ensure_backup_mutation_allowed(
@@ -701,4 +667,34 @@ fn format_timestamp(unix_ms: u64) -> String {
     DateTime::<Utc>::from_timestamp_millis(value)
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
         .to_rfc3339()
+}
+
+#[cfg(test)]
+mod original_rollback_fence_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_layout_has_no_dispatch_but_every_later_state_requires_a_fence() {
+        assert!(!needs_original_rollback_fence(
+            ActionId::SetupWindowLayout,
+            ItemState::Prepared
+        ));
+        for state in [
+            ItemState::Applying,
+            ItemState::Applied,
+            ItemState::ApplyFailed,
+            ItemState::RollingBack,
+            ItemState::RollbackFailed,
+            ItemState::RecoveryRequired,
+        ] {
+            assert!(needs_original_rollback_fence(
+                ActionId::SetupWindowLayout,
+                state
+            ));
+        }
+        assert!(!needs_original_rollback_fence(
+            ActionId::PowerActiveSchemeCheck,
+            ItemState::Applying
+        ));
+    }
 }

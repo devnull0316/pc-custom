@@ -21,7 +21,6 @@ pub enum TransactionState {
     RecoveryRequired,
 }
 
-
 impl TransactionState {
     pub const fn as_db(self) -> &'static str {
         match self {

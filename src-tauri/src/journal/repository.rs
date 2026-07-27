@@ -13,8 +13,8 @@ use crate::{
 use super::{
     database::JournalDatabase,
     models::{
-        ItemState, PersistedItem, PreparedItem, RecoveryClassification,
-        RecoveryTransaction, TimelineItem, TimelineStage, TransactionState,
+        ItemState, PersistedItem, PreparedItem, RecoveryClassification, RecoveryTransaction,
+        TimelineItem, TimelineStage, TransactionState,
     },
 };
 
@@ -451,9 +451,8 @@ impl JournalDatabase {
                 .query_map([], |row| {
                     let transaction_id = parse_uuid(row.get::<_, String>(0)?, 0)?;
                     let state_text: String = row.get(1)?;
-                    let state = TransactionState::from_db(&state_text).ok_or_else(|| {
-                        sql_message(1, Type::Text, "unknown transaction state")
-                    })?;
+                    let state = TransactionState::from_db(&state_text)
+                        .ok_or_else(|| sql_message(1, Type::Text, "unknown transaction state"))?;
                     Ok((transaction_id, state, row.get::<_, String>(2)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -478,7 +477,10 @@ impl JournalDatabase {
                      ORDER BY COALESCE(i.apply_order, i.ordinal) ASC",
                 )?;
                 let items = item_statement
-                    .query_map(params![transaction_id.to_string(), state.as_db()], persisted_item_from_row)?
+                    .query_map(
+                        params![transaction_id.to_string(), state.as_db()],
+                        persisted_item_from_row,
+                    )?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 transactions.push(RecoveryTransaction {
                     transaction_id,
@@ -578,8 +580,7 @@ impl JournalDatabase {
                     started_at: format_timestamp(started_ms),
                     before: "変更直前の状態（保存済み）".to_owned(),
                     after: "適用後の検証状態".to_owned(),
-                    rollback_available: item_state == "APPLIED"
-                        && transaction_state == "SUCCEEDED",
+                    rollback_available: item_state == "APPLIED" && transaction_state == "SUCCEEDED",
                     retry_available: retryable,
                     stages,
                     diagnostic_id,
@@ -589,7 +590,6 @@ impl JournalDatabase {
         })
     }
 }
-
 
 fn insert_backup(
     database: &rusqlite::Transaction<'_>,
@@ -614,7 +614,9 @@ fn insert_backup(
             i64::from(backup.action_version),
             primitive_name(&backup.payload),
             i64::from(backup.codec_version),
-            resource_key.map(String::as_str).unwrap_or(backup.action_id.as_str()),
+            resource_key
+                .map(String::as_str)
+                .unwrap_or(backup.action_id.as_str()),
             backup.precondition_fingerprint.to_hex(),
             backup.intended_fingerprint.to_hex(),
             payload,
@@ -665,14 +667,18 @@ fn persisted_item_from_row(row: &Row<'_>) -> rusqlite::Result<PersistedItem> {
         .map(|value| u32::try_from(value).map_err(|error| sql_conversion(3, Type::Integer, error)))
         .transpose()?;
     let action_text: String = row.get(4)?;
-    let action_id = ActionId::from_str(&action_text)
-        .map_err(|error| sql_conversion(4, Type::Text, error))?;
+    let action_id =
+        ActionId::from_str(&action_text).map_err(|error| sql_conversion(4, Type::Text, error))?;
     let action_version = u32::try_from(row.get::<_, i64>(5)?)
         .map_err(|error| sql_conversion(5, Type::Integer, error))?;
     let parameters = serde_json::from_str::<ActionParameters>(&row.get::<_, String>(6)?)
         .map_err(|error| sql_conversion(6, Type::Text, error))?;
     if parameters.action_id() != action_id {
-        return Err(sql_message(6, Type::Text, "Action ID and parameters disagree"));
+        return Err(sql_message(
+            6,
+            Type::Text,
+            "Action ID and parameters disagree",
+        ));
     }
     let state_text: String = row.get(7)?;
     let state = ItemState::from_db(&state_text)
@@ -705,6 +711,9 @@ fn persisted_item_from_row(row: &Row<'_>) -> rusqlite::Result<PersistedItem> {
     })
 }
 
+// journal の 1 行に入る列がそのまま引数になっている。まとめる構造体を作っても
+// 呼び出し側で同じ数を埋めることに変わりはない。
+#[allow(clippy::too_many_arguments)]
 fn insert_stage_event(
     database: &rusqlite::Transaction<'_>,
     transaction_id: Uuid,
@@ -792,7 +801,11 @@ fn require_exactly_one(affected_rows: usize) -> rusqlite::Result<()> {
 }
 
 fn bool_i64(value: bool) -> i64 {
-    if value { 1 } else { 0 }
+    if value {
+        1
+    } else {
+        0
+    }
 }
 
 fn to_i64(value: u64) -> i64 {

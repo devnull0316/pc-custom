@@ -192,10 +192,7 @@ impl PcCustomEngine {
                 }
                 match classification {
                     RecoveryClassification::Original
-                        if !needs_original_rollback_fence(
-                            parameters.action_id(),
-                            item.state,
-                        ) =>
+                        if !needs_original_rollback_fence(parameters.action_id(), item.state) =>
                     {
                         self.journal.mark_item_rolled_back(
                             transaction.transaction_id,

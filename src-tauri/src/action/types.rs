@@ -113,12 +113,7 @@ impl ActionError {
     }
 
     pub fn recovery_required(stage: ActionStage, message_key: &'static str) -> Self {
-        Self::new(
-            ActionErrorCode::RecoveryRequired,
-            stage,
-            false,
-            message_key,
-        )
+        Self::new(ActionErrorCode::RecoveryRequired, stage, false, message_key)
     }
 }
 

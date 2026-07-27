@@ -60,6 +60,9 @@ impl DwordRegistryAction {
     }
 }
 
+// Action のメタデータをまとめて組み立てる定数関数。分割すると呼び出し側の
+// マクロが読みにくくなるだけで、引数の数は素直に項目数を反映している。
+#[allow(clippy::too_many_arguments)]
 const fn registry_metadata(
     id: ActionId,
     name: &'static str,

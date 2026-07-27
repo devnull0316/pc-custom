@@ -162,7 +162,7 @@ fn query_wmi_identity() -> Result<WmiIdentity, OsIdentityError> {
             "WMI initialization failed while identifying Windows",
         )
     })?;
-    let connection = WMIConnection::new(com.into()).map_err(|_| {
+    let connection = WMIConnection::new(com).map_err(|_| {
         OsIdentityError::new(
             OsIdentityErrorKind::WmiUnavailable,
             "WMI connection failed while identifying Windows",
@@ -263,9 +263,6 @@ fn query_registry_observation() -> Result<RegistryObservation, OsIdentityError> 
             ));
         }
     };
-
-
-
 
     let machine_environment = hklm
         .open_subkey_with_flags(

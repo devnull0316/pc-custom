@@ -36,5 +36,5 @@ pub use system_observations::{
     WINDOWS_UPDATE_STATUS_ACTION,
 };
 pub use window_color::{WindowColorAction, WINDOW_COLOR_ACTION};
-pub use window_layout::{WindowLayoutAction, WINDOW_LAYOUT_ACTION};
 pub(crate) use window_layout::classify_recoverable_window_layout;
+pub use window_layout::{WindowLayoutAction, WINDOW_LAYOUT_ACTION};

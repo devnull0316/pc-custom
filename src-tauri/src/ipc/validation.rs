@@ -1,11 +1,10 @@
 #[cfg_attr(not(test), allow(unused_imports))]
 use super::contract::{
-    ElevatedRequestEnvelope, FileIdentity, PeerEvidence, PeerExpectation,
-    TypedActionParameters, TypedParameter, TypedParameterValue, ValidatedElevatedRequest, ValidatedPeer,
+    ElevatedRequestEnvelope, FileIdentity, PeerEvidence, PeerExpectation, TypedActionParameters,
+    TypedParameter, TypedParameterValue, ValidatedElevatedRequest, ValidatedPeer,
     IPC_PROTOCOL_VERSION, MAX_ACTION_ID_BYTES, MAX_CHOICE_BYTES, MAX_CLOCK_SKEW_MS,
-    MAX_ENVELOPE_BYTES, MAX_PARAMETER_COUNT, MAX_PARAMETER_KEY_BYTES,
-    MAX_PARAMETER_SCHEMA_BYTES, MAX_REQUEST_LIFETIME_MS, MAX_SID_BYTES, NONCE_BYTES,
-    NONCE_HEX_BYTES,
+    MAX_ENVELOPE_BYTES, MAX_PARAMETER_COUNT, MAX_PARAMETER_KEY_BYTES, MAX_PARAMETER_SCHEMA_BYTES,
+    MAX_REQUEST_LIFETIME_MS, MAX_SID_BYTES, NONCE_BYTES, NONCE_HEX_BYTES,
 };
 use std::{collections::BTreeSet, error::Error, fmt};
 
@@ -145,8 +144,7 @@ pub fn validate_request_envelope(
     if context.seen_request_ids.contains(&envelope.request_id) {
         return Err(ValidationError::Replay);
     }
-    if envelope.message_counter == 0
-        || envelope.message_counter != context.expected_message_counter
+    if envelope.message_counter == 0 || envelope.message_counter != context.expected_message_counter
     {
         return Err(ValidationError::UnexpectedMessageCounter);
     }
@@ -236,8 +234,7 @@ pub fn validate_peer_evidence(
     if evidence.normalized_image_path != expected.normalized_image_path {
         return Err(ValidationError::PeerImageMismatch);
     }
-    if evidence.file_identity.volume_serial_number
-        != expected.file_identity.volume_serial_number
+    if evidence.file_identity.volume_serial_number != expected.file_identity.volume_serial_number
         || !constant_time_equal(
             &evidence.file_identity.file_id,
             &expected.file_identity.file_id,
@@ -283,9 +280,7 @@ fn validate_parameters(parameters: &TypedActionParameters) -> Result<(), Validat
         if key.is_empty()
             || key.len() > MAX_PARAMETER_KEY_BYTES
             || !key.bytes().enumerate().all(|(index, byte)| {
-                byte.is_ascii_lowercase()
-                    || byte == b'_'
-                    || (index > 0 && byte.is_ascii_digit())
+                byte.is_ascii_lowercase() || byte == b'_' || (index > 0 && byte.is_ascii_digit())
             })
         {
             return Err(ValidationError::InvalidParameter);
@@ -317,9 +312,7 @@ fn is_namespaced_identifier(value: &str) -> bool {
             return false;
         }
         if !segment.bytes().enumerate().all(|(index, byte)| {
-            byte.is_ascii_lowercase()
-                || byte == b'_'
-                || (index > 0 && byte.is_ascii_digit())
+            byte.is_ascii_lowercase() || byte == b'_' || (index > 0 && byte.is_ascii_digit())
         }) {
             return false;
         }
@@ -451,23 +444,15 @@ mod attack_spike_tests {
 
     #[test]
     fn well_formed_contract_is_accepted_by_a_test_only_allowlist() {
-        let result = validate(
-            &sample_request(),
-            &ContractProbeAllowlist,
-            &BTreeSet::new(),
-        )
-        .expect("well-formed contract should pass structural validation");
+        let result = validate(&sample_request(), &ContractProbeAllowlist, &BTreeSet::new())
+            .expect("well-formed contract should pass structural validation");
         assert_eq!(result.action_id, "admin.contract_probe");
     }
 
     #[test]
     fn current_edition_rejects_every_elevated_action() {
-        let error = validate(
-            &sample_request(),
-            &DenyAllElevatedActions,
-            &BTreeSet::new(),
-        )
-        .expect_err("per-user edition must be deny-all");
+        let error = validate(&sample_request(), &DenyAllElevatedActions, &BTreeSet::new())
+            .expect_err("per-user edition must be deny-all");
         assert_eq!(error, ValidationError::ActionNotAllowlisted);
     }
 
@@ -541,11 +526,7 @@ mod attack_spike_tests {
         let mut wrong_counter = sample_request();
         wrong_counter.message_counter = 2;
         assert_eq!(
-            validate(
-                &wrong_counter,
-                &ContractProbeAllowlist,
-                &BTreeSet::new()
-            ),
+            validate(&wrong_counter, &ContractProbeAllowlist, &BTreeSet::new()),
             Err(ValidationError::UnexpectedMessageCounter)
         );
 
@@ -561,8 +542,7 @@ mod attack_spike_tests {
     #[test]
     fn transaction_action_schema_nonce_encoding_and_duplicate_parameters_fail_closed() {
         let mut wrong_transaction = sample_request();
-        wrong_transaction.transaction_id =
-            "33333333-3333-4333-8333-333333333333".to_owned();
+        wrong_transaction.transaction_id = "33333333-3333-4333-8333-333333333333".to_owned();
         assert_eq!(
             validate(
                 &wrong_transaction,

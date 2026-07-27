@@ -1,1 +1,0 @@
-{"main-window":{"identifier":"main-window","description":"PCカスタム の署名済みローカル UI に必要な最小権限","local":true,"windows":["main"],"permissions":["core:default","application-commands"],"platforms":["windows"]}}

@@ -125,10 +125,8 @@ impl ThemeScheduleStore {
             }
             Ok(_) => {
                 let bytes = std::fs::read(&path).map_err(|_| CoreError::storage())?;
-                let parsed: ThemeScheduleFile =
-                    serde_json::from_slice(&bytes).map_err(|_| {
-                        CoreError::invalid_request("テーマ切り替え設定を読めません。")
-                    })?;
+                let parsed: ThemeScheduleFile = serde_json::from_slice(&bytes)
+                    .map_err(|_| CoreError::invalid_request("テーマ切り替え設定を読めません。"))?;
                 if parsed.version != THEME_SCHEDULE_FILE_VERSION {
                     return Err(CoreError::invalid_request(
                         "テーマ切り替え設定の版が対応外です。",
@@ -235,9 +233,17 @@ mod tests {
     fn daytime_light_schedule_resolves_each_boundary() {
         let s = schedule(7 * 60, 19 * 60);
         assert_eq!(s.desired_mode(6 * 60 + 59), Some(ScheduledMode::Dark));
-        assert_eq!(s.desired_mode(7 * 60), Some(ScheduledMode::Light), "開始時刻は含む");
+        assert_eq!(
+            s.desired_mode(7 * 60),
+            Some(ScheduledMode::Light),
+            "開始時刻は含む"
+        );
         assert_eq!(s.desired_mode(12 * 60), Some(ScheduledMode::Light));
-        assert_eq!(s.desired_mode(19 * 60), Some(ScheduledMode::Dark), "終了時刻は含まない");
+        assert_eq!(
+            s.desired_mode(19 * 60),
+            Some(ScheduledMode::Dark),
+            "終了時刻は含まない"
+        );
         assert_eq!(s.desired_mode(23 * 60), Some(ScheduledMode::Dark));
     }
 
@@ -246,7 +252,11 @@ mod tests {
         // 20:00 明るく → 06:00 暗く（夜間がライト）
         let s = schedule(20 * 60, 6 * 60);
         assert_eq!(s.desired_mode(21 * 60), Some(ScheduledMode::Light));
-        assert_eq!(s.desired_mode(0), Some(ScheduledMode::Light), "日をまたいでも継続");
+        assert_eq!(
+            s.desired_mode(0),
+            Some(ScheduledMode::Light),
+            "日をまたいでも継続"
+        );
         assert_eq!(s.desired_mode(5 * 60 + 59), Some(ScheduledMode::Light));
         assert_eq!(s.desired_mode(6 * 60), Some(ScheduledMode::Dark));
         assert_eq!(s.desired_mode(19 * 60), Some(ScheduledMode::Dark));
@@ -260,7 +270,11 @@ mod tests {
 
         let same = schedule(9 * 60, 9 * 60);
         assert!(same.validate().is_err());
-        assert_eq!(same.desired_mode(9 * 60), None, "同一時刻は自動切り替えしない");
+        assert_eq!(
+            same.desired_mode(9 * 60),
+            None,
+            "同一時刻は自動切り替えしない"
+        );
 
         let out_of_range = schedule(MINUTES_PER_DAY, 60);
         assert!(out_of_range.validate().is_err());
@@ -308,13 +322,18 @@ mod tests {
         let reopened = ThemeScheduleStore::open(path.clone()).expect("reopen");
         assert_eq!(reopened.get(), updated, "ディスクから復元できる");
 
-        assert!(store.set(schedule(9 * 60, 9 * 60)).is_err(), "同一時刻は拒否");
+        assert!(
+            store.set(schedule(9 * 60, 9 * 60)).is_err(),
+            "同一時刻は拒否"
+        );
         assert!(
             store.set(schedule(MINUTES_PER_DAY + 1, 60)).is_err(),
             "範囲外は拒否"
         );
         assert_eq!(
-            ThemeScheduleStore::open(path).expect("reopen after rejects").get(),
+            ThemeScheduleStore::open(path)
+                .expect("reopen after rejects")
+                .get(),
             updated,
             "拒否された値は保存されない"
         );

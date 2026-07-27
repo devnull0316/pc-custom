@@ -3,3 +3,6 @@
 /node_modules
 /dist
 *.log
+
+# Tauri がビルド時に生成する。追跡するとテストのたびに差分が出てブランチ切替を妨げる。
+/src-tauri/gen/schemas/

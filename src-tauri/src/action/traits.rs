@@ -58,10 +58,7 @@ pub trait Action: Sync {
         backup: &BackupEnvelope,
     ) -> ActionResult<Verification>;
 
-    fn explain_changes(
-        &self,
-        parameters: &ActionParameters,
-    ) -> ActionResult<ChangeExplanation>;
+    fn explain_changes(&self, parameters: &ActionParameters) -> ActionResult<ChangeExplanation>;
 
     fn troubleshooting(&self, code: ActionErrorCode) -> &'static [TroubleshootingStep];
 }

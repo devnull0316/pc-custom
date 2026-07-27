@@ -164,12 +164,9 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
         )
     })?;
     let database = Arc::new(JournalDatabase::open(&data_directory.join("pc-custom.db"))?);
-    let identity = match OsIdentity::load() {
-        Ok(identity) => Some(identity),
-        // Absence is an explicit engine input: startup reconcile records
-        // RECOVERY_REQUIRED and every mutation gate remains closed.
-        Err(_identity_error) => None,
-    };
+    // Absence is an explicit engine input: startup reconcile records
+    // RECOVERY_REQUIRED and every mutation gate remains closed.
+    let identity = OsIdentity::load().ok();
     let profile_store = Arc::new(crate::game_profile::ProfileStore::open(
         data_directory.join("profiles.json"),
     )?);

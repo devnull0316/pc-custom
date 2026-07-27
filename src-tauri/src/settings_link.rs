@@ -104,7 +104,9 @@ pub fn open_settings_page(action: ActionId) -> CoreResult<&'static str> {
 
 #[cfg(not(windows))]
 pub fn open_settings_page(_action: ActionId) -> CoreResult<&'static str> {
-    Err(CoreError::invalid_request("PCカスタムはWindows 11専用です。"))
+    Err(CoreError::invalid_request(
+        "PCカスタムはWindows 11専用です。",
+    ))
 }
 
 #[cfg(test)]

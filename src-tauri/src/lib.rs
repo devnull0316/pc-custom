@@ -14,8 +14,8 @@ pub mod presentation;
 pub mod settings_link;
 pub mod setup;
 pub mod theme_schedule;
-pub mod windows;
 pub mod window_layout;
+pub mod windows;
 
 use tauri::Manager;
 
@@ -37,7 +37,7 @@ pub fn run() {
                 // 生ポインタを取り出して 0.58 の HWND へ包み直す（表現差を吸収するため *mut へキャスト）。
                 let raw = window.hwnd()?;
                 // `windows` はローカルモジュール(crate::windows)と衝突するため外部crateは `::windows`。
-                let hwnd = ::windows::Win32::Foundation::HWND(raw.0 as *mut core::ffi::c_void);
+                let hwnd = ::windows::Win32::Foundation::HWND(raw.0);
                 crate::windows::apply_mica_backdrop(hwnd, dark)?;
             }
             Ok(())

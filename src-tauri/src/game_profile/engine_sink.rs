@@ -103,7 +103,9 @@ mod smoke {
 
     use super::EngineProfileSink;
     use crate::action::ActionId;
-    use crate::backup::{read_registry_state, RegistryLocation, RegistryTarget, RegistryValueState};
+    use crate::backup::{
+        read_registry_state, RegistryLocation, RegistryTarget, RegistryValueState,
+    };
     use crate::compatibility::OsIdentity;
     use crate::engine::PcCustomEngine;
     use crate::game_profile::{PlannedAction, ProfileActionSink, ProfileSessionId};
@@ -173,7 +175,10 @@ mod smoke {
         };
 
         let applied = sink
-            .apply(ProfileSessionId(Uuid::new_v4()), std::slice::from_ref(&action))
+            .apply(
+                ProfileSessionId(Uuid::new_v4()),
+                std::slice::from_ref(&action),
+            )
             .expect("apply via engine sink");
         assert_eq!(applied.len(), 1);
 
@@ -185,7 +190,8 @@ mod smoke {
             "適用で実レジストリ値が変化する"
         );
 
-        sink.rollback(&applied[0]).expect("rollback via engine sink");
+        sink.rollback(&applied[0])
+            .expect("rollback via engine sink");
 
         let after_rollback = read_registry_state(&location).expect("read after rollback");
         assert_eq!(

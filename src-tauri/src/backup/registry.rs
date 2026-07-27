@@ -213,10 +213,7 @@ pub fn classify_registry_backup(
         Ok(RegistryClassification::Original)
     } else if current == backup.applied_state() {
         Ok(RegistryClassification::Applied)
-    } else if !backup.original.key_existed
-        && current.key_existed
-        && !current.value_existed
-    {
+    } else if !backup.original.key_existed && current.key_existed && !current.value_existed {
         Ok(RegistryClassification::CreatedKeyWithoutValue)
     } else {
         Ok(RegistryClassification::Third)
@@ -241,11 +238,7 @@ pub fn restore_registry_backup(
                         None,
                     )
                 })?;
-                write_raw_value(
-                    &backup.location,
-                    original_type,
-                    &backup.original.raw_bytes,
-                )?;
+                write_raw_value(&backup.location, original_type, &backup.original.raw_bytes)?;
             } else {
                 delete_value(&backup.location)?;
             }
@@ -257,9 +250,7 @@ pub fn restore_registry_backup(
     }
 }
 
-pub fn verify_registry_backup_restored(
-    backup: &RegistryBackup,
-) -> Result<bool, WindowsError> {
+pub fn verify_registry_backup_restored(backup: &RegistryBackup) -> Result<bool, WindowsError> {
     Ok(read_registry_state(&backup.location)? == backup.original)
 }
 
@@ -272,11 +263,7 @@ mod tests {
 
     fn unique_target(value_name: &'static str) -> RegistryTarget {
         let key: &'static str = Box::leak(
-            format!(
-                r"Software\PCカスタム\IntegrationTests\{}",
-                Uuid::new_v4()
-            )
-            .into_boxed_str(),
+            format!(r"Software\PCカスタム\IntegrationTests\{}", Uuid::new_v4()).into_boxed_str(),
         );
         RegistryTarget::current_user_64(key, value_name)
     }
@@ -323,19 +310,11 @@ mod tests {
         let backup = legacy_missing_key_backup(target, 1);
         let mut sibling = backup.location.clone();
         sibling.value_name = "SiblingValue".to_owned();
-        write_raw_value(
-            &backup.location,
-            backup.intended_type,
-            &backup.intended_raw,
-        )
-        .expect("seed legacy applied value");
+        write_raw_value(&backup.location, backup.intended_type, &backup.intended_raw)
+            .expect("seed legacy applied value");
         let sibling_raw = vec![0xde, 0xad, 0xbe, 0xef];
-        write_raw_value(
-            &sibling,
-            winreg::enums::REG_BINARY as u32,
-            &sibling_raw,
-        )
-        .expect("seed third-party sibling value");
+        write_raw_value(&sibling, winreg::enums::REG_BINARY as u32, &sibling_raw)
+            .expect("seed third-party sibling value");
         assert_eq!(
             classify_registry_backup(&backup).expect("classify legacy applied state"),
             RegistryClassification::Applied
@@ -348,7 +327,10 @@ mod tests {
         assert!(target_after.key_existed);
         assert!(!target_after.value_existed);
         let sibling_after = read_registry_state(&sibling).expect("read preserved sibling");
-        assert_eq!(sibling_after.value_type, Some(winreg::enums::REG_BINARY as u32));
+        assert_eq!(
+            sibling_after.value_type,
+            Some(winreg::enums::REG_BINARY as u32)
+        );
         assert_eq!(sibling_after.raw_bytes, sibling_raw);
         assert!(!verify_registry_backup_restored(&backup).expect("verify retained key is partial"));
 
@@ -360,12 +342,8 @@ mod tests {
         let target = unique_target("RawValue");
         let location = target.location();
         let original = vec![0x00, 0xff, 0x10, 0x00, 0x80];
-        write_raw_value(
-            &location,
-            winreg::enums::REG_BINARY as u32,
-            &original,
-        )
-        .expect("seed isolated test value");
+        write_raw_value(&location, winreg::enums::REG_BINARY as u32, &original)
+            .expect("seed isolated test value");
 
         let backup = prepare_registry_backup(
             target,
@@ -375,12 +353,8 @@ mod tests {
             26_100,
         )
         .expect("prepare isolated lossless backup");
-        write_raw_value(
-            &backup.location,
-            backup.intended_type,
-            &backup.intended_raw,
-        )
-        .expect("apply isolated test value");
+        write_raw_value(&backup.location, backup.intended_type, &backup.intended_raw)
+            .expect("apply isolated test value");
         restore_registry_backup(&backup).expect("restore isolated test value");
         let restored = read_registry_state(&backup.location).unwrap();
         assert_eq!(restored.value_type, Some(winreg::enums::REG_BINARY as u32));
@@ -413,18 +387,14 @@ mod tests {
         assert!(backup.original.key_existed);
         assert!(!backup.original.value_existed);
 
-        write_raw_value(
-            &backup.location,
-            backup.intended_type,
-            &backup.intended_raw,
-        )
-        .expect("apply isolated value");
+        write_raw_value(&backup.location, backup.intended_type, &backup.intended_raw)
+            .expect("apply isolated value");
         assert_eq!(
             restore_registry_backup(&backup).expect("restore absent value"),
             RegistryRestoreOutcome::Restored
         );
-        let restored = read_registry_state(&backup.location)
-            .expect("read restored absent value state");
+        let restored =
+            read_registry_state(&backup.location).expect("read restored absent value state");
         assert!(restored.key_existed);
         assert!(!restored.value_existed);
 
@@ -450,12 +420,8 @@ mod tests {
             26_100,
         )
         .expect("prepare isolated backup");
-        write_raw_value(
-            &backup.location,
-            backup.intended_type,
-            &backup.intended_raw,
-        )
-        .expect("apply isolated intended value");
+        write_raw_value(&backup.location, backup.intended_type, &backup.intended_raw)
+            .expect("apply isolated intended value");
 
         let external_bytes = vec![0xde, 0xad, 0xbe, 0xef];
         write_raw_value(
@@ -468,8 +434,7 @@ mod tests {
             restore_registry_backup(&backup).expect("classify third state"),
             RegistryRestoreOutcome::ExternalConflict
         );
-        let after = read_registry_state(&backup.location)
-            .expect("read value after conflict");
+        let after = read_registry_state(&backup.location).expect("read value after conflict");
         assert_eq!(after.value_type, Some(winreg::enums::REG_BINARY as u32));
         assert_eq!(after.raw_bytes, external_bytes);
 

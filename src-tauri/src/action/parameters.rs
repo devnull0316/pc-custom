@@ -229,9 +229,7 @@ pub enum ActionParameters {
     #[serde(rename = "setup.default_apps")]
     SetupDefaultApps {},
     #[serde(rename = "setup.window_layout")]
-    SetupWindowLayout {
-        invocation: WindowLayoutInvocation,
-    },
+    SetupWindowLayout { invocation: WindowLayoutInvocation },
     #[serde(rename = "setup.audio_output")]
     SetupAudioOutput {},
 }

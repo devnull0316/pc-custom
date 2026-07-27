@@ -36,7 +36,7 @@ fn query_wmi_process_ids() -> WindowsResult<BTreeSet<u32>> {
             None,
         )
     })?;
-    let connection = WMIConnection::new(com.into()).map_err(|_| {
+    let connection = WMIConnection::new(com).map_err(|_| {
         WindowsError::new(
             WindowsErrorKind::ApiFailure,
             "connect WMI process observer",

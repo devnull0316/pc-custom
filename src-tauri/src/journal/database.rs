@@ -94,8 +94,6 @@ impl JournalDatabase {
     }
 
     pub fn checkpoint(&self) -> CoreResult<()> {
-        self.with_connection(|connection| {
-            connection.execute_batch("PRAGMA wal_checkpoint(FULL);")
-        })
+        self.with_connection(|connection| connection.execute_batch("PRAGMA wal_checkpoint(FULL);"))
     }
 }

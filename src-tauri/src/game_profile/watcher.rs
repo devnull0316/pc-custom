@@ -506,7 +506,8 @@ mod tests {
             Arc::new(ProfileStore::open(temp.path().join("profiles.json")).expect("profile store"));
         let journal = Arc::new(JournalDatabase::open_in_memory().expect("journal"));
         let engine = Arc::new(
-            PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).expect("engine"),
+            PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200)))
+                .expect("engine"),
         );
         let mut watcher = ProfileWatcher::spawn(engine, store, None).expect("spawn watcher");
         watcher.shutdown().expect("graceful shutdown");

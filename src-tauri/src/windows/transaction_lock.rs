@@ -55,6 +55,9 @@ pub fn acquire_app_instance_lock(path: &std::path::Path) -> WindowsResult<AppIns
         .read(true)
         .write(true)
         .create(true)
+        // 内容は書かない。share_mode(0) による排他だけが目的なので、
+        // 既存ファイルを切り詰める理由がない。明示しておく。
+        .truncate(false)
         .share_mode(0)
         .open(path)
         .map_err(|error| {

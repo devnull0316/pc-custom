@@ -21,8 +21,7 @@ const MAX_ENUMERATED_VISIBLE_WINDOWS: usize = 2_048;
 const MAX_ABSOLUTE_COORDINATE: i32 = 1_000_000;
 const DURABLE_PLACEMENT_FLAGS: u32 = 0x0001 | 0x0002;
 const WINDOW_RESPONSIVENESS_TIMEOUT_MS: u32 = 500;
-const WINDOW_INSTANCE_PROPERTY_NAME: &str =
-    "PcCustom.WindowPlacement.Instance.v1.80f532c4";
+const WINDOW_INSTANCE_PROPERTY_NAME: &str = "PcCustom.WindowPlacement.Instance.v1.80f532c4";
 
 // Keep the pure eligibility checks available to unit tests on every target.
 const STYLE_POPUP: u32 = 0x8000_0000;
@@ -274,8 +273,7 @@ pub fn verify_captured_window_layout_originals(
                 let Some(expected) = expected else {
                     return Ok(false);
                 };
-                let Some(candidate) =
-                    resolve_original_candidate(expected, &report.candidates)
+                let Some(candidate) = resolve_original_candidate(expected, &report.candidates)
                 else {
                     return Ok(false);
                 };
@@ -624,10 +622,9 @@ fn mutate_transaction(
         let at_original = candidate_matches_saved(&current, &mutation.original.saved);
         let at_desired = candidate_matches_saved(&current, &mutation.desired);
         let (destination, source_state) = match direction {
-            MutationDirection::Apply if at_original => (
-                mutation.desired.placement,
-                OwnedPlacementState::Original,
-            ),
+            MutationDirection::Apply if at_original => {
+                (mutation.desired.placement, OwnedPlacementState::Original)
+            }
             // Reassert the original placement even when the immediate read is
             // already original. If the prior process died while a synchronous
             // SetWindowPlacement call was in flight, recovery must not
@@ -1115,9 +1112,7 @@ fn read_candidate(
         .and_then(|name| name.to_str())
         .filter(|name| {
             let length = name.chars().count();
-            length > 0
-                && length <= MAX_WINDOW_LABEL_CHARS
-                && !name.chars().any(char::is_control)
+            length > 0 && length <= MAX_WINDOW_LABEL_CHARS && !name.chars().any(char::is_control)
         })
         .map(str::to_owned)
     else {
@@ -1215,18 +1210,10 @@ fn window_instance_marker_matches(handle: isize, marker: u64) -> bool {
 
 #[cfg(windows)]
 fn read_window_instance_marker(handle: isize) -> u64 {
-    use windows::Win32::{
-        Foundation::HWND,
-        UI::WindowsAndMessaging::GetPropW,
-    };
+    use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::GetPropW};
 
     let property_name = windows::core::HSTRING::from(WINDOW_INSTANCE_PROPERTY_NAME);
-    let value = unsafe {
-        GetPropW(
-            HWND(handle as *mut core::ffi::c_void),
-            &property_name,
-        )
-    };
+    let value = unsafe { GetPropW(HWND(handle as *mut core::ffi::c_void), &property_name) };
     value.0 as usize as u64
 }
 
@@ -1241,12 +1228,8 @@ fn bind_original_window_markers(
             candidate_key_matches_entry(candidate, &original.saved)
                 && candidate.handle as i64 == original.window_handle_token
                 && candidate.process_id == original.process_id
-                && candidate.process_creation_time_100ns
-                    == original.process_creation_time_100ns
-                && window_instance_marker_matches(
-                    candidate.handle,
-                    original.window_instance_marker,
-                )
+                && candidate.process_creation_time_100ns == original.process_creation_time_100ns
+                && window_instance_marker_matches(candidate.handle, original.window_instance_marker)
         });
         if let (Some(original), None) = (matching.next(), matching.next()) {
             candidate.window_instance_marker = original.window_instance_marker;
@@ -1417,9 +1400,8 @@ fn set_saved_placement(
     use windows::Win32::{
         Foundation::{GetLastError, HWND, LPARAM, POINT, RECT, WPARAM},
         UI::WindowsAndMessaging::{
-            SendMessageTimeoutW, SetWindowPlacement, SEND_MESSAGE_TIMEOUT_FLAGS,
-            SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT, WINDOWPLACEMENT,
-            WINDOWPLACEMENT_FLAGS, WM_NULL,
+            SendMessageTimeoutW, SetWindowPlacement, SEND_MESSAGE_TIMEOUT_FLAGS, SMTO_ABORTIFHUNG,
+            SMTO_BLOCK, SMTO_ERRORONEXIT, WINDOWPLACEMENT, WINDOWPLACEMENT_FLAGS, WM_NULL,
         },
     };
 
@@ -1439,9 +1421,7 @@ fn set_saved_placement(
             WM_NULL,
             WPARAM(0),
             LPARAM(0),
-            SEND_MESSAGE_TIMEOUT_FLAGS(
-                SMTO_ABORTIFHUNG.0 | SMTO_BLOCK.0 | SMTO_ERRORONEXIT.0,
-            ),
+            SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG.0 | SMTO_BLOCK.0 | SMTO_ERRORONEXIT.0),
             WINDOW_RESPONSIVENESS_TIMEOUT_MS,
             Some(&mut message_result),
         )
@@ -1709,11 +1689,11 @@ fn geometry_fingerprint(
                 candidate_key_matches_entry(candidate, entry)
                     && required_instance.is_none_or(
                         |(process_id, creation_time, handle, marker)| {
-                        candidate.process_id == process_id
-                            && candidate.process_creation_time_100ns == creation_time
-                            && candidate.handle as i64 == handle
-                            && candidate.window_instance_marker == marker
-                    },
+                            candidate.process_id == process_id
+                                && candidate.process_creation_time_100ns == creation_time
+                                && candidate.handle as i64 == handle
+                                && candidate.window_instance_marker == marker
+                        },
                     )
             })
             .collect::<Vec<_>>();
@@ -2238,10 +2218,7 @@ mod tests {
             source_state: OwnedPlacementState::Original,
         };
 
-        assert_eq!(
-            compensation_placement(&mutation),
-            original_saved.placement
-        );
+        assert_eq!(compensation_placement(&mutation), original_saved.placement);
         assert!(candidate_matches_compensation_source(
             &original_candidate,
             &mutation
@@ -2316,8 +2293,11 @@ mod tests {
             .into_iter()
             .find(|candidate| candidate.handle == first.handle())
             .expect("first owned marker window is eligible");
-        let desired_entry =
-            entry_from_candidate(&first_candidate, Uuid::new_v4(), "marker-test.exe".to_owned());
+        let desired_entry = entry_from_candidate(
+            &first_candidate,
+            Uuid::new_v4(),
+            "marker-test.exe".to_owned(),
+        );
         let desired = WindowLayoutSnapshot {
             snapshot_id: Uuid::new_v4(),
             captured_at_unix_ms: 1,
@@ -2460,9 +2440,8 @@ mod tests {
             .into_iter()
             .find(|candidate| candidate.handle == owned.handle())
             .expect("moved owned window remains eligible");
-        let window_instance_marker =
-            attach_new_window_instance_marker(moved_candidate.handle)
-                .expect("mark the exact owned test window instance");
+        let window_instance_marker = attach_new_window_instance_marker(moved_candidate.handle)
+            .expect("mark the exact owned test window instance");
         let original = OriginalWindowPlacementEntry {
             saved: SavedWindowPlacementEntry {
                 entry_id: saved_entry.entry_id,

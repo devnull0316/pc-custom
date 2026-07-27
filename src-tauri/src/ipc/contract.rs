@@ -180,7 +180,10 @@ impl fmt::Debug for PeerEvidence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PeerEvidence")
             .field("process_id", &self.process_id)
-            .field("process_creation_time_100ns", &self.process_creation_time_100ns)
+            .field(
+                "process_creation_time_100ns",
+                &self.process_creation_time_100ns,
+            )
             .field("session_id", &self.session_id)
             .field("user_sid", &"[REDACTED]")
             .field("logon_sid", &"[REDACTED]")

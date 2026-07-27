@@ -882,27 +882,29 @@ pub fn delete_user_temp_files(min_age_days: u64) -> WindowsResult<TempCleanupOut
     let mut deleted_count = 0u64;
     let mut freed_bytes = 0u64;
     let mut skipped: Vec<TempCleanupSkip> = Vec::new();
-    let truncated = temp_cleanup_walk(min_age_days, |path, file_name, size, _age| {
-        match std::fs::remove_file(path) {
-            Ok(()) => {
-                deleted_count = deleted_count.saturating_add(1);
-                freed_bytes = freed_bytes.saturating_add(size);
-            }
-            Err(error) => {
-                if skipped.len() < MAX_WARNINGS {
-                    let reason = match error.kind() {
-                        std::io::ErrorKind::PermissionDenied => "使用中か、権限がありません",
-                        std::io::ErrorKind::NotFound => "すでにありません",
-                        _ => "削除できませんでした",
-                    };
-                    skipped.push(TempCleanupSkip {
-                        file_name: file_name.to_owned(),
-                        reason: reason.to_owned(),
-                    });
+    let truncated =
+        temp_cleanup_walk(
+            min_age_days,
+            |path, file_name, size, _age| match std::fs::remove_file(path) {
+                Ok(()) => {
+                    deleted_count = deleted_count.saturating_add(1);
+                    freed_bytes = freed_bytes.saturating_add(size);
                 }
-            }
-        }
-    })?;
+                Err(error) => {
+                    if skipped.len() < MAX_WARNINGS {
+                        let reason = match error.kind() {
+                            std::io::ErrorKind::PermissionDenied => "使用中か、権限がありません",
+                            std::io::ErrorKind::NotFound => "すでにありません",
+                            _ => "削除できませんでした",
+                        };
+                        skipped.push(TempCleanupSkip {
+                            file_name: file_name.to_owned(),
+                            reason: reason.to_owned(),
+                        });
+                    }
+                }
+            },
+        )?;
     Ok(TempCleanupOutcome {
         deleted_count,
         freed_bytes,

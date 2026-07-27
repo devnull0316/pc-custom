@@ -383,7 +383,7 @@ mod tests {
         let log = sink.log.clone();
         let mut runtime = ProfileRuntime::new(sink);
         let profile = stored(true);
-        assert!(runtime.sync(&[profile.clone()]).is_empty());
+        assert!(runtime.sync(std::slice::from_ref(&profile)).is_empty());
 
         // ゲーム起動を検知 → 適用。
         let outcomes = runtime.tick(&[proc(1000)]).expect("tick launch");

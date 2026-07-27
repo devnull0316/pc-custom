@@ -133,10 +133,21 @@ mod tests {
     #[test]
     fn snapshot_records_every_action_and_is_stable_json() {
         let actions = vec![
-            presentation("explorer.show_extensions", "persistent", "mutable", Some(state("known"))),
-            presentation("taskbar.alignment", "guided", "detect_only", Some(state("known"))),
+            presentation(
+                "explorer.show_extensions",
+                "persistent",
+                "mutable",
+                Some(state("known")),
+            ),
+            presentation(
+                "taskbar.alignment",
+                "guided",
+                "detect_only",
+                Some(state("known")),
+            ),
         ];
-        let snapshot = build_settings_snapshot(&actions, Some(26_200), "2026-07-25T00:00:00Z".to_owned());
+        let snapshot =
+            build_settings_snapshot(&actions, Some(26_200), "2026-07-25T00:00:00Z".to_owned());
         assert_eq!(snapshot.version, SETTINGS_SNAPSHOT_VERSION);
         assert_eq!(snapshot.entry_count, 2);
         assert_eq!(snapshot.entries.len(), 2);
@@ -149,7 +160,12 @@ mod tests {
 
     #[test]
     fn undetected_action_is_recorded_without_guessing_state() {
-        let actions = vec![presentation("power.active_scheme_check", "observation", "read_only", None)];
+        let actions = vec![presentation(
+            "power.active_scheme_check",
+            "observation",
+            "read_only",
+            None,
+        )];
         let snapshot = build_settings_snapshot(&actions, None, "2026-07-25T00:00:00Z".to_owned());
         let entry = &snapshot.entries[0];
         assert_eq!(entry.state_kind, "not_detected");
@@ -160,8 +176,14 @@ mod tests {
     #[test]
     fn snapshot_contains_no_command_bodies_or_paths() {
         // 控えに載せるのは表示情報と観測ラベルだけで、生の実行文字列やフルパスは含めない。
-        let actions = vec![presentation("setup.startup_inventory", "observation", "read_only", Some(state("known")))];
-        let snapshot = build_settings_snapshot(&actions, Some(26_200), "2026-07-25T00:00:00Z".to_owned());
+        let actions = vec![presentation(
+            "setup.startup_inventory",
+            "observation",
+            "read_only",
+            Some(state("known")),
+        )];
+        let snapshot =
+            build_settings_snapshot(&actions, Some(26_200), "2026-07-25T00:00:00Z".to_owned());
         let json = serde_json::to_string(&snapshot).expect("serialize");
         assert!(!json.contains(r"C:\\"));
         assert!(!json.contains("powershell"));

@@ -11,8 +11,11 @@ pub fn read_primary_refresh_rate() -> WindowsResult<PrimaryRefreshRateObservatio
         Win32::Graphics::Gdi::{EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS},
     };
 
-    let mut mode = DEVMODEW::default();
-    mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+    // dmSize は EnumDisplaySettingsW の呼び出し前に必ず埋める必要がある。
+    let mut mode = DEVMODEW {
+        dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+        ..Default::default()
+    };
     if !unsafe { EnumDisplaySettingsW(PCWSTR::null(), ENUM_CURRENT_SETTINGS, &mut mode) }.as_bool()
     {
         return Err(WindowsError::new(
