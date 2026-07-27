@@ -675,3 +675,11 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .error-banner__code { margin-top: .3rem; }
 .error-banner__code summary { color: var(--text-tertiary); font-size: var(--fs-xs); cursor: pointer; }
 .error-banner__code code { display: block; margin-top: .25rem; font-size: var(--fs-xs); }
+
+/* 適用直後に、その場で戻すための帯。画面を移動させない。 */
+.undo-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: .7rem;
+  margin-bottom: .8rem; padding: .6rem .8rem; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card); background: var(--surface-solid); box-shadow: var(--shadow); }
+.undo-bar span { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+.undo-bar strong { display: block; color: var(--text); font-size: var(--fs-base); }
+.theme-schedule__message .link-button { margin-left: .5rem; }

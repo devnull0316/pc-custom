@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { publicErrorMessage, themeScheduleGet, themeScheduleSet } from "../backend";
-import type { DataMode, ThemeSchedule } from "../model";
+import { listTimeline, publicErrorMessage, rollbackItem, themeScheduleGet, themeScheduleSet } from "../backend";
+import type { DataMode, ThemeSchedule, TimelineItem } from "../model";
 import { Icon } from "./Icon";
 
 interface ThemeSchedulePanelProps {
@@ -29,6 +29,10 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
   const [lastError, setLastError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // オフにしても、オンの間に適用された明るさはそのまま残る。
+  // 以前はそれを伝えず、戻すにはタイムラインまで移動する必要があった。
+  const [revertableItemId, setRevertableItemId] = useState<string | null>(null);
+  const [reverting, setReverting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,15 +62,54 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
       const state = await themeScheduleSet(next);
       setSchedule(state.schedule);
       setLastError(state.lastError);
-      setMessage(
-        state.schedule.enabled
-          ? "時間帯に合わせて自動で切り替えます。"
-          : "自動切り替えを止めました。",
-      );
+      if (state.schedule.enabled) {
+        setMessage("時間帯に合わせて自動で切り替えます。");
+        setRevertableItemId(null);
+      } else {
+        // 止めただけでは、既に変わった明るさは戻らない。そう書いて、戻す手段を隣に置く。
+        const applied = await lastAppliedColorMode();
+        setRevertableItemId(applied);
+        setMessage(
+          applied === null
+            ? "自動切り替えを止めました。"
+            : "自動切り替えを止めました。すでに変わった明るさはそのままです。",
+        );
+      }
     } catch (error: unknown) {
       setMessage(publicErrorMessage(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /// 直近に適用された明るさの変更のうち、まだ戻せるものを探す。
+  async function lastAppliedColorMode(): Promise<string | null> {
+    try {
+      const timeline = await listTimeline();
+      const hit = timeline.find(
+        (item: TimelineItem) => item.actionId === "theme.color_mode" && item.rollbackAvailable,
+      );
+      return hit?.itemId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function revertApplied() {
+    if (revertableItemId === null) return;
+    setReverting(true);
+    try {
+      const result = await rollbackItem({ itemId: revertableItemId });
+      setMessage(
+        result.status === "recovery_required"
+          ? result.message
+          : "明るさを元へ戻しました。",
+      );
+      setRevertableItemId(null);
+    } catch (error: unknown) {
+      setMessage(publicErrorMessage(error));
+    } finally {
+      setReverting(false);
     }
   }
 
@@ -135,7 +178,16 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
           自動切り替えに失敗しました: {lastError}
         </p>
       )}
-      {message === null ? null : <p className="theme-schedule__message" role="status">{message}</p>}
+      {message === null ? null : (
+        <p className="theme-schedule__message" role="status">
+          {message}
+          {revertableItemId === null ? null : (
+            <button className="link-button" disabled={!live || reverting} onClick={() => void revertApplied()} type="button">
+              {reverting ? "戻しています…" : "明るさも元に戻す"}
+            </button>
+          )}
+        </p>
+      )}
       {live ? null : <p className="muted small">閲覧モードです。安全コアに接続すると設定できます。</p>}
     </section>
   );

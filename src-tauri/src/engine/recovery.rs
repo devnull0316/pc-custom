@@ -68,6 +68,7 @@ impl PcCustomEngine {
                             now_ms(),
                         )?;
                         return Ok(CommitResult {
+                            items: Vec::new(),
                             transaction_id: item.transaction_id,
                             status: "recovery_required".to_owned(),
                             message: "復元を確認できない項目があります。新しい変更を停止しました。"
@@ -92,6 +93,7 @@ impl PcCustomEngine {
             }
         }
         Ok(CommitResult {
+            items: Vec::new(),
             transaction_id: item.transaction_id,
             status: "rolled_back".to_owned(),
             message: "この項目を変更直前の状態へ戻し、再確認しました。".to_owned(),

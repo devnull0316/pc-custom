@@ -129,11 +129,19 @@ export interface CommitPreviewRequest {
   previewToken: string;
 }
 
+/** 適用できた1件。itemId をそのまま rollbackItem へ渡せる。 */
+export interface CommitItem {
+  itemId: string;
+  actionId: string;
+  name: string;
+}
+
 export interface CommitResult {
   transactionId: string;
   status: "succeeded" | "rolled_back" | "recovery_required";
   message: string;
   details?: readonly string[];
+  items: CommitItem[];
 }
 
 export type TimelineStatus =

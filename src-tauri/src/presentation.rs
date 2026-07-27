@@ -144,6 +144,18 @@ pub struct CommitResult {
     pub status: String,
     pub message: String,
     pub details: Vec<String>,
+    /// 適用できた項目。**その場で元へ戻すために必要**。
+    /// これが無かったため、利用者は戻すのにタイムラインまで移動して項目を探す必要があった。
+    pub items: Vec<CommitItem>,
+}
+
+/// 適用済み1件。`item_id` をそのまま `rollback_item` へ渡せる。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitItem {
+    pub item_id: Uuid,
+    pub action_id: String,
+    pub name: String,
 }
 
 pub fn action_presentation(

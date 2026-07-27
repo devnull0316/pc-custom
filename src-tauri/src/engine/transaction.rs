@@ -187,11 +187,26 @@ impl PcCustomEngine {
             true,
             now_ms(),
         )?;
+        // 戻すのに必要な項目をそのまま返す。呼び出し側が探し回らずに済む。
+        let items = work
+            .iter()
+            .map(|entry| {
+                let action_id = entry.parameters.action_id();
+                crate::presentation::CommitItem {
+                    item_id: entry.item_id,
+                    action_id: action_id.as_str().to_owned(),
+                    name: registered_action(action_id)
+                        .map(|action| action.metadata().name.to_owned())
+                        .unwrap_or_else(|_| action_id.as_str().to_owned()),
+                }
+            })
+            .collect();
         Ok(CommitResult {
             transaction_id,
             status: "succeeded".to_owned(),
             message: "全Actionを適用し、現在状態を再確認しました。".to_owned(),
             details: result_details,
+            items,
         })
     }
 
@@ -324,6 +339,8 @@ impl PcCustomEngine {
         )?;
         Ok(CommitResult {
             transaction_id,
+            // 失敗して巻き戻した結果なので、戻す対象は残っていない。
+            items: Vec::new(),
             status: if state == TransactionState::RolledBack {
                 "rolled_back".to_owned()
             } else {

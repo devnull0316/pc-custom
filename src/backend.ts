@@ -284,6 +284,10 @@ export function restartExplorerShell(): Promise<ShellRestartOutcome> {
   return call<ShellRestartOutcome>("restart_explorer_shell", {});
 }
 
+export function listTimeline(): Promise<readonly TimelineItem[]> {
+  return call<readonly TimelineItem[]>("list_timeline");
+}
+
 export function publicErrorMessage(error: unknown): string {
   if (error instanceof SafeCoreError) {
     return error.message;

@@ -38,6 +38,7 @@ import type {
   StoredProfile,
   TimelineItem,
   ViewId,
+  CommitItem,
 } from "./model";
 
 interface UiError {
@@ -161,6 +162,10 @@ export function App() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [uiError, setUiError] = useState<UiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // 直前に適用した項目。その場で戻せるようにするために持つ。
+  // 以前は適用後にタイムラインへ強制移動しており、戻すのに画面移動と項目探しが必要だった。
+  const [justApplied, setJustApplied] = useState<CommitItem[]>([]);
+  const [undoPending, setUndoPending] = useState(false);
   const initialLoadStarted = useRef(false);
 
   const handleUiError = useCallback((error: unknown) => {
@@ -302,17 +307,43 @@ export function App() {
       const result = await commitPreview({ previewToken: preview.previewToken });
       if (result.status === "succeeded") {
         setNotice(commitNotice(result.message, result.details));
+        // 戻す手段をその場に置く。画面は動かさない。
+        setJustApplied(result.items ?? []);
       } else {
         setUiError({ message: result.message, code: result.status.toLocaleUpperCase("en-US") });
+        setJustApplied([]);
       }
       setPreview(null);
       setPreviewConfirmed(false);
       await refreshSnapshot(false);
-      setView("timeline");
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
     } finally {
       setCommitPending(false);
+    }
+  }
+
+  /// 直前に適用した分を、その場でまとめて元へ戻す。
+  /// 逆順に戻すのは、適用が順序を持つため（後に適用したものから解く）。
+  async function undoJustApplied() {
+    if (justApplied.length === 0) return;
+    setUndoPending(true);
+    setUiError(null);
+    try {
+      for (const item of [...justApplied].reverse()) {
+        const result = await rollbackItem({ itemId: item.itemId });
+        if (result.status === "recovery_required") {
+          setUiError({ message: result.message, code: "RECOVERY_REQUIRED" });
+          return;
+        }
+      }
+      setNotice("元へ戻しました。");
+      setJustApplied([]);
+      await refreshSnapshot(false);
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setUndoPending(false);
     }
   }
 
@@ -518,6 +549,21 @@ export function App() {
           {profileDraft.length === 0 ? <div className="dialog-empty"><Icon name="plus" /><strong>Actionはまだありません</strong><span>Action詳細から「プロファイルへ追加」を選んでください。</span></div> : <ul className="draft-list">{profileDraft.map((item) => <li key={item.actionId}><span><strong>{item.title}</strong><code>{item.actionId}</code></span><button aria-label={`${item.title}を下書きから削除`} onClick={() => setProfileDraft((current) => current.filter((candidate) => candidate.actionId !== item.actionId))} type="button"><Icon name="close" /></button></li>)}</ul>}
         </Dialog>
       ) : null}
+      {justApplied.length === 0 ? null : (
+        <div aria-live="polite" className="undo-bar">
+          <Icon name="check" size={16} />
+          <span>
+            適用しました
+            <strong>{justApplied.map((item) => item.name).join("、")}</strong>
+          </span>
+          <button className="secondary-button" disabled={undoPending} onClick={() => void undoJustApplied()} type="button">
+            {undoPending ? <Icon className="spin" name="spinner" /> : <Icon name="undo" />}元に戻す
+          </button>
+          <button aria-label="この案内を閉じる" className="icon-button" onClick={() => setJustApplied([])} type="button">
+            <Icon name="close" size={15} />
+          </button>
+        </div>
+      )}
       {notice === null ? null : <div aria-live="polite" className="notice-toast"><Icon name="check" /><span>{notice}</span><button aria-label="通知を閉じる" onClick={() => setNotice(null)} type="button"><Icon name="close" size={15} /></button></div>}
     </div>
   );
