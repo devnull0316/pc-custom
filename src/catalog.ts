@@ -25,7 +25,7 @@ export const EVERYDAY_FEATURE_GUIDES = [
 
 export const CATEGORIES = [
   { id: "session", label: "集中・セッション", description: "その場だけ有効にして、終われば解放", icon: "focus" },
-  { id: "power", label: "電源", description: "現在の電源状態を安全に確認", icon: "power" },
+  { id: "power", label: "電源", description: "現在の電源状態を確認", icon: "power" },
   { id: "explorer", label: "ファイル表示", description: "ファイルを見分けやすくする", icon: "explorer" },
   { id: "appearance", label: "見た目", description: "Windowsとアプリの明暗を揃える", icon: "appearance" },
   { id: "games", label: "ゲーム", description: "登録したゲームを変更せずに見守る", icon: "game" },
@@ -108,7 +108,7 @@ const BASE_STATIC_ACTIONS = [
     actionVersion: 1,
     name: "ファイルの拡張子を常に表示する",
     description: "画像、文書、実行ファイルなどの種類を名前の末尾で見分けやすくします。",
-    audience: "似た名前のファイルを安全に見分けたい人向け",
+    audience: "似た名前のファイルを確実に見分けたい人向け",
     category: "explorer",
     tags: ["HKCU", "Explorer", "実機スモーク前提"],
     supportedWindowsVersions: ["Windows 11 24H2", "Windows 11 25H2"],
@@ -839,7 +839,7 @@ const OBSERVATION_FALLBACKS = [
     id: "storage.temp_files_check",
     name: "一時ファイルの使用量を確認する",
     description: "Windowsが返すユーザー一時フォルダーを、reparse pointを追跡せず件数・深さ・時間・合計量の上限内で集計します。削除はしません。",
-    audience: "削除前に一時ファイルの規模だけを安全に確認したい人向け",
+    audience: "削除せずに一時ファイルの規模だけを確認したい人向け",
     category: "storage",
     tags: ["ストレージ", "一時ファイル", "読み取り専用"],
     methodSummary: "GetTempPath2Wとreparse point非追跡の上限付きmetadata走査",
