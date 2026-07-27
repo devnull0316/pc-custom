@@ -1,9 +1,12 @@
 import { RESULT_TILES } from "../catalog";
 import type { ActionPresentation, BootstrapStatus, CategoryId, DataMode, TimelineItem } from "../model";
 import { timelineStatusLabel } from "../model";
+import { buildRecommendations } from "../recommendations";
 import { Icon } from "./Icon";
 
 interface HomeViewProps {
+  /** 推奨を押したときに、その項目へ移動する。 */
+  onOpenAction: (actionId: string) => void;
   dataMode: DataMode;
   bootstrap: BootstrapStatus | null;
   actions: readonly ActionPresentation[];
@@ -15,8 +18,10 @@ interface HomeViewProps {
   recoveryBusy: boolean;
 }
 
-export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategory, onOpenTimeline, onOpenView, onReconcile, recoveryBusy }: HomeViewProps) {
+export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenAction, onOpenCategory, onOpenTimeline, onOpenView, onReconcile, recoveryBusy }: HomeViewProps) {
   const recent = timeline[0];
+  // 67項目を等しく並べても「どれから」は決まらない。いまのPCを見て数件だけ先に出す。
+  const recommendations = buildRecommendations(actions, bootstrap);
   return (
     <div className="view home-view">
       <header className="view-heading home-heading">
@@ -33,6 +38,35 @@ export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenCategor
           {bootstrap.recoveryCount > 0 ? <button className="primary-button" disabled={recoveryBusy} onClick={onReconcile} type="button">{recoveryBusy ? <Icon className="spin" name="spinner" /> : <Icon name="recovery" />}復旧を確認</button> : <span className="read-only-badge">読み取りのみ</span>}
         </section>
       ) : null}
+      {recommendations.length === 0 ? null : (
+        <section aria-labelledby="recommend-title" className="recommend">
+          <div className="section-heading">
+            <div>
+              <h2 id="recommend-title">いまのPCを見て、おすすめ</h2>
+              <p>検出した状態から選んでいます。理由のないものは出しません。</p>
+            </div>
+          </div>
+          <ul className="recommend-list">
+            {recommendations.map((item) => (
+              <li className="recommend-row" key={item.actionId}>
+                <span className="recommend-row__mark"><Icon name="info" size={16} /></span>
+                <span className="recommend-row__copy">
+                  <strong>{item.title}</strong>
+                  <small>{item.reason}</small>
+                </span>
+                <button
+                  className="secondary-button"
+                  onClick={() => item.actionId === "__recovery" ? onOpenTimeline() : onOpenAction(item.actionId)}
+                  type="button"
+                >
+                  {item.actionId === "__recovery" ? "確認する" : "見てみる"}
+                  <Icon name="chevron" size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section aria-labelledby="results-title">
         <div className="section-heading"><div><h2 id="results-title">変更できる項目</h2><p>登録済みの{actions.length}項目から、いまのWindowsで実際に変えられるものを見分けて表示します。</p></div></div>
         <div className="result-grid">

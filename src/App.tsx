@@ -246,6 +246,13 @@ export function App() {
     void handleDetect(action.id);
   }, [handleDetect]);
 
+  /// 推奨からIDで直接その項目へ飛ぶ。見つからなければ何もしない（勝手に別の項目を開かない）。
+  const openActionById = useCallback((actionId: string) => {
+    const hit = actions.find((action) => action.id === actionId);
+    if (hit === undefined) return;
+    openAction(hit);
+  }, [actions, openAction]);
+
   const openCategory = useCallback((category: CategoryId) => {
     const first = actions.find((action) => action.category === category);
     setSelectedCategory(category);
@@ -485,7 +492,7 @@ export function App() {
         )}
         <main aria-busy={dataMode === "loading"} id="main-content">
           {view === "home" ? (
-            <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onOpenView={(target) => setView(target)} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
+            <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenAction={openActionById} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onOpenView={(target) => setView(target)} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
           ) : view === "actions" ? (
             <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onError={handleUiError} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
           ) : view === "profiles" ? (

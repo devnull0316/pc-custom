@@ -696,3 +696,16 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 2px 8px rgba(0, 0, 0, .45); }
   .result-tile:hover { border-color: rgba(255, 255, 255, .38); }
 }
+
+/* いまのPCを見た推奨。67項目を等しく並べる前に、数件だけ先に出す。 */
+.recommend { margin-bottom: 1.4rem; }
+.recommend-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.recommend-row { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+  padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-card);
+  background: var(--surface); }
+.recommend-row__mark { display: grid; place-items: center; width: 30px; height: 30px;
+  border-radius: 50%; color: var(--safe); background: var(--safe-soft); }
+.recommend-row__copy { min-width: 0; }
+.recommend-row__copy strong { display: block; font-size: var(--fs-base); }
+.recommend-row__copy small { display: block; margin-top: 2px; color: var(--text-secondary);
+  font-size: var(--fs-sm); line-height: 1.55; }
