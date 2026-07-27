@@ -1703,6 +1703,157 @@ mod tests {
         assert!(alive, "オーバーレイ自体はシェル再起動で消えないこと");
     }
 
+    /// オーバーレイが**他の最前面ウィンドウに前へ出られたとき**どうなるか。
+    ///
+    /// 実運用では、別の topmost ウィンドウ（通知、ゲームのオーバーレイ、他のツール）が
+    /// いつでも前に出てくる。出られたまま黙っていると、絵が半分隠れた状態が続く。
+    /// ここでは、前へ出られたことを**検出できるか**と、
+    /// `SetWindowPos(HWND_TOPMOST)` で**取り返せるか**を測る。
+    ///
+    /// 自分で作った窓しか使わない。利用者の窓には触れない。
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "自作の窓2枚でZ順の奪い合いを測る"]
+    fn overlay_can_retake_the_front_after_another_topmost_window() {
+        use std::{thread::sleep, time::Duration};
+        use windows::{
+            core::{w, PCWSTR},
+            Win32::{
+                Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+                Graphics::Gdi::HBRUSH,
+                UI::WindowsAndMessaging::{
+                    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetTopWindow,
+                    GetWindow, PeekMessageW, RegisterClassW, SetWindowPos, ShowWindow, GW_HWNDNEXT,
+                    HWND_TOPMOST, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                    SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                    WS_EX_TOPMOST, WS_POPUP,
+                },
+            },
+        };
+
+        unsafe extern "system" fn proc_fn(
+            window: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            DefWindowProcW(window, message, wparam, lparam)
+        }
+        fn make(class: PCWSTR, title: PCWSTR) -> Option<HWND> {
+            let registration = WNDCLASSW {
+                lpfnWndProc: Some(proc_fn),
+                lpszClassName: class,
+                hbrBackground: HBRUSH(std::ptr::null_mut()),
+                ..Default::default()
+            };
+            unsafe { RegisterClassW(&registration) };
+            match unsafe {
+                CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                    class,
+                    title,
+                    WS_POPUP,
+                    0,
+                    0,
+                    240,
+                    60,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            } {
+                Ok(handle) if !handle.is_invalid() => {
+                    let _ = unsafe { ShowWindow(handle, SW_SHOWNOACTIVATE) };
+                    Some(handle)
+                }
+                _ => None,
+            }
+        }
+        fn z(target: HWND) -> Option<usize> {
+            let mut current = unsafe { GetTopWindow(None) }.ok()?;
+            let mut index = 0usize;
+            loop {
+                if current == target {
+                    return Some(index);
+                }
+                match unsafe { GetWindow(current, GW_HWNDNEXT) } {
+                    Ok(next) if !next.is_invalid() => {
+                        current = next;
+                        index += 1;
+                        if index > 5000 {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        fn pump() {
+            for _ in 0..6 {
+                let mut message = MSG::default();
+                while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+                    unsafe { DispatchMessageW(&message) };
+                }
+                sleep(Duration::from_millis(120));
+            }
+        }
+
+        let Some(overlay) = make(w!("PcCustomZOverlay"), w!("overlay")) else {
+            println!("窓を作れないためスキップ");
+            return;
+        };
+        struct Owned(HWND);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                let _ = unsafe { DestroyWindow(self.0) };
+            }
+        }
+        let _own_overlay = Owned(overlay);
+        pump();
+        let before = z(overlay);
+
+        // あとから作った別の topmost が前に出るはず。
+        let Some(rival) = make(w!("PcCustomZRival"), w!("rival")) else {
+            println!("相手の窓を作れないためスキップ");
+            return;
+        };
+        let _own_rival = Owned(rival);
+        pump();
+        let (overlay_z, rival_z) = (z(overlay), z(rival));
+        println!("割り込み後: overlay={overlay_z:?} rival={rival_z:?}");
+        let taken = match (overlay_z, rival_z) {
+            (Some(o), Some(r)) => r < o,
+            _ => false,
+        };
+        println!("前を取られた: {taken}");
+
+        // 取り返す。
+        let _ = unsafe {
+            SetWindowPos(
+                overlay,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+            )
+        };
+        pump();
+        let (after_o, after_r) = (z(overlay), z(rival));
+        println!("取り返し後: overlay={after_o:?} rival={after_r:?}");
+
+        match (before, after_o, after_r) {
+            (_, Some(o), Some(r)) if o < r => {
+                println!("EVIDENCE: 割り込まれても SetWindowPos(HWND_TOPMOST) で前を取り返せる");
+            }
+            _ => {
+                println!("EVIDENCE: 取り返せなかった。前面維持には別の手立てが要る");
+            }
+        }
+    }
+
     /// Phase 1 A の決定実験。
     ///
     /// 「タスクバーを着せ替えたように見せる」を Safe 方式（Explorer へ手を入れず、
