@@ -118,6 +118,90 @@ mod imp {
         })
     }
 
+    /// 前面の窓が最大化されているか。
+    ///
+    /// 判断できないときは `None`。**「最大化していない」に倒さない。**
+    /// 分からないまま隠したり出したりするより、何もしないほうがよい。
+    ///
+    /// # なぜ `foreground_is_fullscreen` を使わないのか
+    ///
+    /// あちらは「窓の矩形がモニターを覆っているか」で判定する。オーバーレイには正しい。
+    /// ここで使うと自分で仕掛けた罠にかかる:
+    ///
+    /// タスクバーを隠すと**作業領域がモニター全体まで広がる。**
+    /// すると最大化した窓の矩形もモニターを覆う。あちらの判定はそれを全画面と呼ぶ。
+    /// 全画面は対象外なので `None` が返り、以後この機能は何も決めなくなり、
+    /// **利用者が最大化を解いてもタスクバーは隠れたままになる。**
+    ///
+    /// なので順番を逆にする。まず `showCmd` で最大化かどうかを決め、
+    /// モニターを覆っているかは「最大化ではないのに覆っている窓」＝
+    /// 枠なし全画面を除くためだけに使う。
+    pub fn foreground_is_maximized() -> Option<bool> {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+        classify(unsafe { GetForegroundWindow() })
+    }
+
+    /// 指定した窓を分類する。前面かどうかは問わない。
+    ///
+    /// 「どの窓を見るか」と「どう判定するか」を分けてある。
+    /// Windows は前面の奪取を断ることがあり、前面に依存したままだと
+    /// **判定そのものを一度も測れない。** 実際に断られて測れなかった。
+    pub fn classify(window: windows::Win32::Foundation::HWND) -> Option<bool> {
+        use windows::Win32::{
+            Foundation::RECT,
+            Graphics::Gdi::{
+                GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+            },
+            UI::WindowsAndMessaging::{
+                GetWindowPlacement, GetWindowRect, IsWindowVisible, SW_SHOWMAXIMIZED,
+                WINDOWPLACEMENT,
+            },
+        };
+
+        if window.is_invalid() || !unsafe { IsWindowVisible(window) }.as_bool() {
+            return None;
+        }
+        let mut placement = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        if unsafe { GetWindowPlacement(window, &mut placement) }.is_err() {
+            return None;
+        }
+        if placement.showCmd == SW_SHOWMAXIMIZED.0 as u32 {
+            return Some(true);
+        }
+
+        // 最大化ではない。モニターを覆っているなら枠なし全画面とみなし、触らない。
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(window, &mut rect) }.is_err() {
+            return None;
+        }
+        let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+            return None;
+        }
+        let covers = super::super::overlay_anchor::rect_covers_monitor(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (
+                info.rcMonitor.left,
+                info.rcMonitor.top,
+                info.rcMonitor.right,
+                info.rcMonitor.bottom,
+            ),
+        );
+        if covers {
+            None
+        } else {
+            Some(false)
+        }
+    }
+
     /// `ABS_AUTOHIDE` だけを立て下げする。
     ///
     /// 他のビットは `ABM_GETSTATE` から読み直したものをそのまま載せ替える。
@@ -148,10 +232,19 @@ mod imp {
     pub fn set_auto_hide(_enabled: bool) -> WindowsResult<()> {
         Err(WindowsError::unsupported("set taskbar auto-hide"))
     }
+
+    pub fn foreground_is_maximized() -> Option<bool> {
+        None
+    }
 }
 
 pub fn observe_taskbar_auto_hide() -> WindowsResult<TaskbarAutoHideObservation> {
     imp::observe()
+}
+
+/// 前面の窓が最大化されているか。判断できなければ `None`。
+pub fn foreground_is_maximized() -> Option<bool> {
+    imp::foreground_is_maximized()
 }
 
 /// 現在のビットが `expected` と一致するときだけ書き、書いたあと読み直す。
@@ -247,6 +340,83 @@ mod tests {
         assert_eq!(
             settled_back.work_area, before.work_area,
             "作業領域も元へ戻ること"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機の前面ウィンドウを読む"]
+    fn the_foreground_window_reads_as_something() {
+        // 何が返るかは実行時の画面次第。値そのものより、
+        // 「読めた／読めなかった」を区別して返せていることを見る。
+        println!(
+            "EVIDENCE: taskbar_autohide foreground_is_maximized={:?}",
+            foreground_is_maximized()
+        );
+    }
+
+    /// 自分で窓を作って、最大化の前後で判定が動くことを見る。
+    ///
+    /// 前の測定は前面がずっと枠なし全画面の窓だったため `None` しか出ず、
+    /// **`Some(true)` と `Some(false)` の経路は一度も通っていなかった。**
+    /// 利用者の窓には触らない。自分の窓だけで測る。
+    #[cfg(windows)]
+    struct OwnedTestWindow(windows::Win32::Foundation::HWND);
+
+    #[cfg(windows)]
+    impl Drop for OwnedTestWindow {
+        fn drop(&mut self) {
+            let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(self.0) };
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "自分の窓を作って判定する"]
+    fn a_window_of_our_own_reads_as_maximized_only_when_it_is() {
+        use windows::Win32::{
+            Foundation::{HINSTANCE, HWND},
+            UI::WindowsAndMessaging::{
+                CreateWindowExW, ShowWindow, HMENU, SW_RESTORE, SW_SHOWMAXIMIZED, WINDOW_EX_STYLE,
+                WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            },
+        };
+
+        let window = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                windows::core::w!("STATIC"),
+                windows::core::w!("pc-custom taskbar probe"),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                140,
+                160,
+                520,
+                360,
+                HWND::default(),
+                HMENU::default(),
+                HINSTANCE::default(),
+                None,
+            )
+        }
+        .expect("create a probe window");
+        let owned = OwnedTestWindow(window);
+
+        // 前面にはしない。Windows が断ることがあり、断られると測れないままになる。
+        // 判定そのものは窓を指定して呼べる。
+        let windowed = imp::classify(owned.0);
+        println!("EVIDENCE: taskbar_autohide probe windowed={windowed:?}");
+        assert_eq!(windowed, Some(false), "小さい窓は最大化ではない");
+
+        let _ = unsafe { ShowWindow(owned.0, SW_SHOWMAXIMIZED) };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let maximized = imp::classify(owned.0);
+        println!("EVIDENCE: taskbar_autohide probe maximized={maximized:?}");
+        assert_eq!(maximized, Some(true), "最大化した窓は最大化と読める");
+
+        let _ = unsafe { ShowWindow(owned.0, SW_RESTORE) };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        println!(
+            "EVIDENCE: taskbar_autohide probe restored={:?}",
+            imp::classify(owned.0)
         );
     }
 

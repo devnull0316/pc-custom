@@ -14,6 +14,7 @@ pub mod journal;
 pub mod presentation;
 pub mod settings_link;
 pub mod setup;
+pub mod taskbar_watcher;
 pub mod theme_schedule;
 pub mod window_layout;
 pub mod windows;

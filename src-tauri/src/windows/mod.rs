@@ -147,7 +147,8 @@ pub use power_mode::{
     write_dc_mode, write_dc_mode_raw, EffectiveMode, PowerMode, PowerModeReading,
 };
 pub use taskbar_autohide::{
-    observe_taskbar_auto_hide, replace_taskbar_auto_hide, TaskbarAutoHideObservation,
+    foreground_is_maximized, observe_taskbar_auto_hide, replace_taskbar_auto_hide,
+    TaskbarAutoHideObservation,
 };
 #[cfg(test)]
 pub use ui_probe::{observe_taskbar_layout, TaskbarLayoutObservation};
