@@ -360,6 +360,78 @@ pub fn explorer_window_item_names(window_handle: isize) -> WindowsResult<Vec<Str
     }
 }
 
+/// エクスプローラーの窓の中で、名前が一致する要素の矩形を返す。
+///
+/// 「要素が在るか」では、ステータスバーの表示切替を判定できなかった。
+/// UIA は非表示のものも列挙するためで、`CurrentIsOffscreen` も当てにならなかった。
+/// 代わりに**面積で見る**。ステータスバーが出れば一覧の領域はその分縮む。
+#[cfg(windows)]
+pub fn explorer_element_rect(
+    window_handle: isize,
+    needle: &str,
+) -> WindowsResult<Option<(i32, i32, i32, i32)>> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+    };
+
+    fn fail(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
+    unsafe {
+        let window = HWND(window_handle as *mut core::ffi::c_void);
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+        let result = (|| -> WindowsResult<Option<(i32, i32, i32, i32)>> {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|_| fail("CoCreateInstance"))?;
+            let root: IUIAutomationElement = automation
+                .ElementFromHandle(window)
+                .map_err(|_| fail("ElementFromHandle explorer"))?;
+            let condition = automation
+                .CreateTrueCondition()
+                .map_err(|_| fail("CreateTrueCondition"))?;
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .map_err(|_| fail("FindAll"))?;
+            let count = all.Length().map_err(|_| fail("Length"))?;
+            for index in 0..count {
+                let Ok(element) = all.GetElement(index) else {
+                    continue;
+                };
+                let Ok(name) = element.CurrentName() else {
+                    continue;
+                };
+                if !name.to_string().contains(needle) {
+                    continue;
+                }
+                if let Ok(rect) = element.CurrentBoundingRectangle() {
+                    return Ok(Some((rect.left, rect.top, rect.right, rect.bottom)));
+                }
+            }
+            Ok(None)
+        })();
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+#[cfg(not(windows))]
+pub fn explorer_element_rect(
+    _window_handle: isize,
+    _needle: &str,
+) -> WindowsResult<Option<(i32, i32, i32, i32)>> {
+    Err(WindowsError::unsupported("explorer element rect"))
+}
+
 #[cfg(not(windows))]
 pub fn explorer_window_item_names(window_handle: isize) -> WindowsResult<Vec<String>> {
     Err(WindowsError::unsupported("explorer window items"))
@@ -1757,47 +1829,38 @@ mod tests {
             },
         ];
 
-        fn read_names(label: &str) -> Vec<String> {
+        /// 一覧の矩形を返す。「要素が在るか」では判定できなかったので、**面積**で見る。
+        /// ステータスバーやメニューバーが出れば、その分だけ一覧は縮む。
+        fn read_list_rect(label: &str) -> Option<(i32, i32, i32, i32)> {
             let Ok(dir) = tempfile::tempdir() else {
-                return Vec::new();
+                return None;
             };
             let title = format!("pcc-x-{}", uuid::Uuid::new_v4().simple());
             let target = dir.path().join(&title);
             if fs::create_dir(&target).is_err() {
-                return Vec::new();
+                return None;
             }
             let _ = fs::write(target.join("a.txt"), b"a");
             match OwnedExplorerWindow::open(&target, &title) {
                 Ok(window) => {
-                    let names = window
+                    let rect = window
                         .handle
-                        .and_then(|h| explorer_window_item_names(h).ok())
-                        .unwrap_or_default();
-                    println!("  ({label}) 要素数={}", names.len());
-                    names
+                        .and_then(|h| explorer_element_rect(h, "個の項目").ok().flatten());
+                    println!("  ({label}) 一覧の矩形={rect:?}");
+                    rect
                 }
                 Err(error) => {
                     println!("  ({label}) 窓を開けなかった: {error:?}");
-                    Vec::new()
+                    None
                 }
             }
         }
-        fn has(names: &[String], marker: &str) -> bool {
-            names.iter().any(|name| name.contains(marker))
-        }
 
-        let before = read_names("変更前");
-        if before.is_empty() {
-            println!("観測できないためスキップ");
+        let before = read_list_rect("変更前");
+        let Some(before_rect) = before else {
+            println!("一覧の矩形を読めないためスキップ");
             return;
-        }
-        for candidate in &candidates {
-            println!(
-                "before: {} present={}",
-                candidate.id,
-                has(&before, candidate.marker)
-            );
-        }
+        };
 
         let mut backups = Vec::new();
         for candidate in &candidates {
@@ -1832,39 +1895,36 @@ mod tests {
                 &candidate.flipped.to_le_bytes(),
             );
         }
-        let after = read_names("変更後");
-
-        let mut verdicts = Vec::new();
-        for (candidate, _) in &backups {
-            let was = has(&before, candidate.marker);
-            let now = has(&after, candidate.marker);
-            println!("applied: {} present {was} -> {now}", candidate.id);
-            verdicts.push((candidate.id, was != now));
-        }
+        let after = read_list_rect("変更後");
 
         for (_, backup) in &backups {
             let _ = restore_registry_backup(backup);
         }
         guard.1 = true;
         drop(guard);
-        let restored = read_names("復元後");
-        for (candidate, _) in &backups {
-            assert_eq!(
-                has(&restored, candidate.marker),
-                has(&before, candidate.marker),
-                "{} が元へ戻ること",
-                candidate.id
-            );
-        }
+        let restored = read_list_rect("復元後");
+
+        let height = |r: Option<(i32, i32, i32, i32)>| r.map(|v| v.3 - v.1);
+        println!(
+            "一覧の高さ: 前={:?} 後={:?} 戻し後={:?}",
+            height(before),
+            height(after),
+            height(restored)
+        );
+        let changed = match (height(before), height(after)) {
+            (Some(a), Some(b)) => (a - b).abs() > 4,
+            _ => false,
+        };
+        let _ = before_rect;
 
         println!("---- 判定 ----");
-        for (id, changed) in verdicts {
-            if changed {
-                println!("EVIDENCE: {id} は新しい窓へ反映される。昇格可能");
-            } else {
-                println!("EVIDENCE: {id} は反映を確認できなかった。昇格しない");
-            }
-        }
+        // 3回とも観測に失敗している。ここで出る「変化なし」は
+        // **「反映されない」ではなく「測れていない」** である。結論を書かない。
+        //   1回目: 要素名の有無 → UIA は非表示のものも列挙するので区別できない
+        //   2回目: CurrentIsOffscreen と境界矩形で絞る → 要素数が変わらず、効いていない
+        //   3回目: 一覧の高さ → 掴んだのは幅299pxの詳細ウィンドウで、一覧ではなかった
+        // 必要なのは、一覧そのものを取り違えずに掴む手段。
+        println!("この経路では判定できない（変化={changed}）。観測手段を作り直すこと");
     }
 
     /// 自分で開いたエクスプローラーの窓に、UIA から何が見えるかを出す。
