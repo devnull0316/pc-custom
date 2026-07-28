@@ -19,6 +19,7 @@ mod readiness;
 mod registry;
 // 反映にはシェル再起動が要る項目がある。利用者が明示的に選んだときだけ実行する。
 mod shell_restart;
+mod taskbar_autohide;
 mod transaction_lock;
 // 検証専用の計器。実UIを外から読むためにエクスプローラーの窓を開き、シェル設定を書き、
 // 窓を閉じる処理を含む。製品側からは一度も呼ばれないので、出荷バイナリへは入れない。
@@ -144,6 +145,9 @@ pub use pointer_feel::{read_pointer_feel, replace_pointer_feel, PointerFeel};
 pub use power_mode::{
     read_ac_mode, read_dc_mode, read_effective_mode, write_ac_mode, write_ac_mode_raw,
     write_dc_mode, write_dc_mode_raw, EffectiveMode, PowerMode, PowerModeReading,
+};
+pub use taskbar_autohide::{
+    observe_taskbar_auto_hide, replace_taskbar_auto_hide, TaskbarAutoHideObservation,
 };
 #[cfg(test)]
 pub use ui_probe::{observe_taskbar_layout, TaskbarLayoutObservation};
