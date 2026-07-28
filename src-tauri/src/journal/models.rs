@@ -142,6 +142,17 @@ pub struct PersistedItem {
     pub diagnostic_id: Option<Uuid>,
 }
 
+/// いま効いているはずの適用1件と、そのときのバックアップ。
+///
+/// 「適用したときの値」を知っているのはバックアップだけなので、
+/// 現在値との照合はここを基準にする。
+#[derive(Debug, Clone)]
+pub struct AppliedBackup {
+    pub action_id: String,
+    pub applied_at_unix_ms: i64,
+    pub backup: BackupEnvelope,
+}
+
 #[derive(Debug, Clone)]
 pub struct RecoveryTransaction {
     pub transaction_id: Uuid,

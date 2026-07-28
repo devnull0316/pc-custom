@@ -7,6 +7,7 @@ use crate::{
     bootstrap::ApplicationState,
     error::{CoreError, CoreResult},
     game_profile::{CreateProfileRequest, StoredProfile},
+    health_report::HealthReport,
     journal::{ReconcileResult, TimelineItem},
     presentation::{
         ActionPresentation, BootstrapStatus, CommitPreviewRequest, CommitResult, DetectionResponse,
@@ -145,6 +146,12 @@ pub fn commit_preview(
 #[tauri::command]
 pub fn list_timeline(state: State<'_, ApplicationState>) -> CoreResult<Vec<TimelineItem>> {
     state.engine()?.list_timeline(250)
+}
+
+/// 適用した設定が今も残っているかを照合する。読むだけで、何も変更しない。
+#[tauri::command]
+pub fn build_health_report(state: State<'_, ApplicationState>) -> CoreResult<HealthReport> {
+    state.engine()?.build_health_report()
 }
 
 #[tauri::command]

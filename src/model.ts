@@ -421,3 +421,21 @@ export interface ShellRestartOutcome {
   /** Windows の自動復帰では戻らず、こちらから起動し直したか。 */
   relaunched: boolean;
 }
+
+/** 適用した設定が今も残っているかの照合結果。原因は書かない。 */
+export interface HealthEntry {
+  actionId: string;
+  name: string;
+  note: string;
+  appliedAt: string;
+}
+
+export interface HealthReport {
+  hasBaseline: boolean;
+  noBaselineNote: string | null;
+  holding: readonly HealthEntry[];
+  changed: readonly HealthEntry[];
+  unknown: readonly HealthEntry[];
+  updateReference: string | null;
+  summary: string;
+}

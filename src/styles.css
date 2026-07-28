@@ -257,6 +257,27 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .timeline-recovery > svg { color: var(--danger); }
 .timeline-recovery p { margin: 3px 0 0; color: var(--text-secondary); font-size: var(--fs-sm); }
 .timeline-recovery button { display: flex; gap: 6px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 7px 10px; background: var(--surface); }
+/* 適用した設定の照合。読むだけの表示なので、操作系より一段静かに置く。 */
+.health-panel { display: grid; gap: 10px; padding: 13px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.health-panel--quiet { grid-template-columns: auto 1fr; align-items: center; gap: 10px; background: var(--surface-muted); }
+.health-panel--quiet p { margin: 0; color: var(--text-secondary); font-size: var(--fs-sm); }
+.health-panel--quiet > svg { color: var(--text-tertiary); }
+.health-panel--alert { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.health-panel__head { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; }
+.health-panel__head > svg { margin-top: 2px; color: var(--text-secondary); }
+.health-panel--alert .health-panel__head > svg { color: var(--danger); }
+.health-panel__head strong { font-size: var(--fs-base); }
+/* 参考情報。因果ではないので、本文より弱く出す。 */
+.health-panel__reference { margin: 4px 0 0; color: var(--text-tertiary); font-size: var(--fs-xs); line-height: 1.55; }
+.health-list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.health-list li { display: grid; gap: 2px; padding: 9px 10px; border-radius: var(--radius-control); background: var(--surface-muted); }
+.health-list strong { font-size: var(--fs-sm); }
+.health-list span { color: var(--text-secondary); font-size: var(--fs-xs); }
+.health-list small { color: var(--text-tertiary); font-size: var(--fs-xs); }
+.health-list--quiet li { background: transparent; padding: 5px 0; }
+.health-panel__folds { display: grid; gap: 4px; }
+.health-fold { display: grid; gap: 4px; }
+
 .timeline-list { position: relative; list-style: none; margin: 0; padding: 0; }
 .timeline-list::before { content: ""; position: absolute; top: 22px; bottom: 22px; left: 15px; width: 1px; background: var(--border-strong); }
 .timeline-entry { position: relative; display: grid; grid-template-columns: 31px 1fr; gap: 15px; margin-bottom: 12px; content-visibility: auto; contain-intrinsic-size: auto 220px; }

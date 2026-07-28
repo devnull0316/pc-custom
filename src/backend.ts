@@ -9,6 +9,7 @@ import type {
   CoreErrorShape,
   CreateProfileRequest,
   DetectionResponse,
+  HealthReport,
   ImportPreviewItem,
   ImportResult,
   InstallOutcome,
@@ -323,6 +324,11 @@ export function commitPreviewAsTrial(
 /** 試用を確定する。以後この変更は自動で戻らない。 */
 export function confirmTrial(transactionId: string): Promise<boolean> {
   return call<boolean>("confirm_trial", { transactionId });
+}
+
+/** 適用した設定が今も残っているかを照合する。読むだけで何も変更しない。 */
+export function buildHealthReport(): Promise<HealthReport> {
+  return call<HealthReport>("build_health_report");
 }
 
 export function publicErrorMessage(error: unknown): string {

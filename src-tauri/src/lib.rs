@@ -8,6 +8,7 @@ pub mod config_snapshot;
 pub mod engine;
 pub mod error;
 pub mod game_profile;
+pub mod health_report;
 pub mod ipc;
 pub mod journal;
 pub mod presentation;
@@ -53,6 +54,7 @@ pub fn run() {
             commands::commit_preview_as_trial,
             commands::confirm_trial,
             commands::list_timeline,
+            commands::build_health_report,
             commands::rollback_item,
             commands::reconcile_now,
             commands::profiles_list,

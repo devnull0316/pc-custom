@@ -18,12 +18,16 @@ use crate::{
     action::{
         Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
         ActionParameters, ActionResult, ActionStage, DetectedState, ObservedValue,
-        RollbackEvidence, Verification, ACTION_REGISTRY,
+        ReadinessComponent, RollbackEvidence, Verification, ACTION_REGISTRY,
     },
-    backup::{BackupEnvelope, Fingerprint},
+    backup::{
+        classify_registry_backup, BackupEnvelope, BackupPayload, Fingerprint,
+        RegistryClassification,
+    },
     compatibility::{CompatibilityCatalog, CompatibilityMode, OsIdentity},
     error::{CoreError, CoreResult},
     game_profile::{CreateProfileRequest, ImportResult, ProfileStore, StoredProfile},
+    health_report::{build_health_report, HealthInput, HealthProbe, HealthReport},
     journal::{ItemState, JournalDatabase, ReconcileResult, RecoveryClassification, TimelineItem},
     presentation::{
         action_presentation, default_parameters, listing_parameters, os_label,
@@ -421,6 +425,45 @@ impl PcCustomEngine {
         Ok(timeline)
     }
 
+    /// 適用した設定が今も残っているかを照合する。**read-only。**
+    ///
+    /// 基準は「このアプリで適用して、まだ戻していないもの」。
+    /// 推測で「本来こうあるべき」を作らない。基準が無ければ無いと言う。
+    pub fn build_health_report(&self) -> CoreResult<HealthReport> {
+        let applied = self.journal.applied_backups()?;
+        let inputs = applied
+            .into_iter()
+            .map(|record| {
+                let name = record
+                    .action_id
+                    .parse::<ActionId>()
+                    .ok()
+                    .and_then(|id| ACTION_REGISTRY.get(id))
+                    .map(|action| action.metadata().name.to_owned())
+                    .unwrap_or_else(|| "名前の分からない項目".to_owned());
+                let (probe, uncomparable_reason) = probe_backup(&record.backup.payload);
+                HealthInput {
+                    action_id: record.action_id,
+                    name,
+                    applied_at: format_local_timestamp(record.applied_at_unix_ms),
+                    probe,
+                    uncomparable_reason,
+                }
+            })
+            .collect();
+
+        // 更新の確認日時は参考として添えるだけ。取れなければ何も出さない。
+        // 取れないことを「更新していない」と読み替えない。
+        let last_checked = match crate::windows::read_windows_update_status() {
+            Ok(status) => match status.last_checked_local {
+                ReadinessComponent::Known { value } => Some(value),
+                _ => None,
+            },
+            Err(_) => None,
+        };
+        Ok(build_health_report(inputs, last_checked.as_deref()))
+    }
+
     fn identity_for_read(&self) -> CoreResult<OsIdentity> {
         self.initial_identity.clone().ok_or_else(|| {
             CoreError::recovery_required("Windows buildを確認できないため、状態を推測しません。")
@@ -806,6 +849,164 @@ fn format_timestamp(unix_ms: u64) -> String {
     DateTime::<Utc>::from_timestamp_millis(value)
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
         .to_rfc3339()
+}
+
+/// バックアップに残した実際のバイト列と、いまのレジストリ値を突き合わせる。
+///
+/// 判定を混ぜない: 1つでも読めなければ「確認できません」に落とす。
+/// 読めた分だけで「基準どおり」と言うほうが、黙って見落とすより悪い。
+fn probe_backup(payload: &BackupPayload) -> (HealthProbe, Option<String>) {
+    let entries = match payload {
+        BackupPayload::Registry(backup) => vec![backup],
+        BackupPayload::Composite(composite) => composite.registry_entries.iter().collect(),
+        // レジストリ以外（セッション設定やウィンドウ配置）は、
+        // 「適用したときの値」を今の環境から読み直す手段がない。無いものを在るとは言わない。
+        _ => Vec::new(),
+    };
+    if entries.is_empty() {
+        return (
+            HealthProbe::Uncomparable,
+            Some("この項目は、あとから見比べるしくみがありません。".to_owned()),
+        );
+    }
+
+    let mut counts = ProbeCounts::default();
+    for entry in entries {
+        match classify_registry_backup(entry) {
+            Ok(RegistryClassification::Applied) => counts.holds += 1,
+            // 値が消えている場合も「適用前に戻った」側。作られた空のキーは値ではない。
+            Ok(RegistryClassification::Original)
+            | Ok(RegistryClassification::CreatedKeyWithoutValue) => counts.previous += 1,
+            Ok(RegistryClassification::Third) => counts.neither += 1,
+            Err(_) => {
+                return (
+                    HealthProbe::Uncomparable,
+                    Some("いまの状態を読み取れませんでした。".to_owned()),
+                )
+            }
+        }
+    }
+    (combine_probe(counts), None)
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ProbeCounts {
+    holds: usize,
+    previous: usize,
+    neither: usize,
+}
+
+/// 1つの Action が複数のレジストリ値にまたがるとき、全体をどう言うか。
+///
+/// 一部だけ戻っている状態を「適用したときのまま」とは呼べないので、
+/// 混ざっていたら「どちらとも違う」に倒す。**都合のよい側へ丸めない。**
+fn combine_probe(counts: ProbeCounts) -> HealthProbe {
+    if counts.neither > 0 || (counts.holds > 0 && counts.previous > 0) {
+        HealthProbe::Neither
+    } else if counts.previous > 0 {
+        HealthProbe::BackToPrevious
+    } else {
+        HealthProbe::HoldsApplied
+    }
+}
+
+/// 実機の記録に対して照合を1回走らせ、数を出す。
+///
+/// 単体テストは合成ロジックしか見ていない。SQL が本当に行を返すか、
+/// バックアップのバイト列が本当に現在のレジストリと突き合わせられるかは、
+/// **実際の記録に当てないと分からない。** 読むだけなので何も変更しない。
+#[cfg(all(test, windows))]
+mod real_journal_probe {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    #[ignore = "実機の記録が要る"]
+    fn health_report_runs_against_the_real_journal() {
+        let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+            println!("EVIDENCE: health_report skipped (LOCALAPPDATA なし)");
+            return;
+        };
+        let path = PathBuf::from(local)
+            .join("PCCustom")
+            .join("data")
+            .join("pc-custom.db");
+        if !path.exists() {
+            println!("EVIDENCE: health_report skipped (記録がまだ無い)");
+            return;
+        }
+        // 実物を開かない。`JournalDatabase::open` は読み書きで開くので、
+        // 利用者の変更記録に検証の都合で触れる余地を残さない。複製を作って、そちらを開く。
+        let copy = std::env::temp_dir().join("pc-custom-health-probe-copy.db");
+        let _ = std::fs::remove_file(&copy);
+        std::fs::copy(&path, &copy).expect("copy journal");
+        let journal = JournalDatabase::open(&copy).expect("open journal copy");
+        let applied = journal.applied_backups().expect("applied backups");
+        println!("EVIDENCE: health_report baselines={}", applied.len());
+        for record in &applied {
+            let (probe, reason) = probe_backup(&record.backup.payload);
+            println!(
+                "EVIDENCE: health_report action={} probe={:?} reason={:?}",
+                record.action_id, probe, reason
+            );
+            // 「違う」が正しいのかを、判定関数を通さずに1つずつ読み直して確かめる。
+            let entries: Vec<&crate::backup::RegistryBackup> = match &record.backup.payload {
+                BackupPayload::Registry(backup) => vec![backup],
+                BackupPayload::Composite(composite) => composite.registry_entries.iter().collect(),
+                _ => Vec::new(),
+            };
+            for entry in entries {
+                let current = crate::backup::read_registry_state(&entry.location);
+                println!(
+                    "EVIDENCE: health_report   entry class={:?} current={:?}",
+                    classify_registry_backup(entry),
+                    current.map(|state| (state.value_existed, state.raw_bytes))
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod probe_combination_tests {
+    use super::*;
+
+    fn counts(holds: usize, previous: usize, neither: usize) -> ProbeCounts {
+        ProbeCounts {
+            holds,
+            previous,
+            neither,
+        }
+    }
+
+    #[test]
+    fn every_value_still_applied_reads_as_applied() {
+        assert_eq!(combine_probe(counts(3, 0, 0)), HealthProbe::HoldsApplied);
+    }
+
+    #[test]
+    fn every_value_back_to_the_previous_one_reads_as_reverted() {
+        assert_eq!(combine_probe(counts(0, 2, 0)), HealthProbe::BackToPrevious);
+    }
+
+    #[test]
+    fn a_partial_revert_is_not_reported_as_healthy() {
+        // 2つのうち1つだけ戻っている。ここを「そのまま」と言うと見落としになる。
+        assert_eq!(combine_probe(counts(1, 1, 0)), HealthProbe::Neither);
+    }
+
+    #[test]
+    fn a_third_value_anywhere_wins_over_the_rest() {
+        assert_eq!(combine_probe(counts(5, 0, 1)), HealthProbe::Neither);
+        assert_eq!(combine_probe(counts(0, 5, 1)), HealthProbe::Neither);
+    }
+}
+
+/// 画面に出す時刻。秒までは要らない。
+fn format_local_timestamp(unix_ms: i64) -> String {
+    DateTime::<Utc>::from_timestamp_millis(unix_ms)
+        .map(|value| value.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "時刻不明".to_owned())
 }
 
 #[cfg(test)]

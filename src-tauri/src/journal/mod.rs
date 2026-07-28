@@ -4,6 +4,6 @@ mod repository;
 
 pub use database::JournalDatabase;
 pub use models::{
-    ItemState, PersistedItem, PreparedItem, ReconcileResult, RecoveryClassification,
+    AppliedBackup, ItemState, PersistedItem, PreparedItem, ReconcileResult, RecoveryClassification,
     RecoveryTransaction, TimelineItem, TimelineStage, TransactionState,
 };

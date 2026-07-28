@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { BootstrapStatus, DataMode, TimelineItem } from "../model";
 import { timelineStatusLabel } from "../model";
+import { HealthPanel } from "./HealthPanel";
 import { Icon } from "./Icon";
 
 interface TimelineViewProps {
@@ -24,6 +25,7 @@ export function TimelineView({ dataMode, bootstrap, items, rollbackPendingId, re
   return (
     <div className="view timeline-view">
       <header className="view-heading"><div><p className="eyebrow">変更の記録</p><h1>タイムライン</h1><p>変更前後と検証結果を残し、戻したい項目だけを選べます。</p></div></header>
+      <HealthPanel dataMode={dataMode} />
       {bootstrap?.mode === "recovery_required" && bootstrap.recoveryCount > 0 ? (
         <section aria-label="復旧が必要な項目" className="timeline-recovery"><Icon name="warning" size={22} /><div><strong>{bootstrap.recoveryCount}件の未復元項目があります</strong><p>{bootstrap.message}</p></div><button disabled={recoveryBusy || dataMode !== "live"} onClick={onRetryRecovery} type="button">{recoveryBusy ? <Icon className="spin" name="spinner" /> : <Icon name="recovery" />}失敗項目だけ再試行</button></section>
       ) : null}

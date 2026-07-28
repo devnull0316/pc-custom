@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, str::FromStr};
+use std::{collections::BTreeMap, error::Error as StdError, str::FromStr};
 
 use chrono::{DateTime, Utc};
 use rusqlite::{params, types::Type, OptionalExtension, Row};
@@ -13,8 +13,8 @@ use crate::{
 use super::{
     database::JournalDatabase,
     models::{
-        ItemState, PersistedItem, PreparedItem, RecoveryClassification, RecoveryTransaction,
-        TimelineItem, TimelineStage, TransactionState,
+        AppliedBackup, ItemState, PersistedItem, PreparedItem, RecoveryClassification,
+        RecoveryTransaction, TimelineItem, TimelineStage, TransactionState,
     },
 };
 
@@ -577,6 +577,52 @@ impl JournalDatabase {
                 |row| row.get(0),
             )?;
             Ok(u32::try_from(count).unwrap_or(u32::MAX))
+        })
+    }
+
+    /// いま効いているはずの適用を、バックアップつきで返す。
+    ///
+    /// 「効いているはず」は、項目が APPLIED のまま、取引が SUCCEEDED のもの。
+    /// 戻した分（ROLLED_BACK）は基準にならないので外す。
+    /// 同じ Action を何度も適用していたら、**最後の1回だけ**を基準にする。
+    pub fn applied_backups(&self) -> CoreResult<Vec<AppliedBackup>> {
+        self.with_connection(|database| {
+            let mut statement = database.prepare(
+                "SELECT i.action_id, b.payload,
+                        COALESCE(i.finished_at_unix_ms, t.started_at_unix_ms)
+                 FROM transaction_items i
+                 JOIN transactions t ON t.transaction_id = i.transaction_id
+                 JOIN backups b ON b.item_id = i.item_id
+                 WHERE i.state = 'APPLIED' AND t.state = 'SUCCEEDED'
+                 ORDER BY COALESCE(i.finished_at_unix_ms, t.started_at_unix_ms) ASC",
+            )?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            // 古い順に読んで同じ Action を上書きしていくので、残るのは最後の適用。
+            let mut latest: BTreeMap<String, AppliedBackup> = BTreeMap::new();
+            for (action_id, payload, applied_at_unix_ms) in rows {
+                let Ok(backup) = serde_json::from_slice::<BackupEnvelope>(&payload) else {
+                    // 読めない記録を「基準どおり」に数えるわけにはいかない。黙って落とす。
+                    continue;
+                };
+                latest.insert(
+                    action_id.clone(),
+                    AppliedBackup {
+                        action_id,
+                        applied_at_unix_ms,
+                        backup,
+                    },
+                );
+            }
+            Ok(latest.into_values().collect())
         })
     }
 

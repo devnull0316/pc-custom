@@ -12,6 +12,7 @@ commands.allow = [
   "commit_preview_as_trial",
   "confirm_trial",
   "list_timeline",
+  "build_health_report",
   "rollback_item",
   "reconcile_now",
   "profiles_list",
