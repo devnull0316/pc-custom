@@ -5,6 +5,7 @@ mod bootstrap;
 mod commands;
 pub mod compatibility;
 pub mod config_snapshot;
+pub mod display_profile;
 pub mod engine;
 pub mod error;
 pub mod game_profile;
