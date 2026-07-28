@@ -1804,3 +1804,52 @@ mod tests {
         assert!(listing_parameters(ActionId::SetupPowerToysStatus).is_some());
     }
 }
+
+#[cfg(test)]
+mod count_report {
+    use super::*;
+    use crate::action::ACTION_REGISTRY;
+
+    /// README に載せる件数を実データから数える。
+    ///
+    /// **手で書いた件数は2回ずれた。** 公開している README が自分の数を間違えるのは、
+    /// 訪問者が最初に確かめられる場所なので、ここで数えて突き合わせる。
+    #[test]
+    fn dump_action_counts() {
+        let mut persistent = 0;
+        let mut session = 0;
+        let mut observation = 0;
+        let mut guided_candidate = 0;
+        let mut guided_settings = 0;
+        for action in ACTION_REGISTRY.iter() {
+            let m = action.metadata();
+            match m.kind {
+                ActionKind::Persistent => persistent += 1,
+                ActionKind::Session => session += 1,
+                ActionKind::Observation => observation += 1,
+                ActionKind::Guided => {
+                    if m.method_class == MethodClass::UnverifiedStorage {
+                        guided_candidate += 1;
+                    } else {
+                        guided_settings += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let total = ACTION_REGISTRY.iter().count();
+        println!(
+            "総数={} 変更できる(persistent+session)={} 確認のみ={} 表示専用={} 設定案内={}",
+            total,
+            persistent + session,
+            observation,
+            guided_candidate,
+            guided_settings
+        );
+        assert_eq!(total, 67, "総数が変わったら README も直すこと");
+        assert!(
+            guided_candidate <= 39,
+            "表示専用が増えている。確認していないものを足していないか"
+        );
+    }
+}
