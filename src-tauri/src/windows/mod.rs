@@ -4,6 +4,7 @@ mod accessibility_shortcuts;
 mod app_launch;
 mod audio;
 mod broadcast;
+mod desktop_icons;
 mod execution_state;
 // 実行ファイルを手で打たせない。Windows自身の選択画面を開く。
 mod file_picker;
@@ -141,6 +142,7 @@ impl WindowsError {
 
 pub type WindowsResult<T> = Result<T, WindowsError>;
 
+pub use desktop_icons::{read_desktop_icon_layout, DesktopIcon, DesktopIconLayout};
 pub use pointer_feel::{read_pointer_feel, replace_pointer_feel, PointerFeel};
 pub use power_mode::{
     read_ac_mode, read_dc_mode, read_effective_mode, write_ac_mode, write_ac_mode_raw,
