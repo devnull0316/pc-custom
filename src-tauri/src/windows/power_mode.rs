@@ -92,6 +92,12 @@ mod imp {
     };
 
     type GetMode = unsafe extern "system" fn(*mut GUID) -> i32;
+    type SetMode = unsafe extern "system" fn(*const GUID) -> i32;
+
+    struct Setters {
+        ac: Option<SetMode>,
+        dc: Option<SetMode>,
+    }
 
     /// powrprof.dll から2つの getter を引く。
     ///
@@ -219,6 +225,63 @@ mod imp {
         Ok(received.map(super::EffectiveMode::from_raw))
     }
 
+    fn setters() -> &'static Setters {
+        static CACHE: OnceLock<Setters> = OnceLock::new();
+        CACHE.get_or_init(|| {
+            let Ok(module) =
+                (unsafe { LoadLibraryExW(w!("powrprof.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) })
+            else {
+                return Setters { ac: None, dc: None };
+            };
+            let ac = unsafe { GetProcAddress(module, s!("PowerSetUserConfiguredACPowerMode")) };
+            let dc = unsafe { GetProcAddress(module, s!("PowerSetUserConfiguredDCPowerMode")) };
+            Setters {
+                // SAFETY: 文書化された署名 HRESULT(const GUID*)。
+                ac: ac.map(|address| unsafe { std::mem::transmute::<_, SetMode>(address) }),
+                dc: dc.map(|address| unsafe { std::mem::transmute::<_, SetMode>(address) }),
+            }
+        })
+    }
+
+    fn write(function: Option<SetMode>, raw: [u8; 16], label: &'static str) -> WindowsResult<()> {
+        let Some(function) = function else {
+            return Err(WindowsError::new(
+                WindowsErrorKind::UnsupportedPlatform,
+                label,
+                None,
+            ));
+        };
+        let guid = guid_from_bytes(raw);
+        let status = unsafe { function(&guid) };
+        if status != 0 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ApiFailure,
+                label,
+                Some(i64::from(status)),
+            ));
+        }
+        Ok(())
+    }
+
+    fn guid_from_bytes(raw: [u8; 16]) -> GUID {
+        GUID {
+            data1: u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]),
+            data2: u16::from_le_bytes([raw[4], raw[5]]),
+            data3: u16::from_le_bytes([raw[6], raw[7]]),
+            data4: [
+                raw[8], raw[9], raw[10], raw[11], raw[12], raw[13], raw[14], raw[15],
+            ],
+        }
+    }
+
+    pub fn write_ac_mode(raw: [u8; 16]) -> WindowsResult<()> {
+        write(setters().ac, raw, "PowerSetUserConfiguredACPowerMode")
+    }
+
+    pub fn write_dc_mode(raw: [u8; 16]) -> WindowsResult<()> {
+        write(setters().dc, raw, "PowerSetUserConfiguredDCPowerMode")
+    }
+
     pub fn read_ac_mode() -> WindowsResult<PowerModeReading> {
         read(getters().ac, "PowerGetUserConfiguredACPowerMode")
     }
@@ -234,6 +297,22 @@ mod imp {
 
     pub fn read_effective_mode() -> WindowsResult<Option<super::EffectiveMode>> {
         Ok(None)
+    }
+
+    pub fn write_ac_mode(_raw: [u8; 16]) -> WindowsResult<()> {
+        Err(super::WindowsError::new(
+            super::WindowsErrorKind::UnsupportedPlatform,
+            "PowerSetUserConfiguredACPowerMode",
+            None,
+        ))
+    }
+
+    pub fn write_dc_mode(_raw: [u8; 16]) -> WindowsResult<()> {
+        Err(super::WindowsError::new(
+            super::WindowsErrorKind::UnsupportedPlatform,
+            "PowerSetUserConfiguredDCPowerMode",
+            None,
+        ))
     }
 
     pub fn read_ac_mode() -> WindowsResult<PowerModeReading> {
@@ -253,6 +332,36 @@ pub fn read_ac_mode() -> WindowsResult<PowerModeReading> {
 /// 電池で動いているときの、利用者が選んだモード。
 pub fn read_dc_mode() -> WindowsResult<PowerModeReading> {
     imp::read_dc_mode()
+}
+
+impl PowerMode {
+    /// 書き込みに使う GUID のバイト列。
+    pub const fn bytes(self) -> [u8; 16] {
+        match self {
+            Self::BestEfficiency => EFFICIENCY,
+            Self::Balanced => BALANCED,
+            Self::BestPerformance => PERFORMANCE,
+        }
+    }
+}
+
+/// 電源接続時のモードを書く。
+pub fn write_ac_mode(mode: PowerMode) -> WindowsResult<()> {
+    imp::write_ac_mode(mode.bytes())
+}
+
+/// 電池使用時のモードを書く。
+pub fn write_dc_mode(mode: PowerMode) -> WindowsResult<()> {
+    imp::write_dc_mode(mode.bytes())
+}
+
+/// 元の値へ戻すときは、3値でなかった可能性があるのでバイト列のまま書く。
+pub fn write_ac_mode_raw(raw: [u8; 16]) -> WindowsResult<()> {
+    imp::write_ac_mode(raw)
+}
+
+pub fn write_dc_mode_raw(raw: [u8; 16]) -> WindowsResult<()> {
+    imp::write_dc_mode(raw)
 }
 
 /// Windows が報告する実効モード。取れなければ `None`。
@@ -298,6 +407,137 @@ mod tests {
         let mut raw = [0u8; 16];
         raw[0] = 0x99;
         assert_eq!(PowerMode::from_bytes(raw), None);
+    }
+
+    /// 実機で1往復させる。
+    ///
+    /// 書けたことを効果の証明にしない。**書いたあと必ず読み直す。**
+    /// 触るのは利用者本人の設定なので、panic しても戻るよう `Drop` で戻す。
+    struct RestoreOnDrop {
+        ac: Option<[u8; 16]>,
+        dc: Option<[u8; 16]>,
+    }
+
+    impl Drop for RestoreOnDrop {
+        fn drop(&mut self) {
+            if let Some(raw) = self.ac {
+                let _ = write_ac_mode_raw(raw);
+            }
+            if let Some(raw) = self.dc {
+                let _ = write_dc_mode_raw(raw);
+            }
+        }
+    }
+
+    fn raw_of(reading: PowerModeReading) -> Option<[u8; 16]> {
+        match reading {
+            PowerModeReading::Known(mode) => Some(mode.bytes()),
+            PowerModeReading::Unrecognised(raw) => Some(raw),
+            PowerModeReading::Unavailable => None,
+        }
+    }
+
+    #[test]
+    #[ignore = "実機の電源モードを一時的に変える"]
+    fn setting_a_mode_and_putting_it_back_is_observable_both_times() {
+        let before_ac = read_ac_mode().expect("read ac");
+        let before_dc = read_dc_mode().expect("read dc");
+        println!("EVIDENCE: power_mode_roundtrip before ac={before_ac:?} dc={before_dc:?}");
+        let (Some(original_ac), Some(original_dc)) = (raw_of(before_ac), raw_of(before_dc)) else {
+            println!("EVIDENCE: power_mode_roundtrip skipped (この環境では読めない)");
+            return;
+        };
+        let _restore = RestoreOnDrop {
+            ac: Some(original_ac),
+            dc: Some(original_dc),
+        };
+
+        // 供給ごとに、今と違う値を書く。
+        // 同じ値を書いて同じ値が返っても、書けた証明にはならない。
+        //
+        // すべての機が3値を受け付けるわけではない。この機は「電池優先」を
+        // ERROR_INVALID_PARAMETER で拒否する。受け付ける値が見つかるまで順に試し、
+        // どれで測ったかを EVIDENCE に残す。
+        let write_something_else = |current: PowerModeReading,
+                                    write: &dyn Fn(PowerMode) -> WindowsResult<()>|
+         -> Option<PowerMode> {
+            [
+                PowerMode::Balanced,
+                PowerMode::BestPerformance,
+                PowerMode::BestEfficiency,
+            ]
+            .into_iter()
+            .filter(|mode| current != PowerModeReading::Known(*mode))
+            .find(|mode| write(*mode).is_ok())
+        };
+        let target_ac =
+            write_something_else(before_ac, &write_ac_mode).expect("AC でどれか1つは書けるはず");
+        let target_dc =
+            write_something_else(before_dc, &write_dc_mode).expect("DC でどれか1つは書けるはず");
+        let after_ac = read_ac_mode().expect("re-read ac");
+        let after_dc = read_dc_mode().expect("re-read dc");
+        println!(
+            "EVIDENCE: power_mode_roundtrip wrote ac={target_ac:?} dc={target_dc:?}              after ac={after_ac:?} dc={after_dc:?}"
+        );
+        assert_eq!(after_ac, PowerModeReading::Known(target_ac));
+        assert_eq!(after_dc, PowerModeReading::Known(target_dc));
+
+        write_ac_mode_raw(original_ac).expect("restore ac");
+        write_dc_mode_raw(original_dc).expect("restore dc");
+        let restored_ac = read_ac_mode().expect("re-read ac after restore");
+        let restored_dc = read_dc_mode().expect("re-read dc after restore");
+        println!("EVIDENCE: power_mode_roundtrip restored ac={restored_ac:?} dc={restored_dc:?}");
+        assert_eq!(restored_ac, before_ac);
+        assert_eq!(restored_dc, before_dc);
+    }
+
+    /// DC 側が拒否する条件を切り分ける。3値それぞれを試して、結果をそのまま出す。
+    #[test]
+    #[ignore = "実機の電源モードを一時的に変える"]
+    fn which_dc_values_does_this_machine_accept() {
+        let before = read_dc_mode().expect("read dc");
+        println!("EVIDENCE: dc_probe before={before:?}");
+        let original = match before {
+            PowerModeReading::Known(mode) => mode.bytes(),
+            PowerModeReading::Unrecognised(raw) => raw,
+            PowerModeReading::Unavailable => {
+                println!("EVIDENCE: dc_probe skipped");
+                return;
+            }
+        };
+        let _restore = RestoreOnDrop {
+            ac: None,
+            dc: Some(original),
+        };
+        for mode in [
+            PowerMode::Balanced,
+            PowerMode::BestEfficiency,
+            PowerMode::BestPerformance,
+        ] {
+            let write = write_dc_mode(mode);
+            let read_back = read_dc_mode();
+            println!("EVIDENCE: dc_probe {mode:?} write={write:?} read_back={read_back:?}");
+        }
+        // AC 側も同じ3値で試して、DC だけの問題かを見る。
+        let before_ac = read_ac_mode().expect("read ac");
+        let original_ac = match before_ac {
+            PowerModeReading::Known(mode) => mode.bytes(),
+            PowerModeReading::Unrecognised(raw) => raw,
+            PowerModeReading::Unavailable => return,
+        };
+        let _restore_ac = RestoreOnDrop {
+            ac: Some(original_ac),
+            dc: None,
+        };
+        for mode in [
+            PowerMode::Balanced,
+            PowerMode::BestEfficiency,
+            PowerMode::BestPerformance,
+        ] {
+            let write = write_ac_mode(mode);
+            let read_back = read_ac_mode();
+            println!("EVIDENCE: ac_probe {mode:?} write={write:?} read_back={read_back:?}");
+        }
     }
 
     /// 実機で1回読んで、返ってきた値をそのまま出す。

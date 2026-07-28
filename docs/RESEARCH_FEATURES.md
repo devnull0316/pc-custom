@@ -121,6 +121,22 @@
 4. **Windows のどの公開手段で実現できるか**  
    2025-02-28 更新の公式文書に、AC 用 `PowerGet/SetUserConfiguredACPowerMode` と DC 用 `PowerGet/SetUserConfiguredDCPowerMode` が公開されている（[AC getter](https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powergetuserconfiguredacpowermode)、[AC setter](https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powersetuserconfiguredacpowermode)、[DC getter](https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powergetuserconfigureddcpowermode)、[DC setter](https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powersetuserconfigureddcpowermode)）。受け付けるのは「Best Power Efficiency / Balanced / Best Performance」の3値だけで、Windows 11 が最小要件である。実際の有効 mode は `PowerRegisterForEffectivePowerModeNotifications` で別に観測する（[Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/api/powersetting/nf-powersetting-powerregisterforeffectivepowermodenotifications)）。公式文書に昇格や再起動の要件はないが、標準ユーザー実機で feature probe と error 伝播を確認してから有効化する。
 
+**実機での追加所見（2026-07-28、build 26200 のデスクトップ1台）**  
+`PowerGet/SetUserConfigured{AC,DC}PowerMode` は windows-rs 0.58 のメタデータに無く、手書き FFI になる。
+`GetProcAddress` で実行時に引くこと。静的リンクは、エクスポートが無い環境でプロセスごと起動不能にする。
+
+署名は当てずに測った。両 getter は文書化された overlay GUID を返し、別 API の
+`PowerRegisterForEffectivePowerModeNotifications` も同じ方向を報告した。ただし
+**値は一致しない**（要求 `BestPerformance` / 実効 `MaxPerformance`）。要求値と実効値を1つの
+「現在のモード」に混ぜてはいけない、という設計判断はこの実測で裏が取れている。
+
+**3値すべてが書けるとは限らない。** この機は AC・DC どちらでも「電池優先」を
+`ERROR_INVALID_PARAMETER` で拒否し、「バランス」「パフォーマンス優先」は書けた。
+最初の往復テストは元と同じ値を書いていたため、これを success として通してしまった。
+供給ごとに**必ず今と違う値**を書いて読み直すまで、拒否は見えない。
+実装では、選べない値を事前に断定せず、拒否されたら「この PC ではこのモードを選べません」と
+そのまま伝えること。書き込み前に「選べる」と約束しない。
+
 5. **元に戻せるか**  
    戻せる。AC と DC の元 GUID を別々に保存し、変更した側ごとに現在の user-configured value が自分の適用値なら元へ戻す。active power plan はこの Action では変更しない。Microsoft は user-configured mode を「他の system signal に上書きされ得る vote」と明記しているため、getter の要求値と effective notification の値を別表示する。登録直後に複数 callback が来る可能性を考慮して debounce 後の最終値を採用し、未着は `unknown`、不一致時は「要求値は保存済み／Windows 報告の実効 mode は不一致（理由不明）」とする。
 

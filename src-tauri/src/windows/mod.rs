@@ -140,7 +140,8 @@ impl WindowsError {
 pub type WindowsResult<T> = Result<T, WindowsError>;
 
 pub use power_mode::{
-    read_ac_mode, read_dc_mode, read_effective_mode, EffectiveMode, PowerMode, PowerModeReading,
+    read_ac_mode, read_dc_mode, read_effective_mode, write_ac_mode, write_ac_mode_raw,
+    write_dc_mode, write_dc_mode_raw, EffectiveMode, PowerMode, PowerModeReading,
 };
 #[cfg(test)]
 pub use ui_probe::{observe_taskbar_layout, TaskbarLayoutObservation};
