@@ -92,6 +92,7 @@ impl ProfileWatcher {
         engine: Arc<PcCustomEngine>,
         store: Arc<ProfileStore>,
         theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
+        taskbar: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
     ) -> CoreResult<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let health = WatcherHealth::new();
@@ -101,7 +102,14 @@ impl ProfileWatcher {
             .name("totonoe-profile-watcher".to_owned())
             .spawn(move || {
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    run_loop(engine, store, theme_schedule, stop_thread, &health_thread)
+                    run_loop(
+                        engine,
+                        store,
+                        theme_schedule,
+                        taskbar,
+                        stop_thread,
+                        &health_thread,
+                    )
                 }))
                 .unwrap_or_else(|_| {
                     Err(CoreError::recovery_required(
@@ -165,6 +173,7 @@ fn run_loop(
     engine: Arc<PcCustomEngine>,
     store: Arc<ProfileStore>,
     theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
+    taskbar: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
     stop: Arc<AtomicBool>,
     health: &WatcherHealth,
 ) -> CoreResult<()> {
@@ -172,11 +181,15 @@ fn run_loop(
     let sink = EngineProfileSink::new(engine);
     let mut runtime = ProfileRuntime::new(sink);
     let mut theme_tracker = crate::theme_schedule::ThemeScheduleTracker::default();
+    let mut taskbar_watcher = crate::taskbar_watcher::TaskbarWatcher::default();
 
     while !stop.load(Ordering::SeqCst) {
         run_cycle(&mut runtime, &store, health);
         if let Some(theme_store) = theme_schedule.as_ref() {
             apply_theme_schedule_if_due(&theme_engine, theme_store, &mut theme_tracker);
+        }
+        if let Some(taskbar_store) = taskbar.as_ref() {
+            follow_taskbar_auto_hide(taskbar_store, &mut taskbar_watcher);
         }
 
         let ticks = (POLL_INTERVAL.as_millis() / STOP_CHECK.as_millis()).max(1);
@@ -188,6 +201,15 @@ fn run_loop(
         }
     }
 
+    // 自分が隠していたなら、終了前に戻す。隠したまま消えない。
+    if taskbar.is_some() && taskbar_watcher.owns_hidden() && !taskbar_watcher.has_released() {
+        if let Ok(observation) = crate::windows::observe_taskbar_auto_hide() {
+            if observation.auto_hide_bit {
+                let _ = crate::windows::replace_taskbar_auto_hide(true, false);
+            }
+        }
+    }
+
     // 終了境界: active instance を終了扱いにして、適用済み resource を先に復元する。
     let failures = runtime.sync(&[]);
     if let Some((error, _)) = sync_failures_error(&failures) {
@@ -195,6 +217,60 @@ fn run_loop(
         return Err(error);
     }
     Ok(())
+}
+
+/// 最大化しているときだけタスクバーを隠す。
+///
+/// 判断は `TaskbarWatcher` が持つ。ここは観測を渡して、返ってきた指示を実行するだけ。
+/// **書き込みの前後で必ず読み直す。** `ABM_SETSTATE` の戻り値は常に TRUE なので使えない。
+fn follow_taskbar_auto_hide(
+    store: &crate::taskbar_watcher::TaskbarAutoHideStore,
+    watcher: &mut crate::taskbar_watcher::TaskbarWatcher,
+) {
+    use crate::taskbar_watcher::{ForegroundObservation, WatcherDecision};
+
+    if !store.get().enabled {
+        // 切られた。自分が隠していたなら戻す。
+        // **「オンにしてオフにしても戻らない」を作らない。** 同じ形の不具合を前に出している。
+        if watcher.owns_hidden() && !watcher.has_released() {
+            if let Ok(observation) = crate::windows::observe_taskbar_auto_hide() {
+                if observation.auto_hide_bit {
+                    let _ = crate::windows::replace_taskbar_auto_hide(true, false);
+                }
+            }
+            *watcher = crate::taskbar_watcher::TaskbarWatcher::default();
+        }
+        return;
+    }
+    let Ok(observation) = crate::windows::observe_taskbar_auto_hide() else {
+        // 読めないなら何もしない。読めないことを「隠れていない」と読み替えない。
+        return;
+    };
+    let foreground = match crate::windows::foreground_is_maximized() {
+        Some(true) => ForegroundObservation::Maximized,
+        Some(false) => ForegroundObservation::NotMaximized,
+        None => ForegroundObservation::Unknown,
+    };
+
+    let decision = watcher.evaluate(foreground, observation.auto_hide_bit);
+    let target = match decision {
+        WatcherDecision::Idle => return,
+        WatcherDecision::ReleaseOwnership => {
+            // 誰かが手で変えた。取り返さず、画面にそう出す。
+            store.record_released();
+            return;
+        }
+        WatcherDecision::Hide => true,
+        WatcherDecision::Show => false,
+    };
+
+    match crate::windows::replace_taskbar_auto_hide(observation.auto_hide_bit, target) {
+        Ok(after) if after.auto_hide_bit == target => store.record_error(None),
+        Ok(_) => store.record_error(Some(
+            "タスクバーの設定を書きましたが、反映を確認できませんでした。".to_owned(),
+        )),
+        Err(_) => store.record_error(Some("タスクバーの設定を変更できませんでした。".to_owned())),
+    }
 }
 
 /// 時間帯によるライト/ダーク自動切り替え。
@@ -509,7 +585,7 @@ mod tests {
             PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200)))
                 .expect("engine"),
         );
-        let mut watcher = ProfileWatcher::spawn(engine, store, None).expect("spawn watcher");
+        let mut watcher = ProfileWatcher::spawn(engine, store, None, None).expect("spawn watcher");
         watcher.shutdown().expect("graceful shutdown");
         assert!(watcher.health_error().is_none());
     }

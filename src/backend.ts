@@ -26,6 +26,7 @@ import type {
   ReconcileResult,
   RollbackItemRequest,
   StoredProfile,
+  TaskbarAutoHideState,
   TimelineItem,
   WindowLayoutStatus,
   ShellRestartOutcome,
@@ -39,85 +40,34 @@ export interface CoreSnapshot {
 
 type RawActionPresentation = Omit<ActionPresentation, "category"> & { category: string };
 
-const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
-  "session.prevent_sleep": "session",
-  "input.shift_interruption_guard": "games",
-  "power.active_scheme_check": "power",
-  "power.active_scheme_switch": "power",
-  "explorer.show_extensions": "explorer",
-  "explorer.show_hidden": "explorer",
-  "explorer.clock_seconds": "explorer",
-  "appearance.transparency": "appearance",
-  "taskbar.task_view": "appearance",
-  "taskbar.widgets": "appearance",
-  "explorer.item_checkboxes": "explorer",
-  "explorer.compact_view": "explorer",
-  "theme.color_mode": "appearance",
-  "games.process_watch": "games",
-  "taskbar.search_mode": "appearance",
-  "taskbar.alignment": "appearance",
-  "start.layout": "appearance",
-  "start.recommendations": "appearance",
-  "explorer.launch_target": "explorer",
-  "explorer.recent_files": "explorer",
-  "taskbar.button_grouping": "appearance",
-  "taskbar.flashing": "appearance",
-  "taskbar.share_window": "appearance",
-  "taskbar.show_desktop": "appearance",
-  "search.recent_on_hover": "appearance",
-  "taskbar.multi_monitor": "appearance",
-  "taskbar.multi_monitor_mode": "appearance",
-  "taskbar.secondary_button_grouping": "appearance",
-  "start.show_all_pins": "appearance",
-  "start.recent_apps": "appearance",
-  "appearance.accent_start_taskbar": "appearance",
-  "appearance.accent_title_bars": "appearance",
-  "appearance.auto_accent": "appearance",
-  "games.game_mode": "games",
-  "games.controller_game_bar": "games",
-  "devices.autoplay": "setup",
-  "notifications.usb_errors": "notifications",
-  "notifications.weak_charger": "notifications",
-  "input.autocorrect": "input",
-  "input.double_space_period": "input",
-  "input.auto_shift": "input",
-  "input.voice_typing_key": "input",
-  "input.multilingual_suggestions": "input",
-  "explorer.status_bar": "explorer",
-  "explorer.info_tips": "explorer",
-  "explorer.hide_empty_drives": "explorer",
-  "explorer.nav_expand_current": "explorer",
-  "explorer.nav_show_all": "explorer",
-  "explorer.separate_process": "explorer",
-  "explorer.icons_only": "explorer",
-  "explorer.drive_letters": "explorer",
-  "explorer.preview_handlers": "explorer",
-  "explorer.sharing_wizard": "explorer",
-  "explorer.always_show_menus": "explorer",
-  "appearance.taskbar_animations": "appearance",
-  "notifications.toast_banners": "notifications",
-  "setup.startup_inventory": "setup",
-  "setup.powertoys_status": "setup",
-  "setup.launch_apps": "setup",
-  "setup.windows_update_status": "setup",
-  "setup.default_apps": "setup",
-  "setup.window_layout": "setup",
-  "setup.audio_output": "setup",
-  "storage.free_space_check": "storage",
-  "storage.temp_files_check": "storage",
-  "appearance.accent_color_check": "appearance",
-  "appearance.window_color": "appearance",
-  "games.readiness_check": "games",
-};
+/**
+ * 画面が扱えるカテゴリ。
+ *
+ * ここには**一覧を持たない。** 以前は Action ID ごとのカテゴリ表を持っていて、
+ * 新しい Action を足すたびに書き足す必要があり、忘れると `list_actions` が
+ * まるごと失敗して**アプリが何も表示しなくなる。** 実際に2つ書き忘れた。
+ * 表はコアが既に持っているので、こちらは受け取った値が既知かどうかだけを見る。
+ */
+const KNOWN_CATEGORIES: ReadonlySet<string> = new Set<CategoryId>([
+  "session",
+  "power",
+  "explorer",
+  "appearance",
+  "games",
+  "setup",
+  "storage",
+  "notifications",
+  "input",
+]);
 
 function normalizeAction(action: RawActionPresentation): ActionPresentation {
-  const category = CATEGORY_BY_ACTION[action.id];
-  if (category === undefined) {
+  if (!KNOWN_CATEGORIES.has(action.category)) {
     throw new SafeCoreError(
       "UNKNOWN_ACTION_PRESENTATION",
       "未登録のAction表示を受信したため、変更操作を停止しました。",
     );
   }
+  const category = action.category as CategoryId;
   if (action.id === "games.process_watch" && action.currentState == null) {
     return {
       ...action,
@@ -329,6 +279,16 @@ export function confirmTrial(transactionId: string): Promise<boolean> {
 /** 適用した設定が今も残っているかを照合する。読むだけで何も変更しない。 */
 export function buildHealthReport(): Promise<HealthReport> {
   return call<HealthReport>("build_health_report");
+}
+
+/** 最大化中だけタスクバーを隠す設定の、いまの状態。 */
+export function taskbarAutoHideState(): Promise<TaskbarAutoHideState> {
+  return call<TaskbarAutoHideState>("taskbar_auto_hide_state");
+}
+
+/** その設定を切り替える。切ったときは監視側がタスクバーを戻す。 */
+export function setTaskbarAutoHide(enabled: boolean): Promise<TaskbarAutoHideState> {
+  return call<TaskbarAutoHideState>("set_taskbar_auto_hide", { enabled });
 }
 
 export function publicErrorMessage(error: unknown): string {

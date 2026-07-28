@@ -1937,6 +1937,42 @@ mod tests {
 }
 
 #[cfg(test)]
+mod category_contract {
+    use super::*;
+
+    /// 画面が知っているカテゴリの一覧。`src/model.ts` の `CategoryId` と同じ。
+    const KNOWN: [&str; 9] = [
+        "session",
+        "power",
+        "explorer",
+        "appearance",
+        "games",
+        "setup",
+        "storage",
+        "notifications",
+        "input",
+    ];
+
+    /// 知らないカテゴリを返す Action が1つでもあると、画面は一覧をまるごと拒否する。
+    ///
+    /// 以前は画面側が Action ID ごとのカテゴリ表を持っていて、
+    /// 新しい Action を足して書き忘れると**アプリが何も表示しなくなった。**
+    /// 表は無くしたので、あとはコアが知らない値を出さないことだけを見ればよい。
+    #[test]
+    fn every_action_reports_a_category_the_screen_knows() {
+        for action_id in ActionId::ALL {
+            let category = category_for(action_id);
+            assert!(
+                KNOWN.contains(&category),
+                "{} のカテゴリ {} を画面が知らない",
+                action_id.as_str(),
+                category
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod request_round_trip {
     use super::*;
 

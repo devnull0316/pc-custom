@@ -12,6 +12,7 @@ import { isMutationAllowed, riskLabel } from "../model";
 import { ExplorerRestartPanel } from "./ExplorerRestartPanel";
 import { Icon } from "./Icon";
 import { TempCleanupPanel } from "./TempCleanupPanel";
+import { TaskbarAutoHidePanel } from "./TaskbarAutoHidePanel";
 import { ThemeSchedulePanel } from "./ThemeSchedulePanel";
 
 interface ActionBrowserProps {
@@ -100,6 +101,7 @@ export function ActionBrowser({
         </div>
       </header>
       {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
+      {selectedCategory === "appearance" ? <TaskbarAutoHidePanel dataMode={dataMode} /> : null}
       {selectedCategory === "storage" ? <TempCleanupPanel dataMode={dataMode} /> : null}
       {/* カテゴリは横一列にする。以前は左の列の8割をこれが占め、
           肝心のAction一覧が最下部に押し込まれていた。下で選んで上のボタンへ戻る、

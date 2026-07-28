@@ -13,6 +13,7 @@ use crate::{
         ActionPresentation, BootstrapStatus, CommitPreviewRequest, CommitResult, DetectionResponse,
         PreviewActionsRequest, PreviewResponse, RollbackItemRequest,
     },
+    taskbar_watcher::TaskbarAutoHideState,
     window_layout::WindowLayoutStatus,
 };
 
@@ -146,6 +147,27 @@ pub fn commit_preview(
 #[tauri::command]
 pub fn list_timeline(state: State<'_, ApplicationState>) -> CoreResult<Vec<TimelineItem>> {
     state.engine()?.list_timeline(250)
+}
+
+/// 最大化しているときだけタスクバーを隠す設定の、現在の状態。
+#[tauri::command]
+pub fn taskbar_auto_hide_state(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<TaskbarAutoHideState> {
+    Ok(state.taskbar_store()?.state())
+}
+
+/// この機能を使うかどうかを切り替える。
+///
+/// 切ったときにタスクバーを戻すのは監視側の役目。ここは意思だけを記録する。
+#[tauri::command]
+pub fn set_taskbar_auto_hide(
+    state: State<'_, ApplicationState>,
+    enabled: bool,
+) -> CoreResult<TaskbarAutoHideState> {
+    let store = state.taskbar_store()?;
+    store.set(crate::taskbar_watcher::TaskbarAutoHideSetting { enabled })?;
+    Ok(store.state())
 }
 
 /// 適用した設定が今も残っているかを照合する。読むだけで、何も変更しない。

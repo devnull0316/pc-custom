@@ -18,6 +18,7 @@ pub struct ApplicationState {
     engine: Option<Arc<PcCustomEngine>>,
     profile_store: Option<Arc<crate::game_profile::ProfileStore>>,
     theme_schedule_store: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
+    taskbar_store: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
     initialization_error: Option<CoreError>,
     _instance_guard: Option<crate::windows::AppInstanceGuard>,
     profile_watcher: Option<crate::game_profile::ProfileWatcher>,
@@ -26,7 +27,7 @@ pub struct ApplicationState {
 impl ApplicationState {
     pub fn initialize() -> Self {
         match initialize_engine() {
-            Ok((engine, instance_guard, profile_store, theme_schedule_store)) => {
+            Ok((engine, instance_guard, profile_store, theme_schedule_store, taskbar_store)) => {
                 let engine = Arc::new(engine);
                 // 有効プロファイルのゲーム起動を検知して準備を適用/復元する背景監視。
                 // 既定ではどのプロファイルも自動適用オフのため、実質待機で始まる。
@@ -34,11 +35,13 @@ impl ApplicationState {
                     engine.clone(),
                     profile_store.clone(),
                     Some(theme_schedule_store.clone()),
+                    Some(taskbar_store.clone()),
                 ) {
                     Ok(watcher) => Self {
                         engine: Some(engine),
                         profile_store: Some(profile_store),
                         theme_schedule_store: Some(theme_schedule_store),
+                        taskbar_store: Some(taskbar_store),
                         initialization_error: None,
                         _instance_guard: Some(instance_guard),
                         profile_watcher: Some(watcher),
@@ -49,6 +52,7 @@ impl ApplicationState {
                         engine: Some(engine),
                         profile_store: Some(profile_store),
                         theme_schedule_store: Some(theme_schedule_store),
+                        taskbar_store: Some(taskbar_store),
                         initialization_error: Some(error),
                         _instance_guard: Some(instance_guard),
                         profile_watcher: None,
@@ -59,11 +63,20 @@ impl ApplicationState {
                 engine: None,
                 profile_store: None,
                 theme_schedule_store: None,
+                taskbar_store: None,
                 initialization_error: Some(error),
                 _instance_guard: None,
                 profile_watcher: None,
             },
         }
+    }
+
+    pub fn taskbar_store(&self) -> CoreResult<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>> {
+        self.taskbar_store.clone().ok_or_else(|| {
+            CoreError::recovery_required(
+                "タスクバー設定の保存領域を初期化できなかったため、操作を停止しました。",
+            )
+        })
     }
 
     pub fn engine(&self) -> CoreResult<Arc<PcCustomEngine>> {
@@ -147,6 +160,7 @@ type EngineBootstrap = (
     crate::windows::AppInstanceGuard,
     Arc<crate::game_profile::ProfileStore>,
     Arc<crate::theme_schedule::ThemeScheduleStore>,
+    Arc<crate::taskbar_watcher::TaskbarAutoHideStore>,
 );
 
 fn initialize_engine() -> CoreResult<EngineBootstrap> {
@@ -187,7 +201,16 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
     let theme_schedule_store = Arc::new(crate::theme_schedule::ThemeScheduleStore::open(
         data_directory.join("theme-schedule.json"),
     )?);
-    Ok((engine, instance_guard, profile_store, theme_schedule_store))
+    let taskbar_store = Arc::new(crate::taskbar_watcher::TaskbarAutoHideStore::open(
+        data_directory.join("taskbar-autohide.json"),
+    )?);
+    Ok((
+        engine,
+        instance_guard,
+        profile_store,
+        theme_schedule_store,
+        taskbar_store,
+    ))
 }
 
 fn data_directory() -> CoreResult<PathBuf> {

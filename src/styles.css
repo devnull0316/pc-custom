@@ -793,3 +793,17 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .mode-choice { display: grid; gap: 6px; margin: 14px 0; }
 .mode-choice > span { color: var(--text-secondary); font-size: var(--fs-sm); }
 .mode-choice small { color: var(--text-tertiary); font-size: var(--fs-xs); }
+
+/* 最大化中だけタスクバーを隠す。設定が1つだけなので、項目一覧の外に静かに置く。 */
+.taskbar-autohide-panel { display: grid; gap: 10px; padding: 13px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.taskbar-autohide-panel header { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
+.taskbar-autohide-panel strong { font-size: var(--fs-base); }
+.taskbar-autohide-panel header p { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--fs-sm); }
+.taskbar-autohide-panel__notes { display: grid; gap: 3px; margin: 0; padding-left: 18px;
+  color: var(--text-tertiary); font-size: var(--fs-xs); }
+.taskbar-autohide-panel__released, .taskbar-autohide-panel__error {
+  display: flex; gap: 6px; align-items: center; margin: 0; padding: 8px 10px;
+  border-radius: var(--radius-control); background: var(--surface-muted);
+  color: var(--text-secondary); font-size: var(--fs-xs); }
+.taskbar-autohide-panel__error { color: var(--danger); background: var(--danger-soft); }

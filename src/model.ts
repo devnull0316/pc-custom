@@ -439,3 +439,11 @@ export interface HealthReport {
   updateReference: string | null;
   summary: string;
 }
+
+/** 最大化しているときだけタスクバーを隠す設定の状態。 */
+export interface TaskbarAutoHideState {
+  enabled: boolean;
+  /** 誰かが手で変えたので、この機能が手を引いた。 */
+  released: boolean;
+  lastError: string | null;
+}

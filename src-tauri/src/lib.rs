@@ -56,6 +56,8 @@ pub fn run() {
             commands::confirm_trial,
             commands::list_timeline,
             commands::build_health_report,
+            commands::taskbar_auto_hide_state,
+            commands::set_taskbar_auto_hide,
             commands::rollback_item,
             commands::reconcile_now,
             commands::profiles_list,

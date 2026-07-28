@@ -12,6 +12,112 @@
 //! - **人が触ったら手を引く。** 自分が最後に書いた値と現在値が違えば、
 //!   それは利用者か別のアプリが変えたということ。以後この機能は自分から触らない。
 
+use std::path::PathBuf;
+
+use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
+
+use crate::error::{CoreError, CoreResult};
+
+const SETTING_FILE_VERSION: u32 = 1;
+const MAX_SETTING_FILE_BYTES: u64 = 4 * 1024;
+
+/// この機能を使うかどうか。**既定は切**。勝手にタスクバーを動かさない。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskbarAutoHideSetting {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SettingFile {
+    version: u32,
+    setting: TaskbarAutoHideSetting,
+}
+
+/// 画面へ返す状態。手を引いたかどうかも見せる。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskbarAutoHideState {
+    pub enabled: bool,
+    /// 誰かが手で変えたので、この機能が手を引いた状態。
+    pub released: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct TaskbarAutoHideStore {
+    path: PathBuf,
+    setting: Mutex<TaskbarAutoHideSetting>,
+    released: Mutex<bool>,
+    last_error: Mutex<Option<String>>,
+}
+
+impl TaskbarAutoHideStore {
+    pub fn open(path: PathBuf) -> CoreResult<Self> {
+        let setting = match std::fs::metadata(&path) {
+            Ok(metadata) if metadata.len() > MAX_SETTING_FILE_BYTES => {
+                return Err(CoreError::invalid_request(
+                    "タスクバー設定ファイルが上限を超えています。",
+                ));
+            }
+            Ok(_) => {
+                let bytes = std::fs::read(&path).map_err(|_| CoreError::storage())?;
+                match serde_json::from_slice::<SettingFile>(&bytes) {
+                    Ok(parsed) if parsed.version == SETTING_FILE_VERSION => parsed.setting,
+                    // 読めない・版違いは既定（切）にする。勝手に入れない。
+                    _ => TaskbarAutoHideSetting::default(),
+                }
+            }
+            Err(_) => TaskbarAutoHideSetting::default(),
+        };
+        Ok(Self {
+            path,
+            setting: Mutex::new(setting),
+            released: Mutex::new(false),
+            last_error: Mutex::new(None),
+        })
+    }
+
+    pub fn get(&self) -> TaskbarAutoHideSetting {
+        *self.setting.lock()
+    }
+
+    pub fn state(&self) -> TaskbarAutoHideState {
+        TaskbarAutoHideState {
+            enabled: self.setting.lock().enabled,
+            released: *self.released.lock(),
+            last_error: self.last_error.lock().clone(),
+        }
+    }
+
+    pub fn record_released(&self) {
+        *self.released.lock() = true;
+    }
+
+    pub fn record_error(&self, error: Option<String>) {
+        *self.last_error.lock() = error;
+    }
+
+    pub fn set(&self, setting: TaskbarAutoHideSetting) -> CoreResult<TaskbarAutoHideSetting> {
+        let file = SettingFile {
+            version: SETTING_FILE_VERSION,
+            setting,
+        };
+        let bytes = serde_json::to_vec_pretty(&file).map_err(|_| CoreError::storage())?;
+        let mut temp = self.path.clone();
+        temp.set_extension("json.tmp");
+        std::fs::write(&temp, &bytes).map_err(|_| CoreError::storage())?;
+        std::fs::rename(&temp, &self.path).map_err(|_| CoreError::storage())?;
+        *self.setting.lock() = setting;
+        // 入れ直したら、手を引いた記録も消す。もう一度やらせるということ。
+        *self.released.lock() = false;
+        *self.last_error.lock() = None;
+        Ok(setting)
+    }
+}
+
 /// 観測1回分。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForegroundObservation {
