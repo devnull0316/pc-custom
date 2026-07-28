@@ -295,12 +295,32 @@ pub fn launch_known_apps(bundle: AppLaunchBundle) -> WindowsResult<KnownAppsObse
         // 標準入出力を継承させない。継承すると、起動したアプリが PCカスタム のパイプを
         // 掴んだままになり、こちらの出力を読んでいる側がアプリ終了までブロックする。
         // （実機テストがこれで5分ハングした）
+        // 起動したアプリを**自分の子のままにしない**。
+        // ジョブオブジェクトに囲まれた状態でこちらが終わると、子ごと殺される。
+        // 実際にシェル再起動側で同じ作りをしていて、利用者のタスクバーを2回消した。
+        // UI は「アプリ起動は元に戻しても終了しません」と約束しているので、
+        // こちらが閉じたくらいで消えては困る。
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
         let mut child = std::process::Command::new(path)
             .args(app.fixed_args)
+            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
+            .or_else(|_| {
+                // breakaway を許さないジョブ下では失敗する。段階的に落とす。
+                std::process::Command::new(path)
+                    .args(app.fixed_args)
+                    .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+            })
             .map_err(|error| WindowsError::io("spawn fixed allowlisted application", &error))?;
         if let Some(status) = child
             .try_wait()
