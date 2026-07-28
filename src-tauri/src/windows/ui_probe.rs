@@ -1808,24 +1808,22 @@ mod tests {
         const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 
         struct Candidate {
+            // 判定できるようになったら使う。いまは観測手段が無く、id は記録のためだけに持つ。
+            #[allow(dead_code)]
             id: &'static str,
             value_name: &'static str,
             flipped: u32,
-            marker: &'static str,
         }
-        // marker が要素名に含まれるかで有無を見る。
         let candidates = [
             Candidate {
                 id: "explorer.status_bar",
                 value_name: "ShowStatusBar",
                 flipped: 0,
-                marker: "ステータス バー",
             },
             Candidate {
                 id: "explorer.always_show_menus",
                 value_name: "AlwaysShowMenus",
                 flipped: 1,
-                marker: "ファイル(F)",
             },
         ];
 
