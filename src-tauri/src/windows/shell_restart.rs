@@ -36,6 +36,17 @@ pub struct ShellRestartOutcome {
     pub relaunched: bool,
 }
 
+/// タスクバーが出ているか。後始末で「戻ったこと」を確かめるために使う。
+#[cfg(windows)]
+pub fn taskbar_is_present() -> bool {
+    shell_window_present()
+}
+
+#[cfg(not(windows))]
+pub fn taskbar_is_present() -> bool {
+    false
+}
+
 #[cfg(windows)]
 fn shell_window_present() -> bool {
     use windows::{core::w, Win32::UI::WindowsAndMessaging::FindWindowW};
@@ -212,6 +223,24 @@ pub fn restart_shell() -> WindowsResult<ShellRestartOutcome> {
         sleep(POLL_INTERVAL);
     }
 
+    // ここへ来たのは、期限までにシェルが戻らなかったということ。
+    // このまま返すと**タスクバーが無いまま**になる。実際にテストで一度そうなった。
+    // 諦める前に、もう一度起動して待ち直す。
+    if !shell_window_present() {
+        relaunched = relaunch_shell() || relaunched;
+        let retry_deadline = std::time::Instant::now() + SHELL_RETURN_TIMEOUT;
+        while std::time::Instant::now() < retry_deadline {
+            if shell_window_present() {
+                return Ok(ShellRestartOutcome {
+                    terminated,
+                    shell_returned: true,
+                    relaunched,
+                });
+            }
+            sleep(POLL_INTERVAL);
+        }
+    }
+
     Ok(ShellRestartOutcome {
         terminated,
         shell_returned: shell_window_present(),
@@ -230,12 +259,29 @@ fn relaunch_shell() -> bool {
     if !path.is_file() {
         return false;
     }
-    std::process::Command::new(path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok()
+    // **自分の子として起動してはいけない。**
+    // 子のままだと、こちらがジョブオブジェクトに囲まれている場合
+    // （cargo test がそうだった）、こちらが終わると同時に explorer も殺される。
+    // 実際にこれで、テスト終了後にタスクバーが無い状態が2回発生した。
+    // 製品側でも、再起動ボタンのあとにアプリを閉じれば同じことが起きる。
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+
+    let spawn_with = |flags: u32| {
+        std::process::Command::new(&path)
+            .creation_flags(flags)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok()
+    };
+    // ジョブが breakaway を許していない場合は失敗するので、その時は外して試す。
+    spawn_with(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB)
+        || spawn_with(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+        || spawn_with(0)
 }
 
 #[cfg(not(windows))]

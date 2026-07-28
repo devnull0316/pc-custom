@@ -204,10 +204,13 @@ static TRANSPARENCY_METADATA: ActionMetadata = ActionMetadata {
     windows_update_impact: "中。Windows更新後に値と反映の実機スモークを再実施します。",
 };
 
+// 実機で往復確認済み(2026-07-28)。タスクバー要素「タスク ビュー」present true->false->true。
+// 以前は反映されないと判断して Guided へ降格していたが、あれは設定変更通知だけで測っていた。
+// シェル再起動を前提にすれば実際に反映される。
 static TASK_VIEW_METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::TaskbarTaskView,
     name: "タスクビューボタンを表示・非表示",
-    description: "タスクバーのタスクビューボタンの表示を、HKCUの文書化された設定で変更します。",
+    description: "タスクバーのタスクビューボタンを出すか消すかを選びます。反映するにはエクスプローラーの再起動が必要で、そのとき開いているフォルダーの窓が閉じます。",
     category: "appearance",
     tags: &["taskbar", "taskview", "explorer"],
     supportedWindowsVersions: &[
@@ -219,11 +222,11 @@ static TASK_VIEW_METADATA: ActionMetadata = ActionMetadata {
     riskLevel: ActionRiskLevel::Caution,
     requiresAdmin: false,
     requiresRestart: false,
-    requiresExplorerRestart: false,
+    requiresExplorerRestart: true,
     conflicts: &[],
     dependencies: &[],
     action_version: 1,
-    kind: ActionKind::Guided,
+    kind: ActionKind::Persistent,
     parameter_schema: r#"{"show":"boolean"}"#,
     resource_keys: &[
         "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:showtaskviewbutton",
@@ -239,10 +242,11 @@ static TASK_VIEW_METADATA: ActionMetadata = ActionMetadata {
     windows_update_impact: "中〜高。タスクバー系はWindows更新で挙動が変わり得るため、更新後に実機スモークを再実施します。",
 };
 
+// 実機で往復確認済み(2026-07-28)。タスクバー要素「ウィジェット」present true->false->true。
 static WIDGETS_METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::TaskbarWidgets,
     name: "ウィジェットボタンを表示・非表示",
-    description: "タスクバーのウィジェットボタンの表示を、HKCUの文書化された設定で変更します。",
+    description: "タスクバー左端の天気やニュースのウィジェットを出すか消すかを選びます。反映するにはエクスプローラーの再起動が必要で、そのとき開いているフォルダーの窓が閉じます。",
     category: "appearance",
     tags: &["taskbar", "widgets", "explorer"],
     supportedWindowsVersions: &[
@@ -254,11 +258,11 @@ static WIDGETS_METADATA: ActionMetadata = ActionMetadata {
     riskLevel: ActionRiskLevel::Caution,
     requiresAdmin: false,
     requiresRestart: false,
-    requiresExplorerRestart: false,
+    requiresExplorerRestart: true,
     conflicts: &[],
     dependencies: &[],
     action_version: 1,
-    kind: ActionKind::Guided,
+    kind: ActionKind::Persistent,
     parameter_schema: r#"{"show":"boolean"}"#,
     resource_keys: &[
         "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:taskbarda",
@@ -1067,8 +1071,6 @@ mod compatibility_tests {
         fn demoted_actions_refuse_to_mutate() {
             use crate::action::{ActionKind, ACTION_REGISTRY};
             for id in [
-                ActionId::TaskbarTaskView,
-                ActionId::TaskbarWidgets,
                 ActionId::ExplorerClockSeconds,
                 ActionId::ExplorerCompactView,
                 ActionId::ExplorerItemCheckboxes,

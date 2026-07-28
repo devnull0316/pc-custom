@@ -56,7 +56,7 @@ pub use registry::delete_key_if_empty;
 pub use registry::{
     delete_value, read_value_state, write_raw_value, RawRegistryValue, RawRegistryValueState,
 };
-pub use shell_restart::{restart_shell, ShellRestartOutcome};
+pub use shell_restart::{restart_shell, taskbar_is_present, ShellRestartOutcome};
 pub use transaction_lock::{
     acquire_app_instance_lock, acquire_core_mutation_lock, AppInstanceGuard, CoreMutationGuard,
 };

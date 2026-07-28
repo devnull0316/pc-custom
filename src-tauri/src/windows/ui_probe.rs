@@ -2332,6 +2332,22 @@ mod tests {
                 off_value: 0, // 0 = 右端の「デスクトップの表示」を出さない
                 marker: "デスクトップを表示する",
             },
+            // 以前「反映されない」として Guided へ降格した2件。
+            // あのときは設定変更通知だけで判定していた。シェル再起動込みで測り直す。
+            Candidate {
+                id: "taskbar.task_view",
+                subkey: ADVANCED,
+                value_name: "ShowTaskViewButton",
+                off_value: 0,
+                marker: "タスク ビュー",
+            },
+            Candidate {
+                id: "taskbar.widgets",
+                subkey: ADVANCED,
+                value_name: "TaskbarDa",
+                off_value: 0,
+                marker: "ウィジェット",
+            },
         ];
 
         fn names_or_empty() -> Vec<String> {
@@ -2385,12 +2401,22 @@ mod tests {
         struct Guard(Vec<RegistryBackup>, bool);
         impl Drop for Guard {
             fn drop(&mut self) {
-                if !self.1 {
-                    for backup in &self.0 {
-                        let _ = restore_registry_backup(backup);
-                    }
-                    let _ = crate::windows::restart_shell();
+                if self.1 {
+                    return;
                 }
+                for backup in &self.0 {
+                    let _ = restore_registry_backup(backup);
+                }
+                // panic で巻き戻ってきた場合もここを通る。
+                // **タスクバーが無いまま終わらせない。** 実際に一度そうなった。
+                let _ = crate::windows::restart_shell();
+                for _ in 0..40 {
+                    if crate::windows::taskbar_is_present() {
+                        return;
+                    }
+                    sleep(Duration::from_millis(250));
+                }
+                let _ = crate::windows::restart_shell();
             }
         }
         let mut guard = Guard(backups.iter().map(|(_, b)| b.clone()).collect(), false);
@@ -2434,9 +2460,17 @@ mod tests {
         guard.1 = true;
         drop(guard);
 
+        // 反映には時間がかかる。1回読んで違ったら失敗、では早すぎる。
         for (candidate, _) in &backups {
-            let back = contains(&restored, candidate.marker);
             let originally = contains(&before, candidate.marker);
+            let mut back = contains(&restored, candidate.marker);
+            for _ in 0..20 {
+                if back == originally {
+                    break;
+                }
+                sleep(Duration::from_millis(500));
+                back = contains(&names_or_empty(), candidate.marker);
+            }
             println!(
                 "restored: {} present={back} (元は {originally})",
                 candidate.id

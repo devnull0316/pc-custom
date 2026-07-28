@@ -1112,3 +1112,42 @@ taskbar: (0, 1032) - (1920, 1080)  1920x48  edge=Bottom auto_hide=false
 測定コードには結論を書かず、「この経路では判定できない」とだけ出すようにした。
 
 `explorer_element_rect` は残す。名前で要素の矩形を引く手段自体は使える。
+
+## 降格していた2件は、実は効く。原因は自分のコードだった（2026-07-28）
+
+`taskbar.task_view` と `taskbar.widgets` は「書いても反映されない」として Guided へ降格していた。
+シェル再起動込みで測り直したところ、**両方とも反映される。**
+
+```
+applied:  taskbar.task_view  present true -> false   changed=true
+applied:  taskbar.widgets    present true -> false   changed=true
+restored: 4件とも present=true（元どおり）
+```
+
+降格当時は**設定変更通知だけで測っていた**。反映されないという観測は正しかったが、
+「効かない」という結論は早すぎた。
+
+### 途中で利用者のタスクバーを2回消した
+
+測定のたびにテストが失敗し、終わった後に explorer が 0 プロセスになっていた。
+原因は `relaunch_shell()` が `Command::spawn()` で **explorer を自分の子として起動**していたこと。
+`cargo test` はテストプロセスをジョブオブジェクトで囲むため、
+**テストが終わると子の explorer も一緒に殺される。**
+
+これは**製品側の欠陥でもある。** 再起動ボタンを押したあとにアプリを閉じれば同じことが起きる。
+
+`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB` を付けて、
+ジョブが breakaway を許さない場合は段階的に落とす形にした。
+修正後の測定では、テスト終了後も explorer が残っている。
+
+**「検索が復元されない」という失敗も、これが原因だった。** レジストリは `=2` で正しく戻っていて、
+シェルが落ちていたから読めなかっただけ。値を確認せず「復元されない」と判断していたら、
+無実の復元処理を疑うところだった。
+
+### 併せて直したもの
+
+- `restart_shell()`: 期限までに戻らなければ、諦める前にもう一度起動して待ち直す
+- 測定の後始末: レジストリを戻したうえで、**タスクバーが在ることまで確認**してから抜ける
+- 復元の確認: 1回読んで違えば失敗、ではなく戻るまで待つ
+
+昇格は**5件**（taskbar.alignment / search_mode / show_desktop / task_view / widgets）。
