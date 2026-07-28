@@ -250,6 +250,12 @@ pub enum ObservedValue {
     ActivePowerScheme {
         guid: String,
     },
+    /// マウスポインターの動き方。
+    PointerFeel {
+        acceleration_enabled: bool,
+        /// Windows が扱う 1〜20 の速さ。
+        speed: i32,
+    },
     /// 電源モード。**要求値と実効値を1つにまとめない。**
     /// Windows は前者を「他の signal に上書きされ得る vote」と説明している。
     PowerMode {

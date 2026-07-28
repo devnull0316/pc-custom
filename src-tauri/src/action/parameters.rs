@@ -115,222 +115,117 @@ pub enum ActionParameters {
     #[serde(rename = "power.active_scheme_check")]
     PowerActiveSchemeCheck {},
     #[serde(rename = "power.active_scheme_switch")]
-    PowerActiveSchemeSwitch {
-        scheme: PowerScheme,
-    },
-    PowerModeSwitch {
-        mode: PowerModeChoice,
-    },
+    PowerActiveSchemeSwitch { scheme: PowerScheme },
+    #[serde(rename = "power.mode_switch")]
+    PowerModeSwitch { mode: PowerModeChoice },
+    #[serde(rename = "input.pointer_feel")]
+    InputPointerFeel { acceleration: bool },
     #[serde(rename = "explorer.show_extensions")]
-    ExplorerShowExtensions {
-        show: bool,
-    },
+    ExplorerShowExtensions { show: bool },
     #[serde(rename = "explorer.show_hidden")]
-    ExplorerShowHidden {
-        show: bool,
-    },
+    ExplorerShowHidden { show: bool },
     #[serde(rename = "explorer.clock_seconds")]
-    ExplorerClockSeconds {
-        show: bool,
-    },
+    ExplorerClockSeconds { show: bool },
     #[serde(rename = "appearance.transparency")]
-    AppearanceTransparency {
-        enabled: bool,
-    },
+    AppearanceTransparency { enabled: bool },
     #[serde(rename = "taskbar.task_view")]
-    TaskbarTaskView {
-        show: bool,
-    },
+    TaskbarTaskView { show: bool },
     #[serde(rename = "taskbar.widgets")]
-    TaskbarWidgets {
-        show: bool,
-    },
+    TaskbarWidgets { show: bool },
     #[serde(rename = "explorer.item_checkboxes")]
-    ExplorerItemCheckboxes {
-        show: bool,
-    },
+    ExplorerItemCheckboxes { show: bool },
     #[serde(rename = "explorer.compact_view")]
-    ExplorerCompactView {
-        enabled: bool,
-    },
+    ExplorerCompactView { enabled: bool },
     #[serde(rename = "theme.color_mode")]
-    ThemeColorMode {
-        mode: ThemeColorMode,
-    },
+    ThemeColorMode { mode: ThemeColorMode },
     #[serde(rename = "games.process_watch")]
-    GamesProcessWatch {
-        binding: ProcessBindingParameters,
-    },
+    GamesProcessWatch { binding: ProcessBindingParameters },
     #[serde(rename = "games.readiness_check")]
     GamesReadinessCheck {},
     #[serde(rename = "taskbar.search_mode")]
-    TaskbarSearchMode {
-        mode: TaskbarSearchMode,
-    },
+    TaskbarSearchMode { mode: TaskbarSearchMode },
     #[serde(rename = "taskbar.alignment")]
-    TaskbarAlignment {
-        alignment: TaskbarAlignment,
-    },
+    TaskbarAlignment { alignment: TaskbarAlignment },
     #[serde(rename = "start.layout")]
-    StartLayout {
-        layout: StartLayout,
-    },
+    StartLayout { layout: StartLayout },
     #[serde(rename = "start.recommendations")]
-    StartRecommendations {
-        enabled: bool,
-    },
+    StartRecommendations { enabled: bool },
     #[serde(rename = "explorer.launch_target")]
-    ExplorerLaunchTarget {
-        target: ExplorerLaunchTarget,
-    },
+    ExplorerLaunchTarget { target: ExplorerLaunchTarget },
     #[serde(rename = "explorer.recent_files")]
-    ExplorerRecentFiles {
-        show: bool,
-    },
+    ExplorerRecentFiles { show: bool },
     #[serde(rename = "taskbar.button_grouping")]
-    TaskbarButtonGrouping {
-        mode: TaskbarGroupingMode,
-    },
+    TaskbarButtonGrouping { mode: TaskbarGroupingMode },
     #[serde(rename = "taskbar.flashing")]
-    TaskbarFlashing {
-        enabled: bool,
-    },
+    TaskbarFlashing { enabled: bool },
     #[serde(rename = "taskbar.share_window")]
-    TaskbarShareWindow {
-        enabled: bool,
-    },
+    TaskbarShareWindow { enabled: bool },
     #[serde(rename = "taskbar.show_desktop")]
-    TaskbarShowDesktop {
-        enabled: bool,
-    },
+    TaskbarShowDesktop { enabled: bool },
     #[serde(rename = "search.recent_on_hover")]
-    SearchRecentOnHover {
-        enabled: bool,
-    },
+    SearchRecentOnHover { enabled: bool },
     #[serde(rename = "taskbar.multi_monitor")]
-    TaskbarMultiMonitor {
-        enabled: bool,
-    },
+    TaskbarMultiMonitor { enabled: bool },
     #[serde(rename = "taskbar.multi_monitor_mode")]
-    TaskbarMultiMonitorMode {
-        mode: TaskbarMultiMonitorMode,
-    },
+    TaskbarMultiMonitorMode { mode: TaskbarMultiMonitorMode },
     #[serde(rename = "taskbar.secondary_button_grouping")]
-    TaskbarSecondaryButtonGrouping {
-        mode: TaskbarGroupingMode,
-    },
+    TaskbarSecondaryButtonGrouping { mode: TaskbarGroupingMode },
     #[serde(rename = "start.show_all_pins")]
-    StartShowAllPins {
-        enabled: bool,
-    },
+    StartShowAllPins { enabled: bool },
     #[serde(rename = "start.recent_apps")]
-    StartRecentApps {
-        show: bool,
-    },
+    StartRecentApps { show: bool },
     #[serde(rename = "appearance.accent_start_taskbar")]
-    AppearanceAccentStartTaskbar {
-        enabled: bool,
-    },
+    AppearanceAccentStartTaskbar { enabled: bool },
     #[serde(rename = "appearance.accent_title_bars")]
-    AppearanceAccentTitleBars {
-        enabled: bool,
-    },
+    AppearanceAccentTitleBars { enabled: bool },
     #[serde(rename = "appearance.auto_accent")]
-    AppearanceAutoAccent {
-        enabled: bool,
-    },
+    AppearanceAutoAccent { enabled: bool },
     #[serde(rename = "games.game_mode")]
-    GamesGameMode {
-        enabled: bool,
-    },
+    GamesGameMode { enabled: bool },
     #[serde(rename = "games.controller_game_bar")]
-    GamesControllerGameBar {
-        enabled: bool,
-    },
+    GamesControllerGameBar { enabled: bool },
     #[serde(rename = "devices.autoplay")]
-    DevicesAutoplay {
-        enabled: bool,
-    },
+    DevicesAutoplay { enabled: bool },
     #[serde(rename = "notifications.usb_errors")]
-    NotificationsUsbErrors {
-        enabled: bool,
-    },
+    NotificationsUsbErrors { enabled: bool },
     #[serde(rename = "notifications.weak_charger")]
-    NotificationsWeakCharger {
-        enabled: bool,
-    },
+    NotificationsWeakCharger { enabled: bool },
     #[serde(rename = "input.autocorrect")]
-    InputAutocorrect {
-        enabled: bool,
-    },
+    InputAutocorrect { enabled: bool },
     #[serde(rename = "input.double_space_period")]
-    InputDoubleSpacePeriod {
-        enabled: bool,
-    },
+    InputDoubleSpacePeriod { enabled: bool },
     #[serde(rename = "input.auto_shift")]
-    InputAutoShift {
-        enabled: bool,
-    },
+    InputAutoShift { enabled: bool },
     #[serde(rename = "input.voice_typing_key")]
-    InputVoiceTypingKey {
-        enabled: bool,
-    },
+    InputVoiceTypingKey { enabled: bool },
     #[serde(rename = "input.multilingual_suggestions")]
-    InputMultilingualSuggestions {
-        enabled: bool,
-    },
+    InputMultilingualSuggestions { enabled: bool },
     #[serde(rename = "explorer.status_bar")]
-    ExplorerStatusBar {
-        show: bool,
-    },
+    ExplorerStatusBar { show: bool },
     #[serde(rename = "explorer.info_tips")]
-    ExplorerInfoTips {
-        show: bool,
-    },
+    ExplorerInfoTips { show: bool },
     #[serde(rename = "explorer.hide_empty_drives")]
-    ExplorerHideEmptyDrives {
-        hide: bool,
-    },
+    ExplorerHideEmptyDrives { hide: bool },
     #[serde(rename = "explorer.nav_expand_current")]
-    ExplorerNavExpandCurrent {
-        enabled: bool,
-    },
+    ExplorerNavExpandCurrent { enabled: bool },
     #[serde(rename = "explorer.nav_show_all")]
-    ExplorerNavShowAll {
-        enabled: bool,
-    },
+    ExplorerNavShowAll { enabled: bool },
     #[serde(rename = "explorer.separate_process")]
-    ExplorerSeparateProcess {
-        enabled: bool,
-    },
+    ExplorerSeparateProcess { enabled: bool },
     #[serde(rename = "explorer.icons_only")]
-    ExplorerIconsOnly {
-        enabled: bool,
-    },
+    ExplorerIconsOnly { enabled: bool },
     #[serde(rename = "explorer.drive_letters")]
-    ExplorerDriveLetters {
-        show: bool,
-    },
+    ExplorerDriveLetters { show: bool },
     #[serde(rename = "explorer.preview_handlers")]
-    ExplorerPreviewHandlers {
-        enabled: bool,
-    },
+    ExplorerPreviewHandlers { enabled: bool },
     #[serde(rename = "explorer.sharing_wizard")]
-    ExplorerSharingWizard {
-        enabled: bool,
-    },
+    ExplorerSharingWizard { enabled: bool },
     #[serde(rename = "explorer.always_show_menus")]
-    ExplorerAlwaysShowMenus {
-        enabled: bool,
-    },
+    ExplorerAlwaysShowMenus { enabled: bool },
     #[serde(rename = "appearance.taskbar_animations")]
-    AppearanceTaskbarAnimations {
-        enabled: bool,
-    },
+    AppearanceTaskbarAnimations { enabled: bool },
     #[serde(rename = "notifications.toast_banners")]
-    NotificationsToastBanners {
-        enabled: bool,
-    },
+    NotificationsToastBanners { enabled: bool },
     #[serde(rename = "setup.startup_inventory")]
     SetupStartupInventory {},
     #[serde(rename = "storage.free_space_check")]
@@ -340,23 +235,17 @@ pub enum ActionParameters {
     #[serde(rename = "appearance.accent_color_check")]
     AppearanceAccentColorCheck {},
     #[serde(rename = "appearance.window_color")]
-    AppearanceWindowColor {
-        color: WindowColorPreset,
-    },
+    AppearanceWindowColor { color: WindowColorPreset },
     #[serde(rename = "setup.powertoys_status")]
     SetupPowerToysStatus {},
     #[serde(rename = "setup.launch_apps")]
-    SetupLaunchApps {
-        bundle: AppLaunchBundle,
-    },
+    SetupLaunchApps { bundle: AppLaunchBundle },
     #[serde(rename = "setup.windows_update_status")]
     SetupWindowsUpdateStatus {},
     #[serde(rename = "setup.default_apps")]
     SetupDefaultApps {},
     #[serde(rename = "setup.window_layout")]
-    SetupWindowLayout {
-        invocation: WindowLayoutInvocation,
-    },
+    SetupWindowLayout { invocation: WindowLayoutInvocation },
     #[serde(rename = "setup.audio_output")]
     SetupAudioOutput {},
 }
@@ -369,6 +258,7 @@ impl ActionParameters {
             Self::PowerActiveSchemeCheck { .. } => ActionId::PowerActiveSchemeCheck,
             Self::PowerActiveSchemeSwitch { .. } => ActionId::PowerActiveSchemeSwitch,
             Self::PowerModeSwitch { .. } => ActionId::PowerModeSwitch,
+            Self::InputPointerFeel { .. } => ActionId::InputPointerFeel,
             Self::ExplorerShowExtensions { .. } => ActionId::ExplorerShowExtensions,
             Self::ExplorerShowHidden { .. } => ActionId::ExplorerShowHidden,
             Self::ExplorerClockSeconds { .. } => ActionId::ExplorerClockSeconds,

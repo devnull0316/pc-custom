@@ -15,6 +15,7 @@ pub enum ActionId {
     #[serde(rename = "power.active_scheme_switch")]
     PowerActiveSchemeSwitch,
     PowerModeSwitch,
+    InputPointerFeel,
     #[serde(rename = "explorer.show_extensions")]
     ExplorerShowExtensions,
     #[serde(rename = "explorer.show_hidden")]
@@ -146,12 +147,13 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 69] = [
+    pub const ALL: [Self; 70] = [
         Self::SessionPreventSleep,
         Self::InputShiftInterruptionGuard,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
         Self::PowerModeSwitch,
+        Self::InputPointerFeel,
         Self::ExplorerShowExtensions,
         Self::ExplorerShowHidden,
         Self::ExplorerClockSeconds,
@@ -225,6 +227,7 @@ impl ActionId {
             Self::PowerActiveSchemeCheck => "power.active_scheme_check",
             Self::PowerActiveSchemeSwitch => "power.active_scheme_switch",
             Self::PowerModeSwitch => "power.mode_switch",
+            Self::InputPointerFeel => "input.pointer_feel",
             Self::ExplorerShowExtensions => "explorer.show_extensions",
             Self::ExplorerShowHidden => "explorer.show_hidden",
             Self::ExplorerClockSeconds => "explorer.clock_seconds",
@@ -320,6 +323,7 @@ impl FromStr for ActionId {
             "power.active_scheme_check" => Ok(Self::PowerActiveSchemeCheck),
             "power.active_scheme_switch" => Ok(Self::PowerActiveSchemeSwitch),
             "power.mode_switch" => Ok(Self::PowerModeSwitch),
+            "input.pointer_feel" => Ok(Self::InputPointerFeel),
             "explorer.show_extensions" => Ok(Self::ExplorerShowExtensions),
             "explorer.show_hidden" => Ok(Self::ExplorerShowHidden),
             "explorer.clock_seconds" => Ok(Self::ExplorerClockSeconds),

@@ -451,6 +451,9 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::PowerModeSwitch => ActionParameters::PowerModeSwitch {
             mode: PowerModeChoice::Balanced,
         },
+        ActionId::InputPointerFeel => ActionParameters::InputPointerFeel {
+            acceleration: false,
+        },
         ActionId::ExplorerShowExtensions => ActionParameters::ExplorerShowExtensions { show: true },
         ActionId::ExplorerShowHidden => ActionParameters::ExplorerShowHidden { show: true },
         ActionId::ExplorerClockSeconds => ActionParameters::ExplorerClockSeconds { show: true },
@@ -616,6 +619,7 @@ fn category_for(action_id: ActionId) -> &'static str {
         ActionId::PowerActiveSchemeCheck
         | ActionId::PowerActiveSchemeSwitch
         | ActionId::PowerModeSwitch => "power",
+        ActionId::InputPointerFeel => "games",
         ActionId::ExplorerShowExtensions
         | ActionId::ExplorerShowHidden
         | ActionId::ExplorerClockSeconds
@@ -694,6 +698,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         }
         ActionId::PowerModeSwitch => {
             "電源接続時と電池使用時のモードを、用途に合わせて選びたい人向け。選べない値があるPCもあります"
+        }
+        ActionId::InputPointerFeel => {
+            "ゲームと普段の作業でマウスの動き方を変えたい人向け。ゲーム側が独自にマウスを読んでいる場合は届きません"
         }
         ActionId::ExplorerShowExtensions => "ファイルの種類を見分け、誤操作を減らしたい人向け",
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
@@ -792,6 +799,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::PowerActiveSchemeCheck => "変更せず、現在の電源設定を確認",
         ActionId::PowerActiveSchemeSwitch => "選択したWindows標準の電源プラン",
         ActionId::PowerModeSwitch => "選択した電源モード（電源接続時と電池使用時の両方）",
+        ActionId::InputPointerFeel => "選択したポインターの動き方",
         ActionId::ExplorerShowExtensions => "拡張子を表示",
         ActionId::ExplorerShowHidden => "隠しファイルを表示",
         ActionId::ExplorerClockSeconds => "タスクバーの時計に秒を表示",
@@ -902,6 +910,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::PowerModeSwitch => {
             "Windowsが公開している電源モードの読み取りと設定。要求値と実効値は別に表示"
         }
+        ActionId::InputPointerFeel => {
+            "Windowsが公開しているポインター設定の読み取りと設定。速度としきい値も含めて保存"
+        }
         ActionId::InputShiftInterruptionGuard => {
             "Windowsが公開している入力設定の機能で、確認画面を開く動作だけを一時停止"
         }
@@ -944,6 +955,17 @@ fn update_impact(value: &str) -> &'static str {
 
 fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
     match value {
+        ObservedValue::PointerFeel {
+            acceleration_enabled,
+            speed,
+        } => {
+            let acceleration = if *acceleration_enabled {
+                "加速あり"
+            } else {
+                "加速なし"
+            };
+            format!("{acceleration}、速さ{speed}")
+        }
         ObservedValue::PowerMode {
             requested_ac,
             requested_dc,
@@ -1162,6 +1184,10 @@ fn registry_dword_label(action_id: ActionId, configured: Option<u32>) -> String 
 
 fn observed_detail(value: &ObservedValue) -> String {
     match value {
+        ObservedValue::PointerFeel { .. } => {
+            "Windowsのポインター設定を読んでいます。ゲームが独自にマウスを読んでいる場合、この設定は届きません。"
+                .to_owned()
+        }
         ObservedValue::PowerMode { .. } => {
             "選んだモードと、Windowsがいま効いていると報告するモードは別々に確認しています。             選んだほうは他の設定に上書きされることがあります。"
                 .to_owned()
@@ -1911,6 +1937,63 @@ mod tests {
 }
 
 #[cfg(test)]
+mod request_round_trip {
+    use super::*;
+
+    /// 画面から来る形で、登録されている全 Action を実際の入口に通す。
+    ///
+    /// `ActionParameters` は `action_id` でタグ付けされた enum なので、
+    /// 変種に `#[serde(rename = "...")]` を付け忘れると、その Action は
+    /// **画面から一切呼べなくなる。** それでもコンパイルは通り、
+    /// `ActionParameters` を直に組み立てる単体テストも全部通る。
+    /// 実際に1つ付け忘れて、この経路を通すまで気付かなかった。
+    #[test]
+    fn every_registered_action_can_be_requested_from_the_screen() {
+        for action_id in ActionId::ALL {
+            let Some(defaults) = default_parameters(action_id) else {
+                // 画面から直接は呼ばない Action。引数の作り方が別にある。
+                continue;
+            };
+            let serialized = serde_json::to_value(&defaults).expect("serialize defaults");
+            let parameters = serialized
+                .get("parameters")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let request = PreviewActionRequest {
+                action_id: action_id.as_str().to_owned(),
+                parameters,
+            };
+            let parsed = parse_action_request(request)
+                .unwrap_or_else(|_| panic!("{} を画面から要求できない", action_id.as_str()));
+            assert_eq!(
+                parsed.action_id(),
+                action_id,
+                "{} が別の Action として解釈された",
+                action_id.as_str()
+            );
+        }
+    }
+
+    /// タグ名は Action ID と一字一句同じでなければならない。
+    #[test]
+    fn the_serialized_tag_is_exactly_the_action_id() {
+        for action_id in ActionId::ALL {
+            let Some(defaults) = default_parameters(action_id) else {
+                continue;
+            };
+            let serialized = serde_json::to_value(&defaults).expect("serialize defaults");
+            assert_eq!(
+                serialized.get("action_id").and_then(Value::as_str),
+                Some(action_id.as_str()),
+                "{} のタグ名が Action ID と違う",
+                action_id.as_str()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod count_report {
     use super::*;
     use crate::action::ACTION_REGISTRY;
@@ -1951,7 +2034,7 @@ mod count_report {
             guided_candidate,
             guided_settings
         );
-        assert_eq!(total, 69, "総数が変わったら README も直すこと");
+        assert_eq!(total, 70, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"

@@ -153,6 +153,18 @@ pub enum BackupPayload {
     WindowLayout(WindowLayoutBackup),
     ShiftInterruptionGuard(ShiftInterruptionGuardBackup),
     PowerMode(PowerModeBackup),
+    PointerFeel(PointerFeelBackup),
+}
+
+/// ポインターの動き方の変更前状態。
+///
+/// 加速だけを変えるが、**保存と復元は4つの値すべてを対象にする。**
+/// 速度だけ別の何かに動かされていたら、それは第三者の変更として扱いたい。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointerFeelBackup {
+    pub original: crate::windows::PointerFeel,
+    pub intended: crate::windows::PointerFeel,
 }
 
 /// 電源モードの変更前状態。

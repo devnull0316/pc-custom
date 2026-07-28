@@ -10,6 +10,7 @@ mod file_picker;
 mod observations;
 // オーバーレイをタスクバーの上へ置き続けるための、位置と状況の読み取り。
 mod overlay_anchor;
+mod pointer_feel;
 mod power;
 mod power_mode;
 mod powertoys;
@@ -139,6 +140,7 @@ impl WindowsError {
 
 pub type WindowsResult<T> = Result<T, WindowsError>;
 
+pub use pointer_feel::{read_pointer_feel, replace_pointer_feel, PointerFeel};
 pub use power_mode::{
     read_ac_mode, read_dc_mode, read_effective_mode, write_ac_mode, write_ac_mode_raw,
     write_dc_mode, write_dc_mode_raw, EffectiveMode, PowerMode, PowerModeReading,

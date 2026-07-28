@@ -868,6 +868,7 @@ fn primitive_name(payload: &BackupPayload) -> &'static str {
         BackupPayload::ProcessWatch(_) => "process_watch",
         BackupPayload::PowerScheme(_) => "power_scheme",
         BackupPayload::PowerMode(_) => "power_mode",
+        BackupPayload::PointerFeel(_) => "pointer_feel",
         BackupPayload::WindowLayout(_) => "window_layout",
         BackupPayload::ShiftInterruptionGuard(_) => "shift_interruption_guard",
     }
