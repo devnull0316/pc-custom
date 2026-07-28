@@ -11,6 +11,7 @@ mod power_scheme_switch;
 mod prevent_sleep;
 mod process_watch;
 mod registry_settings;
+mod shift_interruption_guard;
 mod system_observations;
 mod window_color;
 mod window_layout;
@@ -30,6 +31,10 @@ pub use power_scheme_switch::{PowerSchemeSwitchAction, POWER_SCHEME_SWITCH_ACTIO
 pub use prevent_sleep::{PreventSleepAction, PREVENT_SLEEP_ACTION};
 pub use process_watch::{ProcessWatchAction, PROCESS_WATCH_ACTION};
 pub use registry_settings::*;
+pub(crate) use shift_interruption_guard::{
+    classify_recoverable_shift_guard, ShiftGuardTransactionState,
+};
+pub use shift_interruption_guard::{ShiftInterruptionGuardAction, SHIFT_INTERRUPTION_GUARD_ACTION};
 pub use system_observations::{
     SystemObservationAction, ACCENT_COLOR_CHECK_ACTION, FREE_SPACE_CHECK_ACTION,
     POWERTOYS_STATUS_ACTION, STARTUP_INVENTORY_ACTION, TEMP_FILES_CHECK_ACTION,

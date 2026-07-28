@@ -38,6 +38,7 @@ type RawActionPresentation = Omit<ActionPresentation, "category"> & { category: 
 
 const CATEGORY_BY_ACTION: Readonly<Record<string, CategoryId>> = {
   "session.prevent_sleep": "session",
+  "input.shift_interruption_guard": "games",
   "power.active_scheme_check": "power",
   "power.active_scheme_switch": "power",
   "explorer.show_extensions": "explorer",

@@ -254,6 +254,13 @@ pub fn action_presentation(
             );
         }
     }
+    if metadata.id == ActionId::InputShiftInterruptionGuard {
+        detail_points.extend([
+            "変えるのは、Shiftの連打・長押しから確認画面を開く動作だけです。".to_owned(),
+            "入力を補助する機能そのものと、キーの待ち時間などは変更しません。".to_owned(),
+            "入力の補助機能を現在使用中の場合は、安全のため適用しません。".to_owned(),
+        ]);
+    }
     ActionPresentation {
         id: metadata.id.as_str().to_owned(),
         action_version: metadata.action_version,
@@ -436,6 +443,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::SessionPreventSleep => ActionParameters::SessionPreventSleep {
             keep_display_on: false,
         },
+        ActionId::InputShiftInterruptionGuard => ActionParameters::InputShiftInterruptionGuard {},
         ActionId::PowerActiveSchemeCheck => ActionParameters::PowerActiveSchemeCheck {},
         ActionId::PowerActiveSchemeSwitch => ActionParameters::PowerActiveSchemeSwitch {
             scheme: PowerScheme::Balanced,
@@ -643,7 +651,8 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::ExplorerPreviewHandlers
         | ActionId::ExplorerSharingWizard
         | ActionId::ExplorerAlwaysShowMenus => "explorer",
-        ActionId::GamesProcessWatch
+        ActionId::InputShiftInterruptionGuard
+        | ActionId::GamesProcessWatch
         | ActionId::GamesReadinessCheck
         | ActionId::GamesGameMode
         | ActionId::GamesControllerGameBar => "games",
@@ -671,6 +680,9 @@ fn category_for(action_id: ActionId) -> &'static str {
 fn audience_for(action_id: ActionId) -> &'static str {
     match action_id {
         ActionId::SessionPreventSleep => "長い作業やゲーム中に、自動スリープを避けたい人向け",
+        ActionId::InputShiftInterruptionGuard => {
+            "ゲーム中にShift操作で確認画面へ割り込まれたくない人向け。入力の補助機能をShift操作から開く人には向きません"
+        }
         ActionId::PowerActiveSchemeCheck => "現在の電源構成を変更せず確認したい人向け",
         ActionId::PowerActiveSchemeSwitch => {
             "Windows公開Power APIで電源プランを明示的に選びたい人向け"
@@ -766,6 +778,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
 fn desired_state(action_id: ActionId) -> &'static str {
     match action_id {
         ActionId::SessionPreventSleep => "自動スリープを一時的に防ぐ",
+        ActionId::InputShiftInterruptionGuard => {
+            "Shift操作による確認画面を、このモードの間だけ出さない"
+        }
         ActionId::PowerActiveSchemeCheck => "変更せず、現在の電源設定を確認",
         ActionId::PowerActiveSchemeSwitch => "選択したWindows標準の電源プラン",
         ActionId::ExplorerShowExtensions => "拡張子を表示",
@@ -875,6 +890,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::PowerActiveSchemeSwitch => {
             "PowerGetActiveSchemeとPowerSetActiveSchemeによる明示切替"
         }
+        ActionId::InputShiftInterruptionGuard => {
+            "Windowsが公開している入力設定の機能で、確認画面を開く動作だけを一時停止"
+        }
         ActionId::SetupStartupInventory => {
             "固定HKCU/HKLM RunキーとKnown Startup Folderの上限付き読み取り"
         }
@@ -934,6 +952,25 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
                 )
             } else {
                 "PCカスタムのスリープ防止なし".to_owned()
+            }
+        }
+        ObservedValue::ShiftInterruptionGuard {
+            shift_five_press_shortcut_enabled,
+            right_shift_hold_shortcut_enabled,
+            input_assistance_in_use,
+        } => {
+            if *input_assistance_in_use {
+                "入力の補助機能を使用中（変更しません）".to_owned()
+            } else {
+                match (
+                    shift_five_press_shortcut_enabled,
+                    right_shift_hold_shortcut_enabled,
+                ) {
+                    (true, true) => "Shiftの確認画面が2種類とも出る設定".to_owned(),
+                    (true, false) => "Shiftを5回押す確認画面が出る設定".to_owned(),
+                    (false, true) => "右Shift長押しの確認画面が出る設定".to_owned(),
+                    (false, false) => "Shiftの確認画面は出ない設定".to_owned(),
+                }
             }
         }
         ObservedValue::ActivePowerScheme { guid } => {
@@ -1093,6 +1130,18 @@ fn observed_detail(value: &ObservedValue) -> String {
         }
         ObservedValue::SleepLease { .. } => {
             "Windows全体ではなく、PCカスタムが所有するleaseだけを表示します。".to_owned()
+        }
+        ObservedValue::ShiftInterruptionGuard {
+            input_assistance_in_use,
+            ..
+        } => {
+            if *input_assistance_in_use {
+                "入力を補助する機能が現在使われているため、このモードからは変更しません。"
+                    .to_owned()
+            } else {
+                "Shiftの連打と長押しで確認画面を開く動作だけを確認しました。入力を補助する機能そのものは変えません。"
+                    .to_owned()
+            }
         }
         ObservedValue::ActivePowerScheme { .. } => {
             "公開Power APIで読み取りました。設定は変更していません。".to_owned()
@@ -1846,7 +1895,7 @@ mod count_report {
             guided_candidate,
             guided_settings
         );
-        assert_eq!(total, 67, "総数が変わったら README も直すこと");
+        assert_eq!(total, 68, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"

@@ -5,8 +5,9 @@ mod fingerprint;
 mod registry;
 
 pub use envelope::{
-    BackupDraft, BackupEnvelope, BackupPayload, CompositeBackup, ObservationBackup,
-    PowerSchemeBackup, PowerSchemeGuid, ProcessWatchBackup, SleepLeaseBackup, BACKUP_CODEC_VERSION,
+    BackupDraft, BackupEnvelope, BackupPayload, CompositeBackup, KeyboardAccessibilitySettings,
+    ObservationBackup, PowerSchemeBackup, PowerSchemeGuid, ProcessWatchBackup,
+    ShiftInterruptionGuardBackup, SleepLeaseBackup, BACKUP_CODEC_VERSION,
 };
 pub use fingerprint::Fingerprint;
 pub use registry::{

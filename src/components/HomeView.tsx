@@ -20,7 +20,7 @@ interface HomeViewProps {
 
 export function HomeView({ dataMode, bootstrap, actions, timeline, onOpenAction, onOpenCategory, onOpenTimeline, onOpenView, onReconcile, recoveryBusy }: HomeViewProps) {
   const recent = timeline[0];
-  // 67項目を等しく並べても「どれから」は決まらない。いまのPCを見て数件だけ先に出す。
+  // 68項目を等しく並べても「どれから」は決まらない。いまのPCを見て数件だけ先に出す。
   const recommendations = buildRecommendations(actions, bootstrap);
   return (
     <div className="view home-view">

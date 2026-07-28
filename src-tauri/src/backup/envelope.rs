@@ -15,6 +15,49 @@ pub struct SleepLeaseBackup {
     pub keep_display_on: bool,
 }
 
+/// Complete user settings read through the documented keyboard accessibility API.
+///
+/// The size fields are retained deliberately: exact rollback restores every field
+/// returned by Windows rather than synthesizing defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyboardAccessibilitySettings {
+    pub sticky_size: u32,
+    pub sticky_flags: u32,
+    pub filter_size: u32,
+    pub filter_flags: u32,
+    pub filter_wait_ms: u32,
+    pub filter_delay_ms: u32,
+    pub filter_repeat_ms: u32,
+    pub filter_bounce_ms: u32,
+}
+
+impl KeyboardAccessibilitySettings {
+    pub fn fingerprint(self) -> Fingerprint {
+        let mut bytes = Vec::with_capacity(8 * std::mem::size_of::<u32>());
+        for value in [
+            self.sticky_size,
+            self.sticky_flags,
+            self.filter_size,
+            self.filter_flags,
+            self.filter_wait_ms,
+            self.filter_delay_ms,
+            self.filter_repeat_ms,
+            self.filter_bounce_ms,
+        ] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        Fingerprint::of_bytes(&bytes)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShiftInterruptionGuardBackup {
+    pub original: KeyboardAccessibilitySettings,
+    pub intended: KeyboardAccessibilitySettings,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationBackup {
@@ -108,6 +151,7 @@ pub enum BackupPayload {
     ProcessWatch(ProcessWatchBackup),
     PowerScheme(PowerSchemeBackup),
     WindowLayout(WindowLayoutBackup),
+    ShiftInterruptionGuard(ShiftInterruptionGuardBackup),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -690,7 +690,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   .result-tile:hover { border-color: rgba(255, 255, 255, .38); }
 }
 
-/* いまのPCを見た推奨。67項目を等しく並べる前に、数件だけ先に出す。 */
+/* いまのPCを見た推奨。68項目を等しく並べる前に、数件だけ先に出す。 */
 .recommend { margin-bottom: 1.4rem; }
 .recommend-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .recommend-row { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;

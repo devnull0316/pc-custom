@@ -100,6 +100,8 @@ pub enum ActionParameters {
         #[serde(default)]
         keep_display_on: bool,
     },
+    #[serde(rename = "input.shift_interruption_guard")]
+    InputShiftInterruptionGuard {},
     #[serde(rename = "power.active_scheme_check")]
     PowerActiveSchemeCheck {},
     #[serde(rename = "power.active_scheme_switch")]
@@ -238,6 +240,7 @@ impl ActionParameters {
     pub const fn action_id(&self) -> ActionId {
         match self {
             Self::SessionPreventSleep { .. } => ActionId::SessionPreventSleep,
+            Self::InputShiftInterruptionGuard { .. } => ActionId::InputShiftInterruptionGuard,
             Self::PowerActiveSchemeCheck { .. } => ActionId::PowerActiveSchemeCheck,
             Self::PowerActiveSchemeSwitch { .. } => ActionId::PowerActiveSchemeSwitch,
             Self::ExplorerShowExtensions { .. } => ActionId::ExplorerShowExtensions,

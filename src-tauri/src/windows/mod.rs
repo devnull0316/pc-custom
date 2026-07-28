@@ -1,5 +1,6 @@
 //! Narrow Windows primitives. No function accepts a shell command or user-selected registry path.
 
+mod accessibility_shortcuts;
 mod app_launch;
 mod audio;
 mod broadcast;
@@ -26,6 +27,11 @@ mod window_effects;
 mod window_placement;
 mod wmi_process;
 
+pub use accessibility_shortcuts::{
+    filter_feature_is_enabled, read_keyboard_accessibility_settings,
+    replace_keyboard_accessibility_settings, sticky_feature_is_enabled, without_shift_shortcuts,
+    FILTER_SHORTCUT_FLAGS, STICKY_SHORTCUT_FLAGS,
+};
 pub use app_launch::{
     apps_for_bundle, launch_known_apps, observe_known_apps, resolve_known_app,
     resolve_powertoys_app_path, KnownApp,

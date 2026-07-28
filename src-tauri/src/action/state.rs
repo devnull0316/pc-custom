@@ -240,6 +240,11 @@ pub enum ObservedValue {
         owner_count: usize,
         keep_display_on: bool,
     },
+    ShiftInterruptionGuard {
+        shift_five_press_shortcut_enabled: bool,
+        right_shift_hold_shortcut_enabled: bool,
+        input_assistance_in_use: bool,
+    },
     ActivePowerScheme {
         guid: String,
     },

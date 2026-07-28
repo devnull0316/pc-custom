@@ -536,6 +536,21 @@ fn classify_action(
                     Err(_) => RecoveryClassification::Unknown,
                 };
             }
+            if parameters.action_id() == ActionId::InputShiftInterruptionGuard {
+                return match crate::actions::classify_recoverable_shift_guard(context, backup) {
+                    Ok(
+                        crate::actions::ShiftGuardTransactionState::Desired
+                        | crate::actions::ShiftGuardTransactionState::MixedOwned,
+                    ) => RecoveryClassification::Applied,
+                    Ok(crate::actions::ShiftGuardTransactionState::Original) => {
+                        RecoveryClassification::Original
+                    }
+                    Ok(crate::actions::ShiftGuardTransactionState::Third) => {
+                        RecoveryClassification::Third
+                    }
+                    Err(_) => RecoveryClassification::Unknown,
+                };
+            }
             match observed {
                 DetectedState::Known { .. }
                 | DetectedState::NeedsRestart { .. }
