@@ -9,7 +9,7 @@ use crate::{
     action::{
         ActionId, ActionKind, ActionMetadata, ActionParameters, ActionRiskLevel, AppLaunchBundle,
         ChangeExplanation, DetectedState, ExplorerLaunchTarget, GameReadinessObservation,
-        MethodClass, ObservedValue, PowerScheme, ReadinessComponent, StartLayout,
+        MethodClass, ObservedValue, PowerModeChoice, PowerScheme, ReadinessComponent, StartLayout,
         StartupEntrySource, StartupEntryStatus, StartupInventoryObservation, TaskbarAlignment,
         TaskbarGroupingMode, TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode,
         ThemeObservation,
@@ -448,6 +448,9 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::PowerActiveSchemeSwitch => ActionParameters::PowerActiveSchemeSwitch {
             scheme: PowerScheme::Balanced,
         },
+        ActionId::PowerModeSwitch => ActionParameters::PowerModeSwitch {
+            mode: PowerModeChoice::Balanced,
+        },
         ActionId::ExplorerShowExtensions => ActionParameters::ExplorerShowExtensions { show: true },
         ActionId::ExplorerShowHidden => ActionParameters::ExplorerShowHidden { show: true },
         ActionId::ExplorerClockSeconds => ActionParameters::ExplorerClockSeconds { show: true },
@@ -610,7 +613,9 @@ pub fn risk_name(risk: ActionRiskLevel) -> &'static str {
 fn category_for(action_id: ActionId) -> &'static str {
     match action_id {
         ActionId::SessionPreventSleep => "session",
-        ActionId::PowerActiveSchemeCheck | ActionId::PowerActiveSchemeSwitch => "power",
+        ActionId::PowerActiveSchemeCheck
+        | ActionId::PowerActiveSchemeSwitch
+        | ActionId::PowerModeSwitch => "power",
         ActionId::ExplorerShowExtensions
         | ActionId::ExplorerShowHidden
         | ActionId::ExplorerClockSeconds
@@ -686,6 +691,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::PowerActiveSchemeCheck => "現在の電源構成を変更せず確認したい人向け",
         ActionId::PowerActiveSchemeSwitch => {
             "Windows公開Power APIで電源プランを明示的に選びたい人向け"
+        }
+        ActionId::PowerModeSwitch => {
+            "電源接続時と電池使用時のモードを、用途に合わせて選びたい人向け。選べない値があるPCもあります"
         }
         ActionId::ExplorerShowExtensions => "ファイルの種類を見分け、誤操作を減らしたい人向け",
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
@@ -783,6 +791,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         }
         ActionId::PowerActiveSchemeCheck => "変更せず、現在の電源設定を確認",
         ActionId::PowerActiveSchemeSwitch => "選択したWindows標準の電源プラン",
+        ActionId::PowerModeSwitch => "選択した電源モード（電源接続時と電池使用時の両方）",
         ActionId::ExplorerShowExtensions => "拡張子を表示",
         ActionId::ExplorerShowHidden => "隠しファイルを表示",
         ActionId::ExplorerClockSeconds => "タスクバーの時計に秒を表示",
@@ -890,6 +899,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::PowerActiveSchemeSwitch => {
             "PowerGetActiveSchemeとPowerSetActiveSchemeによる明示切替"
         }
+        ActionId::PowerModeSwitch => {
+            "Windowsが公開している電源モードの読み取りと設定。要求値と実効値は別に表示"
+        }
         ActionId::InputShiftInterruptionGuard => {
             "Windowsが公開している入力設定の機能で、確認画面を開く動作だけを一時停止"
         }
@@ -932,6 +944,21 @@ fn update_impact(value: &str) -> &'static str {
 
 fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
     match value {
+        ObservedValue::PowerMode {
+            requested_ac,
+            requested_dc,
+            effective,
+        } => {
+            // 要求値と実効値を1行に混ぜない。読んだ人が別物だと分かる形で並べる。
+            let ac = requested_ac.as_deref().unwrap_or("確認できません");
+            let dc = requested_dc.as_deref().unwrap_or("確認できません");
+            match effective {
+                Some(now) => {
+                    format!("電源接続時は{ac}、電池使用時は{dc}（いま効いているのは{now}）")
+                }
+                None => format!("電源接続時は{ac}、電池使用時は{dc}"),
+            }
+        }
         ObservedValue::RegistryDword { configured } => registry_dword_label(action_id, *configured),
         ObservedValue::Theme(theme) => match theme {
             ThemeObservation::Light => "ライト表示".to_owned(),
@@ -1135,6 +1162,10 @@ fn registry_dword_label(action_id: ActionId, configured: Option<u32>) -> String 
 
 fn observed_detail(value: &ObservedValue) -> String {
     match value {
+        ObservedValue::PowerMode { .. } => {
+            "選んだモードと、Windowsがいま効いていると報告するモードは別々に確認しています。             選んだほうは他の設定に上書きされることがあります。"
+                .to_owned()
+        }
         ObservedValue::RegistryDword { .. } => {
             "HKCUの限定値をraw type/bytesで確認しました。".to_owned()
         }
@@ -1920,7 +1951,7 @@ mod count_report {
             guided_candidate,
             guided_settings
         );
-        assert_eq!(total, 68, "総数が変わったら README も直すこと");
+        assert_eq!(total, 69, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"

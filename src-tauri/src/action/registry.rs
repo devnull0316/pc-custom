@@ -4,8 +4,9 @@ use crate::actions::*;
 
 use super::{Action, ActionError, ActionErrorCode, ActionId, ActionResult, ActionStage};
 
-static REGISTERED_ACTIONS: [&'static dyn Action; 68] = [
+static REGISTERED_ACTIONS: [&'static dyn Action; 69] = [
     &PREVENT_SLEEP_ACTION,
+    &POWER_MODE_SWITCH_ACTION,
     &SHIFT_INTERRUPTION_GUARD_ACTION,
     &ACTIVE_SCHEME_CHECK_ACTION,
     &POWER_SCHEME_SWITCH_ACTION,

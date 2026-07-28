@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::action::{ActionId, PowerScheme, ProcessBindingParameters};
+use crate::action::{ActionId, PowerModeChoice, PowerScheme, ProcessBindingParameters};
 use crate::window_layout::WindowLayoutBackup;
 
 use super::{Fingerprint, RegistryBackup};
@@ -152,6 +152,20 @@ pub enum BackupPayload {
     PowerScheme(PowerSchemeBackup),
     WindowLayout(WindowLayoutBackup),
     ShiftInterruptionGuard(ShiftInterruptionGuardBackup),
+    PowerMode(PowerModeBackup),
+}
+
+/// 電源モードの変更前状態。
+///
+/// **3値の enum ではなく生のバイト列で持つ。** この PC が既に、こちらの知らない
+/// overlay GUID を選んでいる可能性がある。知らない値を「バランス」に丸めて保存すると、
+/// 戻したときに別の設定になる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerModeBackup {
+    pub original_ac: [u8; 16],
+    pub original_dc: [u8; 16],
+    pub intended: PowerModeChoice,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

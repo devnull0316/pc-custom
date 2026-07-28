@@ -13,9 +13,9 @@ pub use metadata::{
     ActionKind, ActionMetadata, ActionRiskLevel, MethodClass, WindowsReleaseFamily,
 };
 pub use parameters::{
-    ActionParameters, AppLaunchBundle, ExplorerLaunchTarget, PowerScheme, ProcessBindingParameters,
-    ProcessFileIdentity, StartLayout, TaskbarAlignment, TaskbarGroupingMode,
-    TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode,
+    ActionParameters, AppLaunchBundle, ExplorerLaunchTarget, PowerModeChoice, PowerScheme,
+    ProcessBindingParameters, ProcessFileIdentity, StartLayout, TaskbarAlignment,
+    TaskbarGroupingMode, TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode,
 };
 pub use registry::{ActionRegistry, ACTION_REGISTRY};
 pub use state::{

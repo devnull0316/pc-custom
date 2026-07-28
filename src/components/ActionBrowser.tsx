@@ -26,7 +26,7 @@ interface ActionBrowserProps {
   onSelectCategory: (category: CategoryId) => void;
   onSelectAction: (actionId: string) => void;
   onDetect: (actionId: string) => void;
-  onPreview: (action: ActionPresentation) => void;
+  onPreview: (action: ActionPresentation, parameterOverride?: Record<string, string>) => void;
   onAddToDraft: (action: ActionPresentation) => void;
   onError: (error: unknown) => void;
 }
@@ -191,7 +191,7 @@ export function ActionBrowser({
               previewing={previewPendingId === selected.id}
               onAddToDraft={() => onAddToDraft(selected)}
               onDetect={() => onDetect(selected.id)}
-              onPreview={() => onPreview(selected)}
+              onPreview={(parameterOverride) => onPreview(selected, parameterOverride)}
               onError={onError}
             />
           )}
@@ -210,12 +210,16 @@ interface ActionDetailProps {
   previewing: boolean;
   onAddToDraft: () => void;
   onDetect: () => void;
-  onPreview: () => void;
+  onPreview: (parameterOverride?: Record<string, string>) => void;
   onError: (error: unknown) => void;
 }
 
 function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, previewing, onAddToDraft, onDetect, onPreview, onError }: ActionDetailProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // 電源モードだけは、押す前にどれにするかを選ばせる。
+  // 既定を1つ決め打ちにすると「選ぶ」と書いてあるのに選べない画面になる。
+  const [powerMode, setPowerMode] = useState("balanced");
+  const picksPowerMode = action.id === "power.mode_switch";
   const current = action.currentState;
   const readOnly = action.availability === "read_only" || action.availability === "detect_only";
   const needsBinding = action.id === "games.process_watch";
@@ -237,6 +241,31 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         </div>
       </div>
       <p className="audience-line"><Icon name="info" size={16} />{action.audience}</p>
+      {!picksPowerMode ? null : (
+        <div aria-label="どのモードにするか" className="mode-choice">
+          <span>どれにしますか</span>
+          <div className="segmented" role="tablist">
+            {[
+              { value: "best_efficiency", label: "電池優先" },
+              { value: "balanced", label: "バランス" },
+              { value: "best_performance", label: "パフォーマンス優先" },
+            ].map((option) => (
+              <button
+                aria-selected={powerMode === option.value}
+                className="segmented__item"
+                key={option.value}
+                onClick={() => setPowerMode(option.value)}
+                role="tab"
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {/* この PC が受け付けない値がある。押す前には分からないので、そう書いておく。 */}
+          <small>選べない値があるPCもあります。その場合は何も変更せずにお知らせします。</small>
+        </div>
+      )}
       <div aria-label="現在と適用後の状態" className="state-comparison">
         <div className={`state-panel state-panel--${current?.kind ?? "unknown"}`}>
           <span>現在</span>
@@ -293,7 +322,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         {readOnly ? (
           <button className="primary-button" disabled={dataMode !== "live" || detecting || needsBinding} onClick={onDetect} type="button">{detecting ? <Icon className="spin" name="spinner" /> : <Icon name={needsBinding ? "info" : "search"} />}{needsBinding ? "実行ファイル登録後に確認" : "状態を確認"}</button>
         ) : (
-          <button className="primary-button" disabled={!mutationAllowed || previewing} onClick={onPreview} type="button">{previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}{previewing ? "プレビュー作成中" : "適用プレビュー"}</button>
+          <button className="primary-button" disabled={!mutationAllowed || previewing} onClick={() => onPreview(picksPowerMode ? { mode: powerMode } : undefined)} type="button">{previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}{previewing ? "プレビュー作成中" : "適用プレビュー"}</button>
         )}
         {/* 「自動適用の対象外」は永久に押せないボタンだった。押せないものはボタンではなく状態なので、
             文で書く。押せる可能性があるときだけボタンを出す。 */}

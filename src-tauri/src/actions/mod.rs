@@ -7,6 +7,7 @@ mod common;
 mod explorer_visibility;
 mod game_readiness;
 mod guided_setup;
+mod power_mode_switch;
 mod power_scheme_switch;
 mod prevent_sleep;
 mod process_watch;
@@ -27,6 +28,7 @@ pub use explorer_visibility::{
 };
 pub use game_readiness::{GameReadinessCheckAction, GAME_READINESS_CHECK_ACTION};
 pub use guided_setup::{GuidedSetupAction, SETUP_AUDIO_OUTPUT_ACTION, SETUP_DEFAULT_APPS_ACTION};
+pub use power_mode_switch::{PowerModeSwitchAction, POWER_MODE_SWITCH_ACTION};
 pub use power_scheme_switch::{PowerSchemeSwitchAction, POWER_SCHEME_SWITCH_ACTION};
 pub use prevent_sleep::{PreventSleepAction, PREVENT_SLEEP_ACTION};
 pub use process_watch::{ProcessWatchAction, PROCESS_WATCH_ACTION};

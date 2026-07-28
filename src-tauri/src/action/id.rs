@@ -14,6 +14,7 @@ pub enum ActionId {
     PowerActiveSchemeCheck,
     #[serde(rename = "power.active_scheme_switch")]
     PowerActiveSchemeSwitch,
+    PowerModeSwitch,
     #[serde(rename = "explorer.show_extensions")]
     ExplorerShowExtensions,
     #[serde(rename = "explorer.show_hidden")]
@@ -145,11 +146,12 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 68] = [
+    pub const ALL: [Self; 69] = [
         Self::SessionPreventSleep,
         Self::InputShiftInterruptionGuard,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
+        Self::PowerModeSwitch,
         Self::ExplorerShowExtensions,
         Self::ExplorerShowHidden,
         Self::ExplorerClockSeconds,
@@ -222,6 +224,7 @@ impl ActionId {
             Self::InputShiftInterruptionGuard => "input.shift_interruption_guard",
             Self::PowerActiveSchemeCheck => "power.active_scheme_check",
             Self::PowerActiveSchemeSwitch => "power.active_scheme_switch",
+            Self::PowerModeSwitch => "power.mode_switch",
             Self::ExplorerShowExtensions => "explorer.show_extensions",
             Self::ExplorerShowHidden => "explorer.show_hidden",
             Self::ExplorerClockSeconds => "explorer.clock_seconds",
@@ -316,6 +319,7 @@ impl FromStr for ActionId {
             "input.shift_interruption_guard" => Ok(Self::InputShiftInterruptionGuard),
             "power.active_scheme_check" => Ok(Self::PowerActiveSchemeCheck),
             "power.active_scheme_switch" => Ok(Self::PowerActiveSchemeSwitch),
+            "power.mode_switch" => Ok(Self::PowerModeSwitch),
             "explorer.show_extensions" => Ok(Self::ExplorerShowExtensions),
             "explorer.show_hidden" => Ok(Self::ExplorerShowHidden),
             "explorer.clock_seconds" => Ok(Self::ExplorerClockSeconds),

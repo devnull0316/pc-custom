@@ -250,6 +250,16 @@ pub enum ObservedValue {
     ActivePowerScheme {
         guid: String,
     },
+    /// 電源モード。**要求値と実効値を1つにまとめない。**
+    /// Windows は前者を「他の signal に上書きされ得る vote」と説明している。
+    PowerMode {
+        /// 電源接続時に利用者が選んでいるモード。読めなければ None。
+        requested_ac: Option<String>,
+        /// 電池使用時に利用者が選んでいるモード。
+        requested_dc: Option<String>,
+        /// Windows がいま効いていると報告するモード。要求値と一致するとは限らない。
+        effective: Option<String>,
+    },
     Processes {
         matches: Vec<ObservedProcess>,
     },

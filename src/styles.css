@@ -788,3 +788,8 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .result-tile--3 .result-tile__icon, .result-tile--6 .result-tile__icon,
 .result-tile--9 .result-tile__icon, .result-tile--10 .result-tile__icon {
   color: var(--text); background: var(--surface-active); }
+
+/* 押す前に選ばせる項目。選択肢が本文と並ぶと見落とすので、1段くくる。 */
+.mode-choice { display: grid; gap: 6px; margin: 14px 0; }
+.mode-choice > span { color: var(--text-secondary); font-size: var(--fs-sm); }
+.mode-choice small { color: var(--text-tertiary); font-size: var(--fs-xs); }

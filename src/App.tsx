@@ -83,6 +83,7 @@ function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "theme.color_mode") return { mode: "dark" };
   if (actionId === "power.active_scheme_check") return {};
   if (actionId === "power.active_scheme_switch") return { scheme: "balanced" };
+  if (actionId === "power.mode_switch") return { mode: "balanced" };
   if (actionId === "games.process_watch") return {};
   if (actionId === "games.readiness_check") return {};
   if (actionId === "taskbar.search_mode") return { mode: "search_box" };
@@ -303,8 +304,9 @@ export function App() {
     }
   }
 
-  function requestPreview(action: ActionPresentation) {
-    return requestActionPreview(action.id, parametersForAction(action.id));
+  function requestPreview(action: ActionPresentation, parameterOverride?: Record<string, string>) {
+    // 画面で選べる項目は、その選択を優先する。既定を上書きしない項目は今までどおり。
+    return requestActionPreview(action.id, parameterOverride ?? parametersForAction(action.id));
   }
 
   function requestPowerToysLaunch() {
