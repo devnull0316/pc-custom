@@ -956,21 +956,25 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
         }
         ObservedValue::ShiftInterruptionGuard {
             shift_five_press_shortcut_enabled,
+            shift_five_press_confirmation_enabled,
             right_shift_hold_shortcut_enabled,
+            right_shift_hold_confirmation_enabled,
             input_assistance_in_use,
         } => {
             if *input_assistance_in_use {
                 "入力の補助機能を使用中（変更しません）".to_owned()
             } else {
-                match (
-                    shift_five_press_shortcut_enabled,
-                    right_shift_hold_shortcut_enabled,
-                ) {
-                    (true, true) => "Shiftの確認画面が2種類とも出る設定".to_owned(),
-                    (true, false) => "Shiftを5回押す確認画面が出る設定".to_owned(),
-                    (false, true) => "右Shift長押しの確認画面が出る設定".to_owned(),
-                    (false, false) => "Shiftの確認画面は出ない設定".to_owned(),
-                }
+                format!(
+                    "Shift 5回: {}／右Shift長押し: {}",
+                    shift_trigger_state(
+                        *shift_five_press_shortcut_enabled,
+                        *shift_five_press_confirmation_enabled,
+                    ),
+                    shift_trigger_state(
+                        *right_shift_hold_shortcut_enabled,
+                        *right_shift_hold_confirmation_enabled,
+                    ),
+                )
             }
         }
         ObservedValue::ActivePowerScheme { guid } => {
@@ -1072,6 +1076,15 @@ fn component_status<T>(component: &ReadinessComponent<T>) -> u8 {
         ReadinessComponent::Known { .. } => 0,
         ReadinessComponent::Unknown { .. } => 1,
         ReadinessComponent::Unconfigured => 2,
+    }
+}
+
+fn shift_trigger_state(shortcut_enabled: bool, confirmation_enabled: bool) -> &'static str {
+    match (shortcut_enabled, confirmation_enabled) {
+        (true, true) => "確認画面が出る",
+        (true, false) => "確認なしで補助機能が始まる",
+        (false, true) => "起動は無効（確認の設定だけ残っています）",
+        (false, false) => "起動は無効",
     }
 }
 
@@ -1497,6 +1510,18 @@ mod tests {
     };
     use crate::actions::START_LAYOUT_ACTION;
     use crate::compatibility::CompatibilityCatalog;
+
+    #[test]
+    fn shift_guard_current_state_distinguishes_trigger_from_confirmation() {
+        assert_eq!(
+            shift_trigger_state(false, true),
+            "起動は無効（確認の設定だけ残っています）"
+        );
+        assert_eq!(
+            shift_trigger_state(true, false),
+            "確認なしで補助機能が始まる"
+        );
+    }
 
     #[test]
     fn power_scheme_request_schema_rejects_unknown_choice_and_extra_fields() {

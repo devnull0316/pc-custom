@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::{
     action::{ActionId, ActionParameters},
@@ -81,6 +81,57 @@ pub fn save_window_layout(
     state
         .engine()?
         .save_window_layout(unregistered_games_closed)
+}
+
+#[tauri::command]
+pub fn list_offscreen_windows(
+    app: tauri::AppHandle,
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::windows::OffscreenWindowScan> {
+    state
+        .engine()?
+        .scan_offscreen_windows(main_window_handle(&app)?)
+}
+
+#[tauri::command]
+pub fn rescue_offscreen_window(
+    app: tauri::AppHandle,
+    state: State<'_, ApplicationState>,
+    candidate_id: String,
+) -> CoreResult<crate::windows::OffscreenWindowRescueOutcome> {
+    let candidate_id = uuid::Uuid::parse_str(&candidate_id)
+        .map_err(|_| CoreError::invalid_request("選んだウィンドウの確認情報が無効です。"))?;
+    state
+        .engine()?
+        .rescue_offscreen_window(candidate_id, main_window_handle(&app)?)
+}
+
+#[tauri::command]
+pub fn rollback_offscreen_window(
+    state: State<'_, ApplicationState>,
+    undo_id: String,
+) -> CoreResult<crate::windows::OffscreenWindowRescueOutcome> {
+    let undo_id = uuid::Uuid::parse_str(&undo_id)
+        .map_err(|_| CoreError::invalid_request("元の位置へ戻すための確認情報が無効です。"))?;
+    state.engine()?.rollback_offscreen_window(undo_id)
+}
+
+#[cfg(windows)]
+fn main_window_handle(app: &tauri::AppHandle) -> CoreResult<isize> {
+    let window = app.get_webview_window("main").ok_or_else(|| {
+        CoreError::recovery_required("PCカスタムの画面を確認できないため、移動先を決められません。")
+    })?;
+    let raw = window.hwnd().map_err(|_| {
+        CoreError::recovery_required("PCカスタムの画面を確認できないため、移動先を決められません。")
+    })?;
+    Ok(raw.0 as isize)
+}
+
+#[cfg(not(windows))]
+fn main_window_handle(_app: &tauri::AppHandle) -> CoreResult<isize> {
+    Err(CoreError::invalid_request(
+        "この機能はWindowsでのみ利用できます。",
+    ))
 }
 
 #[tauri::command]

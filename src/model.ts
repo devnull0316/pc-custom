@@ -347,6 +347,31 @@ export interface WindowLayoutStatus {
   skippedWindows: number;
 }
 
+export type OffscreenWindowBlockReason =
+  | "higher_integrity"
+  | "not_responding"
+  | "access_unknown"
+  | "already_rescued";
+
+export interface OffscreenWindowCandidate {
+  candidateId: string;
+  applicationLabel: string;
+  canRescue: boolean;
+  unavailableReason: OffscreenWindowBlockReason | null;
+}
+
+export interface OffscreenWindowUndo {
+  undoId: string;
+  applicationLabel: string;
+}
+
+export interface OffscreenWindowScan {
+  candidates: readonly OffscreenWindowCandidate[];
+  excludedGameWindows: number;
+  skippedWindows: number;
+  undoItems: readonly OffscreenWindowUndo[];
+}
+
 export function isMutationAllowed(
   mode: DataMode,
   bootstrap: BootstrapStatus | null,

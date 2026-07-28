@@ -253,6 +253,7 @@ impl PcCustomEngine {
             &failed_context,
             &work[failed_index].parameters,
             &work[failed_index].backup,
+            ItemState::ApplyFailed,
         );
         let primary_code = original_error.code.as_code().to_owned();
         let mut recovery_required = false;

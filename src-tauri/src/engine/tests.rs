@@ -6,10 +6,11 @@ use uuid::Uuid;
 
 use crate::{
     action::{ActionId, ActionParameters, ProcessFileIdentity},
+    actions::ShiftGuardTransactionState,
     backup::{BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, ObservationBackup},
     compatibility::OsIdentity,
     game_profile::{CreateProfileRequest, ProfileStore, StoredProfileAction},
-    journal::{JournalDatabase, PreparedItem},
+    journal::{ItemState, JournalDatabase, PreparedItem, RecoveryClassification},
     presentation::{PreviewActionRequest, PreviewActionsRequest},
     window_layout::{
         SavedWindowPlacement, SavedWindowPlacementEntry, SensitiveWindowTitle,
@@ -18,6 +19,66 @@ use crate::{
 };
 
 use super::PcCustomEngine;
+
+#[test]
+fn shift_guard_partial_recovery_uses_durable_item_stage() {
+    assert_eq!(
+        super::classify_shift_guard_recovery_state(
+            ShiftGuardTransactionState::MixedOwned,
+            ItemState::Applying,
+            false,
+        ),
+        RecoveryClassification::Applied
+    );
+    assert_eq!(
+        super::classify_shift_guard_recovery_state(
+            ShiftGuardTransactionState::MixedOwned,
+            ItemState::RollingBack,
+            true,
+        ),
+        RecoveryClassification::Applied
+    );
+    assert_eq!(
+        super::classify_shift_guard_recovery_state(
+            ShiftGuardTransactionState::MixedOwned,
+            ItemState::ApplyFailed,
+            false,
+        ),
+        RecoveryClassification::Applied
+    );
+    assert_eq!(
+        super::classify_shift_guard_recovery_state(
+            ShiftGuardTransactionState::MixedOwned,
+            ItemState::Applied,
+            true,
+        ),
+        RecoveryClassification::Third
+    );
+    assert_eq!(
+        super::classify_shift_guard_recovery_state(
+            ShiftGuardTransactionState::MixedOwned,
+            ItemState::RollbackFailed,
+            true,
+        ),
+        RecoveryClassification::Third
+    );
+    assert_eq!(
+        super::classify_shift_guard_recovery_state(
+            ShiftGuardTransactionState::MixedOwned,
+            ItemState::Applying,
+            true,
+        ),
+        RecoveryClassification::Third
+    );
+    assert_eq!(
+        super::classify_shift_guard_recovery_state(
+            ShiftGuardTransactionState::Desired,
+            ItemState::Applied,
+            true,
+        ),
+        RecoveryClassification::Applied
+    );
+}
 
 fn power_observation_item(transaction_id: Uuid, item_id: Uuid) -> PreparedItem {
     let before = Fingerprint::of_bytes(b"power-before");
@@ -129,6 +190,54 @@ fn kill_after_item_applying_is_reconciled_on_reopen() {
         .expect("reconciled item remains visible");
     assert_eq!(item.status, "rolled_back");
     assert_eq!(reopened.recovery_count().expect("count after reconcile"), 0);
+}
+
+#[test]
+fn rolling_back_stage_and_applied_fingerprint_survive_journal_reopen() {
+    let directory = tempdir().expect("create isolated journal directory");
+    let database_path = directory.path().join("rolling-back-stage.db");
+    let transaction_id = Uuid::new_v4();
+    let item_id = Uuid::new_v4();
+    {
+        let journal = JournalDatabase::open(&database_path).expect("open first journal");
+        let mut prepared = power_observation_item(transaction_id, item_id);
+        journal
+            .record_prepared_transaction(
+                transaction_id,
+                "rolling-back stage test",
+                "test",
+                "stable-os-fingerprint",
+                std::slice::from_ref(&prepared),
+                1,
+            )
+            .expect("durably prepare backup");
+        journal
+            .mark_item_applying(transaction_id, item_id, 0, 2)
+            .expect("persist applying");
+        prepared
+            .backup
+            .record_applied(Fingerprint::of_bytes(b"applied"));
+        journal
+            .mark_item_applied(transaction_id, item_id, &prepared.backup, 3)
+            .expect("persist applied fingerprint");
+        journal
+            .mark_item_rolling_back(transaction_id, item_id, 4)
+            .expect("persist rolling-back stage");
+        journal.checkpoint().expect("checkpoint rolling-back stage");
+    }
+
+    let reopened = JournalDatabase::open(&database_path).expect("reopen journal");
+    let transactions = reopened
+        .load_recovery_transactions()
+        .expect("load rolling-back item");
+    let item = transactions
+        .iter()
+        .flat_map(|transaction| transaction.items.iter())
+        .find(|item| item.item_id == item_id)
+        .expect("rolling-back item survives");
+    assert_eq!(item.state, ItemState::RollingBack);
+    assert!(item.backup.applied_fingerprint.is_some());
+    assert!(item.backup.verify_integrity());
 }
 
 #[test]

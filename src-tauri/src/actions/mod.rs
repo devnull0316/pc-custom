@@ -32,7 +32,7 @@ pub use prevent_sleep::{PreventSleepAction, PREVENT_SLEEP_ACTION};
 pub use process_watch::{ProcessWatchAction, PROCESS_WATCH_ACTION};
 pub use registry_settings::*;
 pub(crate) use shift_interruption_guard::{
-    classify_recoverable_shift_guard, ShiftGuardTransactionState,
+    classify_recoverable_shift_guard, rollback_recoverable_shift_guard, ShiftGuardTransactionState,
 };
 pub use shift_interruption_guard::{ShiftInterruptionGuardAction, SHIFT_INTERRUPTION_GUARD_ACTION};
 pub use system_observations::{

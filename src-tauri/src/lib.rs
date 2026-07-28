@@ -74,6 +74,9 @@ pub fn run() {
             commands::open_windows_settings,
             commands::get_window_layout_status,
             commands::save_window_layout,
+            commands::list_offscreen_windows,
+            commands::rescue_offscreen_window,
+            commands::rollback_offscreen_window,
         ])
         .run(tauri::generate_context!())
         .expect("PCカスタム runtime terminated unexpectedly");

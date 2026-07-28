@@ -32,6 +32,9 @@ commands.allow = [
   "storage_temp_cleanup_apply",
   "open_windows_settings",
   "get_window_layout_status",
-  "save_window_layout"
+  "save_window_layout",
+  "list_offscreen_windows",
+  "rescue_offscreen_window",
+  "rollback_offscreen_window"
 ]
 

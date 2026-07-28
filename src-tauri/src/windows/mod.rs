@@ -28,9 +28,11 @@ mod window_placement;
 mod wmi_process;
 
 pub use accessibility_shortcuts::{
-    filter_feature_is_enabled, read_keyboard_accessibility_settings,
-    replace_keyboard_accessibility_settings, sticky_feature_is_enabled, without_shift_shortcuts,
-    FILTER_SHORTCUT_FLAGS, STICKY_SHORTCUT_FLAGS,
+    filter_confirmation_is_enabled, filter_feature_is_enabled, filter_shortcut_is_enabled,
+    read_keyboard_accessibility_settings, replace_keyboard_accessibility_settings,
+    sticky_confirmation_is_enabled, sticky_feature_is_enabled, sticky_shortcut_is_enabled,
+    sticky_transient_state_is_active, without_shift_shortcuts, FILTER_SHORTCUT_FLAGS,
+    STICKY_SHORTCUT_FLAGS,
 };
 pub use app_launch::{
     apps_for_bundle, launch_known_apps, observe_known_apps, resolve_known_app,
@@ -77,6 +79,8 @@ pub use window_placement::{
     capture_window_layout, capture_window_layout_originals, classify_window_layout_transaction,
     observe_original_window_placements, observe_window_layout, restore_window_layout,
     restore_window_placement_entries, verify_captured_window_layout_originals,
+    OffscreenWindowBlockReason, OffscreenWindowCandidate, OffscreenWindowRescueManager,
+    OffscreenWindowRescueOutcome, OffscreenWindowScan, OffscreenWindowUndo,
     WindowLayoutTransactionState,
 };
 pub use wmi_process::wmi_process_ids;
@@ -89,6 +93,9 @@ pub enum WindowsErrorKind {
     ResourceLimit,
     InvalidData,
     ChannelClosed,
+    /// A primitive re-read a mutable resource immediately before writing and
+    /// found that it no longer matched the caller's expected state.
+    ExternalConflict,
     /// A primitive dispatched at least one write and could not prove that its
     /// bounded inverse compensation completed.
     RecoveryRequired,

@@ -10,9 +10,10 @@ use crate::{
         ShiftInterruptionGuardBackup,
     },
     windows::{
-        filter_feature_is_enabled, read_keyboard_accessibility_settings,
-        replace_keyboard_accessibility_settings, sticky_feature_is_enabled,
-        without_shift_shortcuts, FILTER_SHORTCUT_FLAGS, STICKY_SHORTCUT_FLAGS,
+        filter_confirmation_is_enabled, filter_feature_is_enabled, filter_shortcut_is_enabled,
+        read_keyboard_accessibility_settings, replace_keyboard_accessibility_settings,
+        sticky_confirmation_is_enabled, sticky_feature_is_enabled, sticky_shortcut_is_enabled,
+        sticky_transient_state_is_active, without_shift_shortcuts,
     },
 };
 
@@ -86,7 +87,7 @@ impl ShiftInterruptionGuardAction {
         })
     }
 
-    fn ensure_input_assistance_is_off(
+    fn ensure_safe_to_change(
         settings: KeyboardAccessibilitySettings,
         stage: ActionStage,
     ) -> ActionResult<()> {
@@ -98,6 +99,14 @@ impl ShiftInterruptionGuardAction {
                 "action.shift_interruption_guard.input_assistance_in_use",
             ));
         }
+        if sticky_transient_state_is_active(settings) {
+            return Err(ActionError::new(
+                ActionErrorCode::StateUnknown,
+                stage,
+                false,
+                "action.shift_interruption_guard.transient_input_state",
+            ));
+        }
         Ok(())
     }
 
@@ -107,10 +116,10 @@ impl ShiftInterruptionGuardAction {
     ) -> DetectedState {
         DetectedState::Known {
             value: ObservedValue::ShiftInterruptionGuard {
-                shift_five_press_shortcut_enabled: settings.sticky_flags & STICKY_SHORTCUT_FLAGS
-                    != 0,
-                right_shift_hold_shortcut_enabled: settings.filter_flags & FILTER_SHORTCUT_FLAGS
-                    != 0,
+                shift_five_press_shortcut_enabled: sticky_shortcut_is_enabled(settings),
+                shift_five_press_confirmation_enabled: sticky_confirmation_is_enabled(settings),
+                right_shift_hold_shortcut_enabled: filter_shortcut_is_enabled(settings),
+                right_shift_hold_confirmation_enabled: filter_confirmation_is_enabled(settings),
                 input_assistance_in_use: sticky_feature_is_enabled(settings)
                     || filter_feature_is_enabled(settings),
             },
@@ -134,6 +143,7 @@ impl ShiftInterruptionGuardAction {
         if payload.intended != without_shift_shortcuts(payload.original)
             || sticky_feature_is_enabled(payload.original)
             || filter_feature_is_enabled(payload.original)
+            || sticky_transient_state_is_active(payload.original)
         {
             return Err(ActionError::recovery_required(
                 stage,
@@ -177,6 +187,59 @@ impl ShiftInterruptionGuardAction {
             ShiftGuardTransactionState::Third
         }
     }
+
+    fn rollback_with_recovery_policy(
+        context: &ActionContext<'_>,
+        parameters: &ActionParameters,
+        envelope: &BackupEnvelope,
+        allow_recorded_mixed_rollback: bool,
+    ) -> ActionResult<RollbackEvidence> {
+        validate_base(&METADATA, context, parameters, false, ActionStage::Rollback)?;
+        Self::validate_parameters(parameters, ActionStage::Rollback)?;
+        validate_backup(&METADATA, context, envelope, ActionStage::Rollback)?;
+        let payload = Self::payload(envelope, ActionStage::Rollback)?;
+        let current = Self::read_settings(ActionStage::Rollback)?;
+        match Self::classify_settings(current, payload) {
+            ShiftGuardTransactionState::Original => {}
+            ShiftGuardTransactionState::Desired => {
+                replace_keyboard_accessibility_settings(current, payload.original).map_err(
+                    |error| {
+                        map_windows_error(
+                            ActionStage::Rollback,
+                            "action.shift_interruption_guard.rollback_failed",
+                            error,
+                        )
+                    },
+                )?;
+            }
+            ShiftGuardTransactionState::MixedOwned
+                if envelope.applied_fingerprint.is_none() || allow_recorded_mixed_rollback =>
+            {
+                replace_keyboard_accessibility_settings(current, payload.original).map_err(
+                    |error| {
+                        map_windows_error(
+                            ActionStage::Rollback,
+                            "action.shift_interruption_guard.rollback_failed",
+                            error,
+                        )
+                    },
+                )?;
+            }
+            ShiftGuardTransactionState::MixedOwned | ShiftGuardTransactionState::Third => {
+                return Err(ActionError::new(
+                    ActionErrorCode::ExternalConflict,
+                    ActionStage::Rollback,
+                    false,
+                    "action.rollback.external_change_detected",
+                ));
+            }
+        }
+        let restored = Self::read_settings(ActionStage::Rollback)?;
+        Ok(RollbackEvidence {
+            state: Self::observed_state(context, restored),
+            restored_fingerprint: restored.fingerprint(),
+        })
+    }
 }
 
 pub(crate) fn classify_recoverable_shift_guard(
@@ -189,6 +252,14 @@ pub(crate) fn classify_recoverable_shift_guard(
     Ok(ShiftInterruptionGuardAction::classify_settings(
         current, payload,
     ))
+}
+
+pub(crate) fn rollback_recoverable_shift_guard(
+    context: &ActionContext<'_>,
+    parameters: &ActionParameters,
+    backup: &BackupEnvelope,
+) -> ActionResult<RollbackEvidence> {
+    ShiftInterruptionGuardAction::rollback_with_recovery_policy(context, parameters, backup, true)
 }
 
 impl Action for ShiftInterruptionGuardAction {
@@ -216,7 +287,7 @@ impl Action for ShiftInterruptionGuardAction {
     ) -> ActionResult<ValidationReport> {
         let report = validate_base(&METADATA, context, parameters, true, ActionStage::Validate)?;
         Self::validate_parameters(parameters, ActionStage::Validate)?;
-        Self::ensure_input_assistance_is_off(
+        Self::ensure_safe_to_change(
             Self::read_settings(ActionStage::Validate)?,
             ActionStage::Validate,
         )?;
@@ -231,7 +302,7 @@ impl Action for ShiftInterruptionGuardAction {
         validate_base(&METADATA, context, parameters, true, ActionStage::Backup)?;
         Self::validate_parameters(parameters, ActionStage::Backup)?;
         let original = Self::read_settings(ActionStage::Backup)?;
-        Self::ensure_input_assistance_is_off(original, ActionStage::Backup)?;
+        Self::ensure_safe_to_change(original, ActionStage::Backup)?;
         let intended = without_shift_shortcuts(original);
         Ok(BackupDraft {
             precondition_fingerprint: original.fingerprint(),
@@ -254,7 +325,7 @@ impl Action for ShiftInterruptionGuardAction {
         validate_backup_for_apply(&METADATA, context, envelope)?;
         let payload = Self::payload(envelope, ActionStage::Apply)?;
         let current = Self::read_settings(ActionStage::Apply)?;
-        Self::ensure_input_assistance_is_off(current, ActionStage::Apply)?;
+        Self::ensure_safe_to_change(current, ActionStage::Apply)?;
         if current != payload.original {
             return Err(ActionError::new(
                 ActionErrorCode::ExternalConflict,
@@ -263,13 +334,15 @@ impl Action for ShiftInterruptionGuardAction {
                 "action.apply.stale_preview",
             ));
         }
-        replace_keyboard_accessibility_settings(payload.intended).map_err(|error| {
-            map_windows_error(
-                ActionStage::Apply,
-                "action.shift_interruption_guard.apply_failed",
-                error,
-            )
-        })?;
+        replace_keyboard_accessibility_settings(payload.original, payload.intended).map_err(
+            |error| {
+                map_windows_error(
+                    ActionStage::Apply,
+                    "action.shift_interruption_guard.apply_failed",
+                    error,
+                )
+            },
+        )?;
         let applied = Self::read_settings(ActionStage::Apply)?;
         Ok(AppliedEvidence {
             state: Self::observed_state(context, applied),
@@ -299,45 +372,7 @@ impl Action for ShiftInterruptionGuardAction {
         parameters: &ActionParameters,
         envelope: &BackupEnvelope,
     ) -> ActionResult<RollbackEvidence> {
-        validate_base(&METADATA, context, parameters, false, ActionStage::Rollback)?;
-        Self::validate_parameters(parameters, ActionStage::Rollback)?;
-        validate_backup(&METADATA, context, envelope, ActionStage::Rollback)?;
-        let payload = Self::payload(envelope, ActionStage::Rollback)?;
-        let current = Self::read_settings(ActionStage::Rollback)?;
-        match Self::classify_settings(current, payload) {
-            ShiftGuardTransactionState::Original => {}
-            ShiftGuardTransactionState::Desired => {
-                replace_keyboard_accessibility_settings(payload.original).map_err(|error| {
-                    map_windows_error(
-                        ActionStage::Rollback,
-                        "action.shift_interruption_guard.rollback_failed",
-                        error,
-                    )
-                })?;
-            }
-            ShiftGuardTransactionState::MixedOwned if envelope.applied_fingerprint.is_none() => {
-                replace_keyboard_accessibility_settings(payload.original).map_err(|error| {
-                    map_windows_error(
-                        ActionStage::Rollback,
-                        "action.shift_interruption_guard.rollback_failed",
-                        error,
-                    )
-                })?;
-            }
-            ShiftGuardTransactionState::MixedOwned | ShiftGuardTransactionState::Third => {
-                return Err(ActionError::new(
-                    ActionErrorCode::ExternalConflict,
-                    ActionStage::Rollback,
-                    false,
-                    "action.rollback.external_change_detected",
-                ));
-            }
-        }
-        let restored = Self::read_settings(ActionStage::Rollback)?;
-        Ok(RollbackEvidence {
-            state: Self::observed_state(context, restored),
-            restored_fingerprint: restored.fingerprint(),
-        })
+        Self::rollback_with_recovery_policy(context, parameters, envelope, false)
     }
 
     fn verify_rolled_back(
@@ -382,6 +417,7 @@ impl Action for ShiftInterruptionGuardAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::windows::{FILTER_SHORTCUT_FLAGS, STICKY_SHORTCUT_FLAGS};
     use uuid::Uuid;
 
     fn sample() -> KeyboardAccessibilitySettings {
@@ -414,12 +450,20 @@ mod tests {
     fn active_input_assistance_is_rejected_without_changing_it() {
         let mut settings = sample();
         settings.sticky_flags |= 1;
-        let error = ShiftInterruptionGuardAction::ensure_input_assistance_is_off(
-            settings,
-            ActionStage::Apply,
-        )
-        .expect_err("active input assistance must fail closed");
+        let error =
+            ShiftInterruptionGuardAction::ensure_safe_to_change(settings, ActionStage::Apply)
+                .expect_err("active input assistance must fail closed");
         assert_eq!(error.code, ActionErrorCode::InvalidParameters);
+    }
+
+    #[test]
+    fn transient_latch_or_lock_state_is_rejected_before_writing() {
+        let mut settings = sample();
+        settings.sticky_flags |= 0x0001_0000;
+        let error =
+            ShiftInterruptionGuardAction::ensure_safe_to_change(settings, ActionStage::Apply)
+                .expect_err("transient Sticky Keys state must fail closed");
+        assert_eq!(error.code, ActionErrorCode::StateUnknown);
     }
 
     #[test]
@@ -465,10 +509,15 @@ mod tests {
                 return;
             }
             match read_keyboard_accessibility_settings() {
-                Ok(current) if current == self.original => {}
-                Ok(_) => {
-                    if let Err(error) = replace_keyboard_accessibility_settings(self.original) {
-                        eprintln!("emergency Shift interruption settings cleanup failed: {error}");
+                Ok(current) => {
+                    if current != self.original {
+                        if let Err(error) =
+                            replace_keyboard_accessibility_settings(current, self.original)
+                        {
+                            eprintln!(
+                                "emergency Shift interruption settings cleanup failed: {error}"
+                            );
+                        }
                     }
                 }
                 Err(error) => {
@@ -476,6 +525,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[cfg(windows)]
+    fn set_sticky_only_for_rollback_crash_simulation(settings: KeyboardAccessibilitySettings) {
+        use windows::Win32::UI::{
+            Accessibility::{STICKYKEYS, STICKYKEYS_FLAGS},
+            WindowsAndMessaging::{
+                SystemParametersInfoW, SPI_SETSTICKYKEYS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            },
+        };
+
+        let mut sticky = STICKYKEYS {
+            cbSize: settings.sticky_size,
+            dwFlags: STICKYKEYS_FLAGS(settings.sticky_flags),
+        };
+        unsafe {
+            SystemParametersInfoW(
+                SPI_SETSTICKYKEYS,
+                settings.sticky_size,
+                Some((&mut sticky as *mut STICKYKEYS).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+        }
+        .expect("simulate a crash after the first rollback write");
     }
 
     /// 実際の利用者設定を一時変更し、公開getterで適用・完全復元を別途観測する。
@@ -497,6 +570,10 @@ mod tests {
         assert!(
             !sticky_feature_is_enabled(before) && !filter_feature_is_enabled(before),
             "入力の補助機能を使用中の環境では変更しない"
+        );
+        assert!(
+            !sticky_transient_state_is_active(before),
+            "一時的なキー状態が残っている環境では変更しない"
         );
 
         let os = OsIdentity::load().expect("load real Windows identity");
@@ -567,8 +644,63 @@ mod tests {
                 .expect("verify rollback through Windows")
                 .verified
         );
+
+        // ROLLING_BACK の耐久記録後、1つ目だけ戻して落ちた状態を作り、
+        // 再起動時専用経路が第三者変更と誤認せず完全復元できることも確認する。
+        let recovery_draft = SHIFT_INTERRUPTION_GUARD_ACTION
+            .create_backup(&context, &parameters)
+            .expect("create backup for rollback crash recovery");
+        let mut recovery_envelope = BackupEnvelope::from_draft(
+            recovery_draft,
+            transaction_id,
+            item_id,
+            METADATA.id,
+            METADATA.action_version,
+            os.observed_at_unix_ms,
+            os.base_build,
+        );
+        let recovery_applied_evidence = SHIFT_INTERRUPTION_GUARD_ACTION
+            .apply(&context, &parameters, &recovery_envelope)
+            .expect("reapply for rollback crash recovery");
+        recovery_envelope.record_applied(recovery_applied_evidence.applied_fingerprint);
+        let recovery_applied =
+            read_keyboard_accessibility_settings().expect("read recovery applied settings");
+        assert_eq!(recovery_applied, applied);
+
+        set_sticky_only_for_rollback_crash_simulation(before);
+        let rollback_partial =
+            read_keyboard_accessibility_settings().expect("read partial rollback state");
+        assert_eq!(
+            ShiftInterruptionGuardAction::classify_settings(
+                rollback_partial,
+                &ShiftInterruptionGuardBackup {
+                    original: before,
+                    intended: recovery_applied,
+                },
+            ),
+            ShiftGuardTransactionState::MixedOwned
+        );
+        let ordinary_rollback_error = SHIFT_INTERRUPTION_GUARD_ACTION
+            .rollback(&context, &parameters, &recovery_envelope)
+            .expect_err("ordinary rollback must reject recorded mixed state");
+        assert_eq!(
+            ordinary_rollback_error.code,
+            ActionErrorCode::ExternalConflict
+        );
+        assert_eq!(
+            read_keyboard_accessibility_settings()
+                .expect("ordinary rollback must preserve mixed state"),
+            rollback_partial
+        );
+        rollback_recoverable_shift_guard(&context, &parameters, &recovery_envelope)
+            .expect("resume rollback from its owned partial state");
+        let recovered =
+            read_keyboard_accessibility_settings().expect("read crash-recovered settings");
+        assert_eq!(recovered, before);
         cleanup.armed = false;
 
-        println!("EVIDENCE: before={before:?} applied={applied:?} restored={restored:?}");
+        println!(
+            "EVIDENCE: before={before:?} applied={applied:?} rollback_partial={rollback_partial:?} restored={recovered:?}"
+        );
     }
 }

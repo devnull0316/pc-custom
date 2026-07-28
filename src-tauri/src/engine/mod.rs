@@ -17,7 +17,8 @@ use uuid::Uuid;
 use crate::{
     action::{
         Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind,
-        ActionParameters, ActionStage, DetectedState, ObservedValue, Verification, ACTION_REGISTRY,
+        ActionParameters, ActionResult, ActionStage, DetectedState, ObservedValue,
+        RollbackEvidence, Verification, ACTION_REGISTRY,
     },
     backup::{BackupEnvelope, Fingerprint},
     compatibility::{CompatibilityCatalog, CompatibilityMode, OsIdentity},
@@ -55,6 +56,7 @@ pub struct PcCustomEngine {
     initial_identity: Option<OsIdentity>,
     profile_store: Option<Arc<ProfileStore>>,
     window_layout_store: Option<Arc<WindowLayoutStore>>,
+    offscreen_window_rescue: crate::windows::OffscreenWindowRescueManager,
     previews: Mutex<HashMap<String, PreviewRecord>>,
     mutation_gate: Mutex<()>,
 }
@@ -79,6 +81,7 @@ impl PcCustomEngine {
             initial_identity,
             profile_store,
             window_layout_store,
+            offscreen_window_rescue: crate::windows::OffscreenWindowRescueManager::new(),
             previews: Mutex::new(HashMap::new()),
             mutation_gate: Mutex::new(()),
         };
@@ -159,6 +162,63 @@ impl PcCustomEngine {
             ));
         }
         window_layout_store.replace(snapshot)
+    }
+
+    pub fn scan_offscreen_windows(
+        &self,
+        anchor_window: isize,
+    ) -> CoreResult<crate::windows::OffscreenWindowScan> {
+        let exclusions = self
+            .runtime_profile_store()?
+            .registered_game_file_identities()?;
+        self.offscreen_window_rescue
+            .scan(&exclusions, anchor_window)
+            .map_err(offscreen_window_rescue_error)
+    }
+
+    pub fn rescue_offscreen_window(
+        &self,
+        candidate_id: Uuid,
+        anchor_window: isize,
+    ) -> CoreResult<crate::windows::OffscreenWindowRescueOutcome> {
+        let _mutation_guard = self.mutation_gate.lock();
+        let _process_guard =
+            crate::windows::acquire_core_mutation_lock().map_err(core_mutation_lock_error)?;
+        self.ensure_offscreen_window_mutation_allowed()?;
+        let exclusions = self
+            .runtime_profile_store()?
+            .registered_game_file_identities()?;
+        self.offscreen_window_rescue
+            .rescue(candidate_id, &exclusions, anchor_window)
+            .map_err(offscreen_window_rescue_error)
+    }
+
+    pub fn rollback_offscreen_window(
+        &self,
+        undo_id: Uuid,
+    ) -> CoreResult<crate::windows::OffscreenWindowRescueOutcome> {
+        let _mutation_guard = self.mutation_gate.lock();
+        let _process_guard =
+            crate::windows::acquire_core_mutation_lock().map_err(core_mutation_lock_error)?;
+        // Re-check that the running OS instance still matches startup before touching the HWND.
+        // Rollback remains a separate one-window operation and never uses a saved layout.
+        let _identity = self.identity_for_commit()?;
+        let exclusions = self
+            .runtime_profile_store()?
+            .registered_game_file_identities()?;
+        self.offscreen_window_rescue
+            .rollback(undo_id, &exclusions)
+            .map_err(offscreen_window_rescue_error)
+    }
+
+    fn ensure_offscreen_window_mutation_allowed(&self) -> CoreResult<()> {
+        let _identity = self.identity_for_commit()?;
+        if self.bootstrap_status()?.mode != "ready" {
+            return Err(CoreError::recovery_required(
+                "このWindows環境では、新しいウィンドウ移動を開始できません。",
+            ));
+        }
+        Ok(())
     }
 
     pub fn create_profile(&self, request: CreateProfileRequest) -> CoreResult<StoredProfile> {
@@ -511,6 +571,7 @@ fn classify_action(
     context: &ActionContext<'_>,
     parameters: &ActionParameters,
     backup: &BackupEnvelope,
+    item_state: ItemState,
 ) -> RecoveryClassification {
     match action.verify_rolled_back(context, parameters, backup) {
         Ok(Verification { verified: true, .. }) => return RecoveryClassification::Original,
@@ -538,16 +599,11 @@ fn classify_action(
             }
             if parameters.action_id() == ActionId::InputShiftInterruptionGuard {
                 return match crate::actions::classify_recoverable_shift_guard(context, backup) {
-                    Ok(
-                        crate::actions::ShiftGuardTransactionState::Desired
-                        | crate::actions::ShiftGuardTransactionState::MixedOwned,
-                    ) => RecoveryClassification::Applied,
-                    Ok(crate::actions::ShiftGuardTransactionState::Original) => {
-                        RecoveryClassification::Original
-                    }
-                    Ok(crate::actions::ShiftGuardTransactionState::Third) => {
-                        RecoveryClassification::Third
-                    }
+                    Ok(state) => classify_shift_guard_recovery_state(
+                        state,
+                        item_state,
+                        backup.applied_fingerprint.is_some(),
+                    ),
                     Err(_) => RecoveryClassification::Unknown,
                 };
             }
@@ -559,6 +615,42 @@ fn classify_action(
             }
         }
         Err(_) => RecoveryClassification::Unknown,
+    }
+}
+
+fn classify_shift_guard_recovery_state(
+    state: crate::actions::ShiftGuardTransactionState,
+    item_state: ItemState,
+    applied_fingerprint_recorded: bool,
+) -> RecoveryClassification {
+    match state {
+        crate::actions::ShiftGuardTransactionState::Original => RecoveryClassification::Original,
+        crate::actions::ShiftGuardTransactionState::Desired => RecoveryClassification::Applied,
+        crate::actions::ShiftGuardTransactionState::MixedOwned
+            if item_state == ItemState::RollingBack
+                || (!applied_fingerprint_recorded
+                    && matches!(item_state, ItemState::Applying | ItemState::ApplyFailed)) =>
+        {
+            RecoveryClassification::Applied
+        }
+        crate::actions::ShiftGuardTransactionState::MixedOwned
+        | crate::actions::ShiftGuardTransactionState::Third => RecoveryClassification::Third,
+    }
+}
+
+fn rollback_action_from_persisted_state(
+    action: &'static dyn Action,
+    context: &ActionContext<'_>,
+    parameters: &ActionParameters,
+    backup: &BackupEnvelope,
+    item_state: ItemState,
+) -> ActionResult<RollbackEvidence> {
+    if parameters.action_id() == ActionId::InputShiftInterruptionGuard
+        && item_state == ItemState::RollingBack
+    {
+        crate::actions::rollback_recoverable_shift_guard(context, parameters, backup)
+    } else {
+        action.rollback(context, parameters, backup)
     }
 }
 
@@ -607,6 +699,38 @@ fn window_layout_windows_error(error: crate::windows::WindowsError) -> CoreError
         retryable,
         "ウィンドウ配置を安全に確認できませんでした。対象は変更していません。",
     )
+}
+
+fn offscreen_window_rescue_error(error: crate::windows::WindowsError) -> CoreError {
+    match error.kind {
+        crate::windows::WindowsErrorKind::ExternalConflict => CoreError::new(
+            "OFFSCREEN_WINDOW_CHANGED",
+            "WINDOW_RESCUE",
+            true,
+            "確認後に対象の状態が変わったため、ウィンドウを動かしませんでした。もう一度探してください。",
+        ),
+        crate::windows::WindowsErrorKind::AccessDenied => CoreError::new(
+            "OFFSCREEN_WINDOW_UNAVAILABLE",
+            "WINDOW_RESCUE",
+            false,
+            "このウィンドウは権限または応答状態のため、PCカスタムから動かせません。",
+        ),
+        crate::windows::WindowsErrorKind::RecoveryRequired => CoreError::recovery_required(
+            "ウィンドウ移動後の状態を確認できませんでした。対象アプリの位置を確認してください。",
+        ),
+        crate::windows::WindowsErrorKind::ResourceLimit => CoreError::new(
+            "OFFSCREEN_WINDOW_LIMIT",
+            "WINDOW_RESCUE",
+            true,
+            "対象が多いため、安全な上限内で処理できませんでした。",
+        ),
+        _ => CoreError::new(
+            "OFFSCREEN_WINDOW_API_FAILURE",
+            "WINDOW_RESCUE",
+            true,
+            "ウィンドウの状態を安全に確認できませんでした。対象は成功として扱われていません。",
+        ),
+    }
 }
 
 fn state_fingerprint(state: &DetectedState) -> CoreResult<Fingerprint> {

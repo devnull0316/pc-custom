@@ -5,8 +5,10 @@ use super::{WindowsError, WindowsErrorKind, WindowsResult};
 #[cfg(windows)]
 use windows::Win32::UI::{
     Accessibility::{
-        FILTERKEYS, SKF_CONFIRMHOTKEY, SKF_HOTKEYACTIVE, SKF_STICKYKEYSON, STICKYKEYS,
-        STICKYKEYS_FLAGS,
+        FILTERKEYS, SKF_CONFIRMHOTKEY, SKF_HOTKEYACTIVE, SKF_LALTLATCHED, SKF_LALTLOCKED,
+        SKF_LCTLLATCHED, SKF_LCTLLOCKED, SKF_LSHIFTLATCHED, SKF_LSHIFTLOCKED, SKF_RALTLATCHED,
+        SKF_RALTLOCKED, SKF_RCTLLATCHED, SKF_RCTLLOCKED, SKF_RSHIFTLATCHED, SKF_RSHIFTLOCKED,
+        SKF_STICKYKEYSON, STICKYKEYS, STICKYKEYS_FLAGS,
     },
     WindowsAndMessaging::{
         SystemParametersInfoW, FKF_CONFIRMHOTKEY, FKF_FILTERKEYSON, FKF_HOTKEYACTIVE,
@@ -16,14 +18,24 @@ use windows::Win32::UI::{
 };
 
 #[cfg(windows)]
-pub const STICKY_SHORTCUT_FLAGS: u32 = SKF_HOTKEYACTIVE.0 | SKF_CONFIRMHOTKEY.0;
+const STICKY_HOTKEY_ACTIVE: u32 = SKF_HOTKEYACTIVE.0;
 #[cfg(not(windows))]
-pub const STICKY_SHORTCUT_FLAGS: u32 = 0x0000_0004 | 0x0000_0008;
+const STICKY_HOTKEY_ACTIVE: u32 = 0x0000_0004;
+#[cfg(windows)]
+const STICKY_CONFIRM_HOTKEY: u32 = SKF_CONFIRMHOTKEY.0;
+#[cfg(not(windows))]
+const STICKY_CONFIRM_HOTKEY: u32 = 0x0000_0008;
+pub const STICKY_SHORTCUT_FLAGS: u32 = STICKY_HOTKEY_ACTIVE | STICKY_CONFIRM_HOTKEY;
 
 #[cfg(windows)]
-pub const FILTER_SHORTCUT_FLAGS: u32 = FKF_HOTKEYACTIVE | FKF_CONFIRMHOTKEY;
+const FILTER_HOTKEY_ACTIVE: u32 = FKF_HOTKEYACTIVE;
 #[cfg(not(windows))]
-pub const FILTER_SHORTCUT_FLAGS: u32 = 0x0000_0004 | 0x0000_0008;
+const FILTER_HOTKEY_ACTIVE: u32 = 0x0000_0004;
+#[cfg(windows)]
+const FILTER_CONFIRM_HOTKEY: u32 = FKF_CONFIRMHOTKEY;
+#[cfg(not(windows))]
+const FILTER_CONFIRM_HOTKEY: u32 = 0x0000_0008;
+pub const FILTER_SHORTCUT_FLAGS: u32 = FILTER_HOTKEY_ACTIVE | FILTER_CONFIRM_HOTKEY;
 
 #[cfg(windows)]
 const STICKY_FEATURE_ENABLED: u32 = SKF_STICKYKEYSON.0;
@@ -35,12 +47,48 @@ const FILTER_FEATURE_ENABLED: u32 = FKF_FILTERKEYSON;
 #[cfg(not(windows))]
 const FILTER_FEATURE_ENABLED: u32 = 0x0000_0001;
 
+#[cfg(windows)]
+const STICKY_TRANSIENT_STATE_FLAGS: u32 = SKF_LALTLATCHED.0
+    | SKF_LALTLOCKED.0
+    | SKF_LCTLLATCHED.0
+    | SKF_LCTLLOCKED.0
+    | SKF_LSHIFTLATCHED.0
+    | SKF_LSHIFTLOCKED.0
+    | SKF_RALTLATCHED.0
+    | SKF_RALTLOCKED.0
+    | SKF_RCTLLATCHED.0
+    | SKF_RCTLLOCKED.0
+    | SKF_RSHIFTLATCHED.0
+    | SKF_RSHIFTLOCKED.0;
+#[cfg(not(windows))]
+const STICKY_TRANSIENT_STATE_FLAGS: u32 = 0x3F3F_0000;
+
 pub const fn sticky_feature_is_enabled(settings: KeyboardAccessibilitySettings) -> bool {
     settings.sticky_flags & STICKY_FEATURE_ENABLED != 0
 }
 
+pub const fn sticky_shortcut_is_enabled(settings: KeyboardAccessibilitySettings) -> bool {
+    settings.sticky_flags & STICKY_HOTKEY_ACTIVE != 0
+}
+
+pub const fn sticky_confirmation_is_enabled(settings: KeyboardAccessibilitySettings) -> bool {
+    settings.sticky_flags & STICKY_CONFIRM_HOTKEY != 0
+}
+
+pub const fn sticky_transient_state_is_active(settings: KeyboardAccessibilitySettings) -> bool {
+    settings.sticky_flags & STICKY_TRANSIENT_STATE_FLAGS != 0
+}
+
 pub const fn filter_feature_is_enabled(settings: KeyboardAccessibilitySettings) -> bool {
     settings.filter_flags & FILTER_FEATURE_ENABLED != 0
+}
+
+pub const fn filter_shortcut_is_enabled(settings: KeyboardAccessibilitySettings) -> bool {
+    settings.filter_flags & FILTER_HOTKEY_ACTIVE != 0
+}
+
+pub const fn filter_confirmation_is_enabled(settings: KeyboardAccessibilitySettings) -> bool {
+    settings.filter_flags & FILTER_CONFIRM_HOTKEY != 0
 }
 
 pub const fn without_shift_shortcuts(
@@ -104,36 +152,224 @@ pub fn read_keyboard_accessibility_settings() -> WindowsResult<KeyboardAccessibi
     ))
 }
 
-/// Replaces both documented structures and compensates the first write if the
-/// second write fails. The caller is responsible for comparing an expected
-/// precondition immediately before invoking this primitive.
+/// Replaces both documented structures after re-reading the expected state.
+/// If the second write fails, compensation touches only values still matching
+/// the expected or desired transaction states.
 #[cfg(windows)]
 pub fn replace_keyboard_accessibility_settings(
+    expected: KeyboardAccessibilitySettings,
     desired: KeyboardAccessibilitySettings,
 ) -> WindowsResult<()> {
+    validate_structure_sizes(expected)?;
     validate_structure_sizes(desired)?;
     let before = read_keyboard_accessibility_settings()?;
-    set_sticky_settings(desired)?;
-    if let Err(filter_error) = set_filter_settings(desired) {
-        if let Err(compensation_error) = set_sticky_settings(before) {
-            return Err(WindowsError::new(
-                WindowsErrorKind::RecoveryRequired,
-                "compensate partial keyboard accessibility update",
-                compensation_error.os_code,
-            ));
+    if before != expected {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ExternalConflict,
+            "recheck keyboard accessibility settings before replacement",
+            None,
+        ));
+    }
+    let sticky_write_dispatched = !sticky_component_matches(expected, desired);
+    if sticky_write_dispatched {
+        if let Err(sticky_error) = set_sticky_settings(desired) {
+            compensate_owned_sticky_component(expected, desired)?;
+            return Err(sticky_error);
         }
+    }
+    let after_sticky = match read_keyboard_accessibility_settings() {
+        Ok(settings) => settings,
+        Err(read_error) => {
+            if sticky_write_dispatched {
+                compensate_owned_sticky_component(expected, desired)?;
+            }
+            return Err(read_error);
+        }
+    };
+    if !sticky_component_matches(after_sticky, desired)
+        || !filter_component_matches(after_sticky, expected)
+    {
+        if sticky_write_dispatched {
+            compensate_owned_sticky_component(expected, desired)?;
+        }
+        return Err(WindowsError::new(
+            WindowsErrorKind::ExternalConflict,
+            "recheck keyboard accessibility settings between replacements",
+            None,
+        ));
+    }
+    if filter_component_matches(expected, desired) {
+        return Ok(());
+    }
+    if let Err(filter_error) = set_filter_settings(desired) {
+        compensate_partial_replacement(expected, desired)?;
         return Err(filter_error);
+    }
+    let applied = match read_keyboard_accessibility_settings() {
+        Ok(settings) => settings,
+        Err(read_error) => {
+            compensate_partial_replacement(expected, desired)?;
+            return Err(read_error);
+        }
+    };
+    if applied != desired {
+        compensate_partial_replacement(expected, desired)?;
+        return Err(WindowsError::new(
+            WindowsErrorKind::ExternalConflict,
+            "verify keyboard accessibility settings after replacement",
+            None,
+        ));
     }
     Ok(())
 }
 
 #[cfg(not(windows))]
 pub fn replace_keyboard_accessibility_settings(
+    _expected: KeyboardAccessibilitySettings,
     _desired: KeyboardAccessibilitySettings,
 ) -> WindowsResult<()> {
     Err(WindowsError::unsupported(
         "replace keyboard accessibility shortcut settings",
     ))
+}
+
+#[cfg(windows)]
+fn compensate_owned_sticky_component(
+    expected: KeyboardAccessibilitySettings,
+    desired: KeyboardAccessibilitySettings,
+) -> WindowsResult<()> {
+    let current = read_keyboard_accessibility_settings().map_err(|error| {
+        recovery_required(
+            "read partial keyboard accessibility sticky update before compensation",
+            error.os_code,
+        )
+    })?;
+    if sticky_component_matches(current, expected) {
+        return Ok(());
+    }
+    if !sticky_component_matches(current, desired) {
+        return Err(recovery_required(
+            "refuse to compensate an externally changed sticky-key state",
+            None,
+        ));
+    }
+    set_sticky_settings(expected).map_err(|error| {
+        recovery_required(
+            "compensate partial keyboard accessibility sticky update",
+            error.os_code,
+        )
+    })?;
+    let restored = read_keyboard_accessibility_settings().map_err(|error| {
+        recovery_required(
+            "verify partial keyboard accessibility sticky compensation",
+            error.os_code,
+        )
+    })?;
+    if !sticky_component_matches(restored, expected) {
+        return Err(recovery_required(
+            "verify partial keyboard accessibility sticky compensation",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn compensate_owned_filter_component(
+    expected: KeyboardAccessibilitySettings,
+    desired: KeyboardAccessibilitySettings,
+) -> WindowsResult<()> {
+    let current = read_keyboard_accessibility_settings().map_err(|error| {
+        recovery_required(
+            "read partial keyboard accessibility filter update before compensation",
+            error.os_code,
+        )
+    })?;
+    if filter_component_matches(current, expected) {
+        return Ok(());
+    }
+    if !filter_component_matches(current, desired) {
+        return Err(recovery_required(
+            "refuse to compensate an externally changed filter-key state",
+            None,
+        ));
+    }
+    set_filter_settings(expected).map_err(|error| {
+        recovery_required(
+            "compensate partial keyboard accessibility filter update",
+            error.os_code,
+        )
+    })?;
+    let restored = read_keyboard_accessibility_settings().map_err(|error| {
+        recovery_required(
+            "verify partial keyboard accessibility filter compensation",
+            error.os_code,
+        )
+    })?;
+    if !filter_component_matches(restored, expected) {
+        return Err(recovery_required(
+            "verify partial keyboard accessibility filter compensation",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn compensate_partial_replacement(
+    expected: KeyboardAccessibilitySettings,
+    desired: KeyboardAccessibilitySettings,
+) -> WindowsResult<()> {
+    let filter_error = compensate_owned_filter_component(expected, desired).err();
+    let sticky_error = compensate_owned_sticky_component(expected, desired).err();
+    if let Some(error) = filter_error.or(sticky_error) {
+        return Err(error);
+    }
+
+    let restored = read_keyboard_accessibility_settings().map_err(|error| {
+        recovery_required("verify keyboard accessibility compensation", error.os_code)
+    })?;
+    if restored != expected {
+        return Err(recovery_required(
+            "verify keyboard accessibility compensation",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn components_are_transaction_owned(
+    current: KeyboardAccessibilitySettings,
+    expected: KeyboardAccessibilitySettings,
+    desired: KeyboardAccessibilitySettings,
+) -> bool {
+    (sticky_component_matches(current, expected) || sticky_component_matches(current, desired))
+        && (filter_component_matches(current, expected)
+            || filter_component_matches(current, desired))
+}
+
+fn sticky_component_matches(
+    current: KeyboardAccessibilitySettings,
+    expected: KeyboardAccessibilitySettings,
+) -> bool {
+    current.sticky_size == expected.sticky_size && current.sticky_flags == expected.sticky_flags
+}
+
+fn filter_component_matches(
+    current: KeyboardAccessibilitySettings,
+    expected: KeyboardAccessibilitySettings,
+) -> bool {
+    current.filter_size == expected.filter_size
+        && current.filter_flags == expected.filter_flags
+        && current.filter_wait_ms == expected.filter_wait_ms
+        && current.filter_delay_ms == expected.filter_delay_ms
+        && current.filter_repeat_ms == expected.filter_repeat_ms
+        && current.filter_bounce_ms == expected.filter_bounce_ms
+}
+
+const fn recovery_required(operation: &'static str, os_code: Option<i64>) -> WindowsError {
+    WindowsError::new(WindowsErrorKind::RecoveryRequired, operation, os_code)
 }
 
 #[cfg(windows)]
@@ -209,7 +445,7 @@ mod tests {
     fn sample() -> KeyboardAccessibilitySettings {
         KeyboardAccessibilitySettings {
             sticky_size: 8,
-            sticky_flags: 0xABCD_01FE,
+            sticky_flags: 0x0000_01FE,
             filter_size: 24,
             filter_flags: 0x0000_007E,
             filter_wait_ms: 100,
@@ -253,5 +489,37 @@ mod tests {
         assert!(filter_feature_is_enabled(before));
         assert!(sticky_feature_is_enabled(after));
         assert!(filter_feature_is_enabled(after));
+    }
+
+    #[test]
+    fn ignored_latch_and_lock_bits_are_detected_before_any_write() {
+        let mut settings = sample();
+        settings.sticky_flags |= STICKY_TRANSIENT_STATE_FLAGS;
+        assert!(sticky_transient_state_is_active(settings));
+        assert!(!sticky_transient_state_is_active(sample()));
+    }
+
+    #[test]
+    fn shortcut_and_confirmation_bits_are_observed_separately() {
+        let mut settings = sample();
+        settings.sticky_flags = STICKY_CONFIRM_HOTKEY;
+        settings.filter_flags = FILTER_HOTKEY_ACTIVE;
+
+        assert!(!sticky_shortcut_is_enabled(settings));
+        assert!(sticky_confirmation_is_enabled(settings));
+        assert!(filter_shortcut_is_enabled(settings));
+        assert!(!filter_confirmation_is_enabled(settings));
+    }
+
+    #[test]
+    fn transaction_components_accept_only_expected_or_desired_values() {
+        let expected = sample();
+        let desired = without_shift_shortcuts(expected);
+        let mut mixed = expected;
+        mixed.sticky_flags = desired.sticky_flags;
+        assert!(components_are_transaction_owned(mixed, expected, desired));
+
+        mixed.filter_wait_ms += 1;
+        assert!(!components_are_transaction_owned(mixed, expected, desired));
     }
 }

@@ -242,7 +242,9 @@ pub enum ObservedValue {
     },
     ShiftInterruptionGuard {
         shift_five_press_shortcut_enabled: bool,
+        shift_five_press_confirmation_enabled: bool,
         right_shift_hold_shortcut_enabled: bool,
+        right_shift_hold_confirmation_enabled: bool,
         input_assistance_in_use: bool,
     },
     ActivePowerScheme {

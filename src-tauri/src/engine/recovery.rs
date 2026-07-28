@@ -27,7 +27,7 @@ impl PcCustomEngine {
         }
         let context = action_context(&identity, item.transaction_id, item.item_id);
         let parameters = self.recovery_parameters(&item.parameters)?;
-        match classify_action(action, &context, &parameters, &item.backup) {
+        match classify_action(action, &context, &parameters, &item.backup, item.state) {
             RecoveryClassification::Original
                 if !needs_original_rollback_fence(parameters.action_id(), item.state) =>
             {
@@ -38,9 +38,14 @@ impl PcCustomEngine {
                 ensure_backup_mutation_allowed(&identity, action, &item.backup)?;
                 self.journal
                     .mark_item_rolling_back(item.transaction_id, item.item_id, now_ms())?;
-                let verification = action
-                    .rollback(&context, &parameters, &item.backup)
-                    .and_then(|_| action.verify_rolled_back(&context, &parameters, &item.backup));
+                let verification = rollback_action_from_persisted_state(
+                    action,
+                    &context,
+                    &parameters,
+                    &item.backup,
+                    item.state,
+                )
+                .and_then(|_| action.verify_rolled_back(&context, &parameters, &item.backup));
                 match verification {
                     Ok(Verification { verified: true, .. }) => {
                         self.journal.mark_item_rolled_back(
@@ -198,7 +203,8 @@ impl PcCustomEngine {
                         continue;
                     }
                 };
-                let classification = classify_action(action, &context, &parameters, &item.backup);
+                let classification =
+                    classify_action(action, &context, &parameters, &item.backup, item.state);
                 if item.state == ItemState::Prepared
                     && classification != RecoveryClassification::Original
                 {
@@ -253,11 +259,16 @@ impl PcCustomEngine {
                             item.item_id,
                             now_ms(),
                         )?;
-                        let result = action
-                            .rollback(&context, &parameters, &item.backup)
-                            .and_then(|_| {
-                                action.verify_rolled_back(&context, &parameters, &item.backup)
-                            });
+                        let result = rollback_action_from_persisted_state(
+                            action,
+                            &context,
+                            &parameters,
+                            &item.backup,
+                            item.state,
+                        )
+                        .and_then(|_| {
+                            action.verify_rolled_back(&context, &parameters, &item.backup)
+                        });
                         match result {
                             Ok(Verification { verified: true, .. }) => {
                                 self.journal.mark_item_rolled_back(

@@ -22,6 +22,9 @@ const MAX_ABSOLUTE_COORDINATE: i32 = 1_000_000;
 const DURABLE_PLACEMENT_FLAGS: u32 = 0x0001 | 0x0002;
 const WINDOW_RESPONSIVENESS_TIMEOUT_MS: u32 = 500;
 const WINDOW_INSTANCE_PROPERTY_NAME: &str = "PcCustom.WindowPlacement.Instance.v1.80f532c4";
+const MAX_CONNECTED_MONITORS: usize = 64;
+const MIN_VISIBLE_AREA_PERCENT: i64 = 10;
+const MAX_ACTIVE_WINDOW_RESCUES: usize = MAX_WINDOW_LAYOUT_ENTRIES;
 
 // Keep the pure eligibility checks available to unit tests on every target.
 const STYLE_POPUP: u32 = 0x8000_0000;
@@ -95,6 +98,569 @@ pub enum WindowLayoutTransactionState {
     Desired,
     MixedOwned,
     Third,
+}
+
+/// Why an off-screen window is shown but cannot be moved by this standard-user process.
+///
+/// These values are deliberately coarse. They give the UI an actionable reason without
+/// exposing a window title, HWND, PID, or other process details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OffscreenWindowBlockReason {
+    HigherIntegrity,
+    NotResponding,
+    AccessUnknown,
+    AlreadyRescued,
+}
+
+/// Privacy-safe list item. `candidate_id` is an in-memory opaque capability and contains no
+/// derivation from the title, executable path, HWND, or process identifier.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffscreenWindowCandidate {
+    pub candidate_id: uuid::Uuid,
+    pub application_label: String,
+    pub can_rescue: bool,
+    pub unavailable_reason: Option<OffscreenWindowBlockReason>,
+}
+
+/// One still-live rescue that can be rolled back to its exact pre-rescue placement.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffscreenWindowUndo {
+    pub undo_id: uuid::Uuid,
+    pub application_label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffscreenWindowScan {
+    pub candidates: Vec<OffscreenWindowCandidate>,
+    pub excluded_game_windows: u32,
+    pub skipped_windows: u32,
+    pub undo_items: Vec<OffscreenWindowUndo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffscreenWindowRescueOutcome {
+    pub undo_id: uuid::Uuid,
+    pub application_label: String,
+}
+
+#[derive(Clone)]
+struct ListedOffscreenWindow {
+    candidate: WindowCandidate,
+    original: SavedWindowPlacementEntry,
+    target_placement: SavedWindowPlacement,
+    target_work_area: WindowRect,
+    block_reason: Option<OffscreenWindowBlockReason>,
+}
+
+#[derive(Clone)]
+struct ActiveWindowRescue {
+    undo_id: uuid::Uuid,
+    candidate: WindowCandidate,
+    original: OriginalWindowPlacementEntry,
+    rescued: SavedWindowPlacementEntry,
+}
+
+#[derive(Default)]
+struct OffscreenWindowRescueState {
+    listed: std::collections::HashMap<uuid::Uuid, ListedOffscreenWindow>,
+    active: std::collections::HashMap<uuid::Uuid, ActiveWindowRescue>,
+}
+
+/// In-memory owner of opaque selection capabilities and exact rollback records.
+///
+/// Window titles remain inside this module. Every move and rollback revalidates the existing
+/// per-HWND random marker together with PID and process creation time before using the handle.
+#[derive(Default)]
+pub struct OffscreenWindowRescueManager {
+    state: parking_lot::Mutex<OffscreenWindowRescueState>,
+}
+
+impl OffscreenWindowRescueManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// List only windows with less than ten percent of their area in every connected monitor's
+    /// work area. The selected target monitor is the one containing PCカスタム's main window.
+    #[cfg(windows)]
+    pub fn scan(
+        &self,
+        excluded_game_file_identities: &[ProcessFileIdentity],
+        anchor_window: isize,
+    ) -> WindowsResult<OffscreenWindowScan> {
+        use uuid::Uuid;
+
+        let work_areas = connected_monitor_work_areas()?;
+        let target_work_area = work_area_for_window(anchor_window)?;
+        let report = enumerate_candidates(excluded_game_file_identities, false)?;
+        let mut skipped_windows = report.skipped_windows;
+        let mut labels = std::collections::HashMap::<String, u32>::new();
+        let mut state = self.state.lock();
+        state.listed.clear();
+        let mut candidates = Vec::new();
+
+        for mut candidate in report.candidates {
+            // Minimized windows are intentionally not called "lost": Windows normally places their
+            // live rectangles away from the desktop while retaining an on-screen restore rectangle.
+            if window_is_minimized(candidate.handle)
+                || !rect_is_offscreen(candidate.observed_rect, &work_areas)
+            {
+                continue;
+            }
+            if candidates.len() == MAX_WINDOW_LAYOUT_ENTRIES {
+                skipped_windows = skipped_windows.saturating_add(1);
+                continue;
+            }
+
+            let ordinal = labels
+                .entry(candidate.application_label.clone())
+                .and_modify(|value| *value = value.saturating_add(1))
+                .or_insert(1);
+            let application_label =
+                numbered_application_label(&candidate.application_label, *ordinal);
+            let original =
+                entry_from_candidate(&candidate, Uuid::new_v4(), application_label.clone());
+            let mut block_reason = match process_is_elevated(candidate.process_id) {
+                Ok(true) => Some(OffscreenWindowBlockReason::HigherIntegrity),
+                Ok(false) => None,
+                Err(_) => Some(OffscreenWindowBlockReason::AccessUnknown),
+            };
+
+            if block_reason.is_none() {
+                match attach_new_window_instance_marker(candidate.handle) {
+                    Ok(marker) => candidate.window_instance_marker = marker,
+                    Err(_) => block_reason = Some(OffscreenWindowBlockReason::AccessUnknown),
+                }
+            }
+            if block_reason.is_none() && probe_window_responsiveness(candidate.handle).is_err() {
+                block_reason = Some(OffscreenWindowBlockReason::NotResponding);
+            }
+            if block_reason.is_none()
+                && state.active.values().any(|active| {
+                    active.candidate.handle == candidate.handle
+                        && active.candidate.process_id == candidate.process_id
+                        && active.candidate.process_creation_time_100ns
+                            == candidate.process_creation_time_100ns
+                        && active.original.window_instance_marker
+                            == candidate.window_instance_marker
+                })
+            {
+                block_reason = Some(OffscreenWindowBlockReason::AlreadyRescued);
+            }
+
+            // `GetWindowRect` is in screen coordinates while `rcNormalPosition` can retain a
+            // workspace-coordinate offset. Compute the smallest screen-space translation first,
+            // then apply that same delta to the saved normal rectangle instead of assigning one
+            // coordinate space directly to the other.
+            let target_observed_rect = rescue_rect(candidate.observed_rect, target_work_area);
+            let delta_x = target_observed_rect
+                .left
+                .saturating_sub(candidate.observed_rect.left);
+            let delta_y = target_observed_rect
+                .top
+                .saturating_sub(candidate.observed_rect.top);
+            let target_normal_position =
+                translate_rect(candidate.placement.normal_position, delta_x, delta_y);
+            if target_normal_position.is_none() {
+                block_reason = Some(OffscreenWindowBlockReason::AccessUnknown);
+            }
+            let target_placement = SavedWindowPlacement {
+                normal_position: target_normal_position
+                    .unwrap_or(candidate.placement.normal_position),
+                ..candidate.placement
+            };
+            let candidate_id = Uuid::new_v4();
+            state.listed.insert(
+                candidate_id,
+                ListedOffscreenWindow {
+                    candidate,
+                    original,
+                    target_placement,
+                    target_work_area,
+                    block_reason,
+                },
+            );
+            candidates.push(OffscreenWindowCandidate {
+                candidate_id,
+                application_label,
+                can_rescue: block_reason.is_none(),
+                unavailable_reason: block_reason,
+            });
+        }
+
+        candidates.sort_by(|left, right| {
+            left.application_label
+                .cmp(&right.application_label)
+                .then_with(|| left.candidate_id.cmp(&right.candidate_id))
+        });
+        let mut undo_items = state
+            .active
+            .values()
+            .map(|active| OffscreenWindowUndo {
+                undo_id: active.undo_id,
+                application_label: active.original.saved.application_label.clone(),
+            })
+            .collect::<Vec<_>>();
+        undo_items.sort_by(|left, right| {
+            left.application_label
+                .cmp(&right.application_label)
+                .then_with(|| left.undo_id.cmp(&right.undo_id))
+        });
+        Ok(OffscreenWindowScan {
+            candidates,
+            excluded_game_windows: report.excluded_game_windows,
+            skipped_windows,
+            undo_items,
+        })
+    }
+
+    #[cfg(not(windows))]
+    pub fn scan(
+        &self,
+        _excluded_game_file_identities: &[ProcessFileIdentity],
+        _anchor_window: isize,
+    ) -> WindowsResult<OffscreenWindowScan> {
+        Err(WindowsError::unsupported("scan off-screen windows"))
+    }
+
+    /// Move exactly one backend-issued candidate to the work area containing `anchor_window`.
+    #[cfg(windows)]
+    pub fn rescue(
+        &self,
+        candidate_id: uuid::Uuid,
+        excluded_game_file_identities: &[ProcessFileIdentity],
+        anchor_window: isize,
+    ) -> WindowsResult<OffscreenWindowRescueOutcome> {
+        let listed = self
+            .state
+            .lock()
+            .listed
+            .get(&candidate_id)
+            .cloned()
+            .ok_or_else(|| {
+                WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "resolve opaque off-screen window candidate",
+                    None,
+                )
+            })?;
+        if listed.block_reason.is_some() {
+            return Err(WindowsError::new(
+                WindowsErrorKind::AccessDenied,
+                "reject unavailable off-screen window candidate",
+                None,
+            ));
+        }
+        if self.state.lock().active.len() >= MAX_ACTIVE_WINDOW_RESCUES {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ResourceLimit,
+                "bound active off-screen window rescues",
+                None,
+            ));
+        }
+        if work_area_for_window(anchor_window)? != listed.target_work_area {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ExternalConflict,
+                "current screen changed after off-screen window scan",
+                None,
+            ));
+        }
+        let work_areas = connected_monitor_work_areas()?;
+        let current = refresh_marked_candidate(
+            &listed.candidate,
+            listed.candidate.window_instance_marker,
+            excluded_game_file_identities,
+            false,
+        )?
+        .ok_or_else(|| {
+            WindowsError::new(
+                WindowsErrorKind::ExternalConflict,
+                "off-screen window changed after scan",
+                None,
+            )
+        })?;
+        if !candidate_matches_saved(&current, &listed.original)
+            || !rect_is_offscreen(current.observed_rect, &work_areas)
+        {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ExternalConflict,
+                "off-screen window geometry changed after scan",
+                None,
+            ));
+        }
+
+        let original = OriginalWindowPlacementEntry {
+            saved: listed.original.clone(),
+            window_handle_token: current.handle as i64,
+            process_id: current.process_id,
+            process_creation_time_100ns: current.process_creation_time_100ns,
+            window_instance_marker: current.window_instance_marker,
+        };
+        if let Err(error) = set_saved_placement(
+            current.handle,
+            original.window_instance_marker,
+            listed.target_placement,
+        ) {
+            return rescue_error_after_compensation(
+                error,
+                &listed,
+                &original,
+                excluded_game_file_identities,
+            );
+        }
+
+        let rescued_candidate =
+            wait_for_rescued_candidate(&listed, &original, excluded_game_file_identities)?;
+        let Some(rescued_candidate) = rescued_candidate else {
+            return rescue_error_after_compensation(
+                WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "verify rescued window placement",
+                    None,
+                ),
+                &listed,
+                &original,
+                excluded_game_file_identities,
+            );
+        };
+        let rescued = SavedWindowPlacementEntry {
+            entry_id: listed.original.entry_id,
+            process_file_identity: listed.original.process_file_identity,
+            application_label: listed.original.application_label.clone(),
+            class_name: listed.original.class_name.clone(),
+            title: listed.original.title.clone(),
+            placement: rescued_candidate.placement,
+            observed_rect: rescued_candidate.observed_rect,
+        };
+        let undo_id = uuid::Uuid::new_v4();
+        let active = ActiveWindowRescue {
+            undo_id,
+            candidate: rescued_candidate,
+            original,
+            rescued,
+        };
+        let mut state = self.state.lock();
+        state.listed.remove(&candidate_id);
+        state.active.insert(undo_id, active);
+        Ok(OffscreenWindowRescueOutcome {
+            undo_id,
+            application_label: listed.original.application_label,
+        })
+    }
+
+    #[cfg(not(windows))]
+    pub fn rescue(
+        &self,
+        _candidate_id: uuid::Uuid,
+        _excluded_game_file_identities: &[ProcessFileIdentity],
+        _anchor_window: isize,
+    ) -> WindowsResult<OffscreenWindowRescueOutcome> {
+        Err(WindowsError::unsupported("rescue off-screen window"))
+    }
+
+    /// Roll back one rescue only if the exact marked window is still at PCカスタム's rescued
+    /// placement. A replacement HWND or a third-party move is never overwritten.
+    #[cfg(windows)]
+    pub fn rollback(
+        &self,
+        undo_id: uuid::Uuid,
+        excluded_game_file_identities: &[ProcessFileIdentity],
+    ) -> WindowsResult<OffscreenWindowRescueOutcome> {
+        let active = self
+            .state
+            .lock()
+            .active
+            .get(&undo_id)
+            .cloned()
+            .ok_or_else(|| {
+                WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "resolve opaque off-screen window undo",
+                    None,
+                )
+            })?;
+        let current = refresh_marked_candidate(
+            &active.candidate,
+            active.original.window_instance_marker,
+            excluded_game_file_identities,
+            false,
+        )?
+        .ok_or_else(|| {
+            WindowsError::new(
+                WindowsErrorKind::ExternalConflict,
+                "resolve exact rescued window instance",
+                None,
+            )
+        })?;
+        if !candidate_matches_saved(&current, &active.rescued) {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ExternalConflict,
+                "rescued window has an external third placement",
+                None,
+            ));
+        }
+        restore_exact_saved_placement(
+            current.handle,
+            active.original.window_instance_marker,
+            active.original.saved.placement,
+            active.original.saved.observed_rect,
+        )?;
+        if !wait_for_saved_candidate(
+            &active.candidate,
+            &active.original.saved,
+            active.original.window_instance_marker,
+            excluded_game_file_identities,
+        ) {
+            return Err(WindowsError::new(
+                WindowsErrorKind::RecoveryRequired,
+                "verify off-screen window rescue rollback",
+                None,
+            ));
+        }
+        self.state.lock().active.remove(&undo_id);
+        Ok(OffscreenWindowRescueOutcome {
+            undo_id,
+            application_label: active.original.saved.application_label,
+        })
+    }
+
+    #[cfg(not(windows))]
+    pub fn rollback(
+        &self,
+        _undo_id: uuid::Uuid,
+        _excluded_game_file_identities: &[ProcessFileIdentity],
+    ) -> WindowsResult<OffscreenWindowRescueOutcome> {
+        Err(WindowsError::unsupported(
+            "roll back off-screen window rescue",
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_rescued_candidate(
+    listed: &ListedOffscreenWindow,
+    original: &OriginalWindowPlacementEntry,
+    excluded_game_file_identities: &[ProcessFileIdentity],
+) -> WindowsResult<Option<WindowCandidate>> {
+    use std::{
+        thread::sleep,
+        time::{Duration, Instant},
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(current) = refresh_marked_candidate(
+            &listed.candidate,
+            original.window_instance_marker,
+            excluded_game_file_identities,
+            false,
+        )? {
+            let work_areas = connected_monitor_work_areas()?;
+            if placement_matches(listed.target_placement, current.placement)
+                && !rect_is_offscreen(current.observed_rect, &work_areas)
+            {
+                return Ok(Some(current));
+            }
+        }
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+        sleep(Duration::from_millis(40));
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_saved_candidate(
+    candidate: &WindowCandidate,
+    saved: &SavedWindowPlacementEntry,
+    window_instance_marker: u64,
+    excluded_game_file_identities: &[ProcessFileIdentity],
+) -> bool {
+    use std::{
+        thread::sleep,
+        time::{Duration, Instant},
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let verified = matches!(
+            refresh_marked_candidate(
+                candidate,
+                window_instance_marker,
+                excluded_game_file_identities,
+                false,
+            ),
+            Ok(Some(current)) if candidate_matches_saved(&current, saved)
+        );
+        if verified {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        sleep(Duration::from_millis(40));
+    }
+}
+
+#[cfg(windows)]
+fn rescue_error_after_compensation(
+    error: WindowsError,
+    listed: &ListedOffscreenWindow,
+    original: &OriginalWindowPlacementEntry,
+    excluded_game_file_identities: &[ProcessFileIdentity],
+) -> WindowsResult<OffscreenWindowRescueOutcome> {
+    if compensate_single_rescue(listed, original, excluded_game_file_identities) {
+        Err(error)
+    } else {
+        Err(WindowsError::new(
+            WindowsErrorKind::RecoveryRequired,
+            "compensate off-screen window rescue",
+            error.os_code,
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn compensate_single_rescue(
+    listed: &ListedOffscreenWindow,
+    original: &OriginalWindowPlacementEntry,
+    excluded_game_file_identities: &[ProcessFileIdentity],
+) -> bool {
+    let Ok(Some(current)) = refresh_marked_candidate(
+        &listed.candidate,
+        original.window_instance_marker,
+        excluded_game_file_identities,
+        false,
+    ) else {
+        return false;
+    };
+    let at_original = candidate_matches_saved(&current, &original.saved);
+    let at_rescue_destination = placement_matches(listed.target_placement, current.placement);
+    if !at_original && !at_rescue_destination {
+        // A third party moved this exact window after our dispatch. Never overwrite that state.
+        return false;
+    }
+    if restore_exact_saved_placement(
+        current.handle,
+        original.window_instance_marker,
+        original.saved.placement,
+        original.saved.observed_rect,
+    )
+    .is_err()
+    {
+        return false;
+    }
+    wait_for_saved_candidate(
+        &listed.candidate,
+        &original.saved,
+        original.window_instance_marker,
+        excluded_game_file_identities,
+    )
 }
 
 /// Capture the current placement of eligible, non-game top-level application windows.
@@ -1297,6 +1863,29 @@ fn refresh_candidate(
     excluded_game_file_identities: &[ProcessFileIdentity],
     include_own_process_for_test: bool,
 ) -> WindowsResult<Option<WindowCandidate>> {
+    Ok(refresh_marked_candidate(
+        candidate,
+        window_instance_marker,
+        excluded_game_file_identities,
+        include_own_process_for_test,
+    )?
+    .filter(|value| candidate_key_matches_entry(value, desired)))
+}
+
+/// Re-read one exact marked HWND without relying on its mutable title.
+///
+/// The saved-layout matcher still requires a title because it may need to choose among several
+/// windows owned by one process. An off-screen rescue already attached a random property to the
+/// selected HWND before exposing its opaque ID, so PID + creation time + HWND + marker is the
+/// stronger identity. Keeping title out of this revalidation also lets a browser tab or document
+/// title change without destroying the user's ability to undo the rescue.
+#[cfg(windows)]
+fn refresh_marked_candidate(
+    candidate: &WindowCandidate,
+    window_instance_marker: u64,
+    excluded_game_file_identities: &[ProcessFileIdentity],
+    include_own_process_for_test: bool,
+) -> WindowsResult<Option<WindowCandidate>> {
     use std::collections::HashMap;
 
     #[cfg(all(test, windows))]
@@ -1328,7 +1917,8 @@ fn refresh_candidate(
     );
     Ok(match current {
         CandidateRead::Included(mut value)
-            if candidate_key_matches_entry(&value, desired)
+            if value.process_file_identity == candidate.process_file_identity
+                && value.class_name == candidate.class_name
                 && value.process_id == candidate.process_id
                 && value.process_creation_time_100ns == candidate.process_creation_time_100ns
                 && window_instance_marker_matches(value.handle, window_instance_marker) =>
@@ -1392,26 +1982,15 @@ fn read_placement_and_rect(handle: isize) -> WindowsResult<(SavedWindowPlacement
 }
 
 #[cfg(windows)]
-fn set_saved_placement(
-    handle: isize,
-    window_instance_marker: u64,
-    saved: SavedWindowPlacement,
-) -> WindowsResult<()> {
+fn probe_window_responsiveness(handle: isize) -> WindowsResult<()> {
     use windows::Win32::{
-        Foundation::{GetLastError, HWND, LPARAM, POINT, RECT, WPARAM},
+        Foundation::{GetLastError, HWND, LPARAM, WPARAM},
         UI::WindowsAndMessaging::{
-            SendMessageTimeoutW, SetWindowPlacement, SEND_MESSAGE_TIMEOUT_FLAGS, SMTO_ABORTIFHUNG,
-            SMTO_BLOCK, SMTO_ERRORONEXIT, WINDOWPLACEMENT, WINDOWPLACEMENT_FLAGS, WM_NULL,
+            SendMessageTimeoutW, SEND_MESSAGE_TIMEOUT_FLAGS, SMTO_ABORTIFHUNG, SMTO_BLOCK,
+            SMTO_ERRORONEXIT, WM_NULL,
         },
     };
 
-    if !placement_is_valid(saved) {
-        return Err(WindowsError::new(
-            WindowsErrorKind::InvalidData,
-            "validate SetWindowPlacement input",
-            None,
-        ));
-    }
     let window = HWND(handle as *mut core::ffi::c_void);
     let mut message_result = 0usize;
     unsafe { windows::Win32::Foundation::SetLastError(Default::default()) };
@@ -1430,7 +2009,7 @@ fn set_saved_placement(
         let error = unsafe { GetLastError() };
         return Err(WindowsError::new(
             WindowsErrorKind::ApiFailure,
-            "window responsiveness probe before SetWindowPlacement",
+            "window responsiveness probe before placement change",
             if error.0 == 0 {
                 None
             } else {
@@ -1438,6 +2017,29 @@ fn set_saved_placement(
             },
         ));
     }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn set_saved_placement(
+    handle: isize,
+    window_instance_marker: u64,
+    saved: SavedWindowPlacement,
+) -> WindowsResult<()> {
+    use windows::Win32::{
+        Foundation::{HWND, POINT, RECT},
+        UI::WindowsAndMessaging::{SetWindowPlacement, WINDOWPLACEMENT, WINDOWPLACEMENT_FLAGS},
+    };
+
+    if !placement_is_valid(saved) {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate SetWindowPlacement input",
+            None,
+        ));
+    }
+    let window = HWND(handle as *mut core::ffi::c_void);
+    probe_window_responsiveness(handle)?;
     if !window_instance_marker_matches(handle, window_instance_marker) {
         return Err(WindowsError::new(
             WindowsErrorKind::InvalidData,
@@ -1474,6 +2076,71 @@ fn set_saved_placement(
         WindowsError::new(
             WindowsErrorKind::ApiFailure,
             "SetWindowPlacement",
+            Some(i64::from(error.code().0)),
+        )
+    })
+}
+
+/// Restore both documented placement state and the exact observed rectangle.
+///
+/// Windows may clamp an entirely off-screen `rcNormalPosition` passed to
+/// `SetWindowPlacement` back onto a monitor. Rollback still starts with the
+/// existing placement path so flags, show state, responsiveness probing, and
+/// HWND-instance validation are preserved. When Windows applies that safety
+/// clamp, one marker-guarded `SetWindowPos` supplies only the missing exact
+/// rectangle; the caller then re-reads both representations before accepting
+/// the rollback.
+#[cfg(windows)]
+fn restore_exact_saved_placement(
+    handle: isize,
+    window_instance_marker: u64,
+    saved: SavedWindowPlacement,
+    observed_rect: WindowRect,
+) -> WindowsResult<()> {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER},
+    };
+
+    if !rect_is_valid(observed_rect) {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate exact window rectangle restoration input",
+            None,
+        ));
+    }
+    set_saved_placement(handle, window_instance_marker, saved)?;
+    if read_placement_and_rect(handle)
+        .is_ok_and(|(_, current_rect)| rect_matches(observed_rect, current_rect))
+    {
+        return Ok(());
+    }
+
+    // Reuse the same bounded liveness check, then close its race with the same
+    // per-HWND random marker immediately before the fallback write.
+    probe_window_responsiveness(handle)?;
+    if !window_instance_marker_matches(handle, window_instance_marker) {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "revalidate exact window instance before rectangle restoration",
+            None,
+        ));
+    }
+    unsafe {
+        SetWindowPos(
+            HWND(handle as *mut core::ffi::c_void),
+            HWND::default(),
+            observed_rect.left,
+            observed_rect.top,
+            observed_rect.width(),
+            observed_rect.height(),
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    }
+    .map_err(|error| {
+        WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "SetWindowPos for exact window rectangle restoration",
             Some(i64::from(error.code().0)),
         )
     })
@@ -1848,6 +2515,323 @@ fn numbered_application_label(base: &str, ordinal: u32) -> String {
     result
 }
 
+/// Enumerate every connected monitor's work area instead of using a nearest-monitor fallback.
+///
+/// `MonitorFromWindow(..., MONITOR_DEFAULTTONEAREST)` deliberately returns a monitor even for a
+/// completely detached rectangle, which would make a lost window look visible. Work areas also
+/// exclude taskbars and app bars. We compute the union of all intersections, so a window spanning
+/// two screens counts all genuinely visible pixels while mirrored/overlapping monitor rectangles
+/// cannot count the same pixels twice.
+#[cfg(windows)]
+fn connected_monitor_work_areas() -> WindowsResult<Vec<WindowRect>> {
+    use windows::Win32::{
+        Foundation::{BOOL, FALSE, LPARAM, TRUE},
+        Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO},
+    };
+
+    struct MonitorEnumeration {
+        work_areas: Vec<WindowRect>,
+        overflow: bool,
+        failed: bool,
+    }
+
+    unsafe extern "system" fn callback(
+        monitor: HMONITOR,
+        _device_context: HDC,
+        _monitor_rect: *mut windows::Win32::Foundation::RECT,
+        parameter: LPARAM,
+    ) -> BOOL {
+        let enumeration = &mut *(parameter.0 as *mut MonitorEnumeration);
+        if enumeration.work_areas.len() == MAX_CONNECTED_MONITORS {
+            enumeration.overflow = true;
+            return FALSE;
+        }
+        let mut information = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(monitor, &mut information).as_bool() {
+            enumeration.failed = true;
+            return FALSE;
+        }
+        let work_area = rect_from_win32(information.rcWork);
+        if !rect_is_valid(work_area) {
+            enumeration.failed = true;
+            return FALSE;
+        }
+        if !enumeration.work_areas.contains(&work_area) {
+            enumeration.work_areas.push(work_area);
+        }
+        TRUE
+    }
+
+    let mut enumeration = MonitorEnumeration {
+        work_areas: Vec::new(),
+        overflow: false,
+        failed: false,
+    };
+    let completed = unsafe {
+        EnumDisplayMonitors(
+            HDC::default(),
+            None,
+            Some(callback),
+            LPARAM(&mut enumeration as *mut MonitorEnumeration as isize),
+        )
+    };
+    if enumeration.overflow {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ResourceLimit,
+            "bound connected monitor enumeration",
+            None,
+        ));
+    }
+    if enumeration.failed || !completed.as_bool() || enumeration.work_areas.is_empty() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "enumerate connected monitor work areas",
+            None,
+        ));
+    }
+    Ok(enumeration.work_areas)
+}
+
+#[cfg(windows)]
+fn work_area_for_window(handle: isize) -> WindowsResult<WindowRect> {
+    use windows::Win32::{
+        Foundation::HWND,
+        Graphics::Gdi::{
+            GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        },
+    };
+
+    if handle == 0 {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate current-screen anchor window",
+            None,
+        ));
+    }
+    let monitor = unsafe {
+        MonitorFromWindow(
+            HWND(handle as *mut core::ffi::c_void),
+            MONITOR_DEFAULTTONEAREST,
+        )
+    };
+    if monitor.0.is_null() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "find current screen for window rescue",
+            None,
+        ));
+    }
+    let mut information = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !unsafe { GetMonitorInfoW(monitor, &mut information) }.as_bool() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "read current screen work area",
+            None,
+        ));
+    }
+    let work_area = rect_from_win32(information.rcWork);
+    if !rect_is_valid(work_area) {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate current screen work area",
+            None,
+        ));
+    }
+    Ok(work_area)
+}
+
+#[cfg(windows)]
+fn window_is_minimized(handle: isize) -> bool {
+    use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::IsIconic};
+
+    unsafe { IsIconic(HWND(handle as *mut core::ffi::c_void)) }.as_bool()
+}
+
+#[cfg(windows)]
+struct PlacementOwnedHandle(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for PlacementOwnedHandle {
+    fn drop(&mut self) {
+        let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
+#[cfg(windows)]
+fn process_is_elevated(process_id: u32) -> WindowsResult<bool> {
+    use windows::Win32::{
+        Foundation::{ERROR_ACCESS_DENIED, HANDLE},
+        Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+        System::Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+
+    let process = PlacementOwnedHandle(
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }.map_err(
+            |error| {
+                WindowsError::new(
+                    if error.code() == windows::core::HRESULT::from_win32(ERROR_ACCESS_DENIED.0) {
+                        WindowsErrorKind::AccessDenied
+                    } else {
+                        WindowsErrorKind::ApiFailure
+                    },
+                    "open process for elevation check",
+                    Some(i64::from(error.code().0)),
+                )
+            },
+        )?,
+    );
+    let mut raw_token = HANDLE::default();
+    unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &mut raw_token) }.map_err(|error| {
+        WindowsError::new(
+            if error.code() == windows::core::HRESULT::from_win32(ERROR_ACCESS_DENIED.0) {
+                WindowsErrorKind::AccessDenied
+            } else {
+                WindowsErrorKind::ApiFailure
+            },
+            "open process token for elevation check",
+            Some(i64::from(error.code().0)),
+        )
+    })?;
+    let token = PlacementOwnedHandle(raw_token);
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut returned = 0u32;
+    unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenElevation,
+            Some((&mut elevation as *mut TOKEN_ELEVATION).cast()),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+    }
+    .map_err(|error| {
+        WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "read process elevation",
+            Some(i64::from(error.code().0)),
+        )
+    })?;
+    if returned < std::mem::size_of::<TOKEN_ELEVATION>() as u32 {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate process elevation result",
+            None,
+        ));
+    }
+    Ok(elevation.TokenIsElevated != 0)
+}
+
+fn rect_is_offscreen(window: WindowRect, work_areas: &[WindowRect]) -> bool {
+    let total_area = rect_area(window);
+    if total_area <= 0 {
+        return true;
+    }
+    let intersections = work_areas
+        .iter()
+        .copied()
+        .filter_map(|work_area| intersection_rect(window, work_area))
+        .collect::<Vec<_>>();
+    union_area(&intersections).saturating_mul(100)
+        < total_area.saturating_mul(MIN_VISIBLE_AREA_PERCENT)
+}
+
+fn rect_area(rect: WindowRect) -> i64 {
+    i64::from(rect.width()).saturating_mul(i64::from(rect.height()))
+}
+
+fn intersection_rect(left: WindowRect, right: WindowRect) -> Option<WindowRect> {
+    let intersection = WindowRect {
+        left: left.left.max(right.left),
+        top: left.top.max(right.top),
+        right: left.right.min(right.right),
+        bottom: left.bottom.min(right.bottom),
+    };
+    (intersection.right > intersection.left && intersection.bottom > intersection.top)
+        .then_some(intersection)
+}
+
+fn union_area(rectangles: &[WindowRect]) -> i64 {
+    let mut x_boundaries = rectangles
+        .iter()
+        .flat_map(|rect| [rect.left, rect.right])
+        .collect::<Vec<_>>();
+    x_boundaries.sort_unstable();
+    x_boundaries.dedup();
+    let mut area = 0i64;
+    for pair in x_boundaries.windows(2) {
+        let left = pair[0];
+        let right = pair[1];
+        if right <= left {
+            continue;
+        }
+        let mut intervals = rectangles
+            .iter()
+            .filter(|rect| rect.left < right && rect.right > left)
+            .map(|rect| (rect.top, rect.bottom))
+            .collect::<Vec<_>>();
+        intervals.sort_unstable();
+        let mut visible_height = 0i64;
+        let mut current: Option<(i32, i32)> = None;
+        for (top, bottom) in intervals {
+            current = match current {
+                None => Some((top, bottom)),
+                Some((current_top, current_bottom)) if top <= current_bottom => {
+                    Some((current_top, current_bottom.max(bottom)))
+                }
+                Some((current_top, current_bottom)) => {
+                    visible_height = visible_height
+                        .saturating_add(i64::from(current_bottom.saturating_sub(current_top)));
+                    Some((top, bottom))
+                }
+            };
+        }
+        if let Some((top, bottom)) = current {
+            visible_height = visible_height.saturating_add(i64::from(bottom.saturating_sub(top)));
+        }
+        area = area
+            .saturating_add(i64::from(right.saturating_sub(left)).saturating_mul(visible_height));
+    }
+    area
+}
+
+fn rescue_rect(window: WindowRect, work_area: WindowRect) -> WindowRect {
+    let width = window.width();
+    let height = window.height();
+    let left = clamp_window_axis(window.left, width, work_area.left, work_area.right);
+    let top = clamp_window_axis(window.top, height, work_area.top, work_area.bottom);
+    WindowRect {
+        left,
+        top,
+        right: left.saturating_add(width),
+        bottom: top.saturating_add(height),
+    }
+}
+
+fn clamp_window_axis(start: i32, size: i32, work_start: i32, work_end: i32) -> i32 {
+    let latest_start = work_end.saturating_sub(size);
+    if latest_start < work_start {
+        work_start
+    } else {
+        start.clamp(work_start, latest_start)
+    }
+}
+
+fn translate_rect(rect: WindowRect, delta_x: i32, delta_y: i32) -> Option<WindowRect> {
+    let translated = WindowRect {
+        left: rect.left.checked_add(delta_x)?,
+        top: rect.top.checked_add(delta_y)?,
+        right: rect.right.checked_add(delta_x)?,
+        bottom: rect.bottom.checked_add(delta_y)?,
+    };
+    rect_is_valid(translated).then_some(translated)
+}
+
 fn is_standard_app_style(style: u32, extended_style: u32) -> bool {
     style & STYLE_CAPTION == STYLE_CAPTION
         && style & STYLE_SYSTEM_MENU == STYLE_SYSTEM_MENU
@@ -2043,6 +3027,96 @@ mod tests {
             "a standard maximized window must remain eligible for showCmd round-trip"
         );
         assert!(exclude_monitor_filling_window(1, monitor, monitor));
+    }
+
+    #[test]
+    fn offscreen_detection_uses_the_union_of_work_areas_and_an_exact_ten_percent_boundary() {
+        let first = WindowRect {
+            left: 0,
+            top: 0,
+            right: 1_000,
+            bottom: 1_000,
+        };
+        let second = WindowRect {
+            left: 1_100,
+            top: 0,
+            right: 2_100,
+            bottom: 1_000,
+        };
+        let nine_percent_visible = WindowRect {
+            left: 991,
+            top: 100,
+            right: 1_091,
+            bottom: 200,
+        };
+        let exactly_ten_percent_visible = WindowRect {
+            left: 990,
+            top: 100,
+            right: 1_090,
+            bottom: 200,
+        };
+        assert!(rect_is_offscreen(nine_percent_visible, &[first]));
+        assert!(!rect_is_offscreen(exactly_ten_percent_visible, &[first]));
+
+        let nearby_second = WindowRect {
+            left: 1_088,
+            top: 0,
+            right: 2_088,
+            bottom: 1_000,
+        };
+        let six_percent_on_each_screen = WindowRect {
+            left: 994,
+            top: 100,
+            right: 1_094,
+            bottom: 200,
+        };
+        assert!(
+            !rect_is_offscreen(six_percent_on_each_screen, &[first, nearby_second]),
+            "visible pieces on separate monitors must be added"
+        );
+        assert_eq!(
+            union_area(&[first, first]),
+            rect_area(first),
+            "mirrored work areas must not double-count visible pixels"
+        );
+        assert!(rect_is_offscreen(
+            WindowRect {
+                left: -50_000,
+                top: -40_000,
+                right: -49_500,
+                bottom: -39_700,
+            },
+            &[first, second],
+        ));
+    }
+
+    #[test]
+    fn rescue_translation_preserves_size_and_moves_only_as_far_as_needed() {
+        let work_area = WindowRect {
+            left: 0,
+            top: 0,
+            right: 1_920,
+            bottom: 1_032,
+        };
+        let lost = WindowRect {
+            left: -8_000,
+            top: 200,
+            right: -7_480,
+            bottom: 560,
+        };
+        let rescued = rescue_rect(lost, work_area);
+        assert_eq!(
+            rescued,
+            WindowRect {
+                left: 0,
+                top: 200,
+                right: 520,
+                bottom: 560,
+            }
+        );
+        assert_eq!(rescued.width(), lost.width());
+        assert_eq!(rescued.height(), lost.height());
+        assert!(!rect_is_offscreen(rescued, &[work_area]));
     }
 
     #[test]
@@ -2242,6 +3316,10 @@ mod tests {
     #[cfg(windows)]
     impl OwnedTestWindow {
         fn create(title: &windows::core::HSTRING) -> Self {
+            Self::create_at(title, 120, 140)
+        }
+
+        fn create_at(title: &windows::core::HSTRING, left: i32, top: i32) -> Self {
             use windows::Win32::{
                 Foundation::{HINSTANCE, HWND},
                 UI::WindowsAndMessaging::{
@@ -2254,8 +3332,8 @@ mod tests {
                     windows::core::w!("STATIC"),
                     title,
                     WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                    120,
-                    140,
+                    left,
+                    top,
                     520,
                     360,
                     HWND::default(),
@@ -2361,6 +3439,151 @@ mod tests {
             read_candidate(owned.handle(), &identities, &[], process_id, true),
             CandidateRead::Skipped
         ));
+    }
+
+    /// Creates, moves, rescues, and rolls back only a window owned by this test process.
+    /// Every other process identity is passed through the existing game-exclusion boundary before
+    /// any title read, so the test never selects or moves a user's window.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "real-machine off-screen detection, one-window rescue, and exact rollback smoke"]
+    fn owned_offscreen_window_is_rescued_and_rolled_back_with_external_rect_evidence() {
+        use std::{collections::HashSet, thread::sleep, time::Duration};
+        use windows::Win32::{
+            Foundation::HWND,
+            UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER},
+        };
+
+        let _own_window_scope = allow_own_window_candidates_for_test();
+        let anchor_title =
+            windows::core::HSTRING::from(format!("totonoe-rescue-anchor-{}", Uuid::new_v4()));
+        let target_title =
+            windows::core::HSTRING::from(format!("totonoe-rescue-target-{}", Uuid::new_v4()));
+        let anchor = OwnedTestWindow::create_at(&anchor_title, 80, 90);
+        let target = OwnedTestWindow::create_at(&target_title, 260, 220);
+        sleep(Duration::from_millis(150));
+
+        let (_, before) =
+            read_placement_and_rect(target.handle()).expect("read owned window before test move");
+        unsafe {
+            SetWindowPos(
+                HWND(target.handle() as *mut core::ffi::c_void),
+                HWND::default(),
+                -12_000,
+                -9_000,
+                before.width(),
+                before.height(),
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        }
+        .expect("move owned test window off-screen");
+        sleep(Duration::from_millis(120));
+        let (_, offscreen) =
+            read_placement_and_rect(target.handle()).expect("read owned off-screen window");
+        let work_areas = connected_monitor_work_areas().expect("read connected monitor work areas");
+        assert!(rect_is_offscreen(offscreen, &work_areas));
+
+        let own_process_id = std::process::id();
+        let identity_snapshot = super::super::snapshot_process_identities()
+            .expect("snapshot identities for test isolation");
+        let own_file_identity = identity_snapshot
+            .processes
+            .iter()
+            .find(|identity| identity.process_id == own_process_id)
+            .expect("identity snapshot contains the owned test process")
+            .file_identity;
+        let mut unique_exclusions = HashSet::new();
+        let exclusions = identity_snapshot
+            .processes
+            .into_iter()
+            .filter(|identity| identity.process_id != own_process_id)
+            // A concurrently running copy of this test executable must not turn
+            // the current process's shared file identity into a game exclusion.
+            .filter(|identity| identity.file_identity != own_file_identity)
+            .filter_map(|identity| {
+                unique_exclusions
+                    .insert(identity.file_identity)
+                    .then_some(identity.file_identity)
+            })
+            .collect::<Vec<_>>();
+        let manager = OffscreenWindowRescueManager::new();
+        let scan = manager
+            .scan(&exclusions, anchor.handle())
+            .expect("scan for the owned off-screen window");
+        let candidate_id = {
+            let state = manager.state.lock();
+            state
+                .listed
+                .iter()
+                .find_map(|(candidate_id, listed)| {
+                    (listed.candidate.handle == target.handle()).then_some(*candidate_id)
+                })
+                .expect("owned off-screen window is listed")
+        };
+        let public_candidate = scan
+            .candidates
+            .iter()
+            .find(|candidate| candidate.candidate_id == candidate_id)
+            .expect("public candidate corresponds to the owned target");
+        assert!(
+            public_candidate.can_rescue,
+            "owned standard-user test window must be rescuable: {:?}",
+            public_candidate.unavailable_reason
+        );
+
+        let rescued_outcome = manager
+            .rescue(candidate_id, &exclusions, anchor.handle())
+            .expect("rescue only the owned test window");
+        let (_, rescued) =
+            read_placement_and_rect(target.handle()).expect("read rescued owned window");
+        assert!(
+            !rect_is_offscreen(rescued, &work_areas),
+            "GetWindowRect must externally confirm that the target is on-screen"
+        );
+
+        if let Err(error) = manager.rollback(rescued_outcome.undo_id, &exclusions) {
+            let (placement_after_failed_rollback, rect_after_failed_rollback) =
+                read_placement_and_rect(target.handle())
+                    .expect("inspect owned window after failed rollback");
+            panic!(
+                "roll back only the owned rescued window: {error:?}; expected placement={:?} rect={:?}; actual placement={placement_after_failed_rollback:?} rect={rect_after_failed_rollback:?}",
+                manager
+                    .state
+                    .lock()
+                    .active
+                    .get(&rescued_outcome.undo_id)
+                    .expect("failed rollback remains active")
+                    .original
+                    .saved
+                    .placement,
+                offscreen,
+            );
+        }
+        let (_, rolled_back) =
+            read_placement_and_rect(target.handle()).expect("read rolled-back owned window");
+        assert!(
+            rect_matches(offscreen, rolled_back),
+            "rollback must return the exact pre-rescue off-screen geometry"
+        );
+        println!(
+            "EVIDENCE: offscreen_window_rescue before=({},{} {}x{}) offscreen=({},{} {}x{}) rescued=({},{} {}x{}) rolled_back=({},{} {}x{})",
+            before.left,
+            before.top,
+            before.width(),
+            before.height(),
+            offscreen.left,
+            offscreen.top,
+            offscreen.width(),
+            offscreen.height(),
+            rescued.left,
+            rescued.top,
+            rescued.width(),
+            rescued.height(),
+            rolled_back.left,
+            rolled_back.top,
+            rolled_back.width(),
+            rolled_back.height(),
+        );
     }
 
     /// Creates and mutates only a window owned by this test process. No existing user window is

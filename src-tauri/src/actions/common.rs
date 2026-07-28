@@ -151,6 +151,7 @@ pub fn map_windows_error(
         WindowsErrorKind::ResourceLimit => ActionErrorCode::ResourceLimit,
         WindowsErrorKind::InvalidData => ActionErrorCode::StateUnknown,
         WindowsErrorKind::ChannelClosed => ActionErrorCode::LeaseFailure,
+        WindowsErrorKind::ExternalConflict => ActionErrorCode::ExternalConflict,
         WindowsErrorKind::ApiFailure => ActionErrorCode::WindowsApiFailure,
         WindowsErrorKind::RecoveryRequired => ActionErrorCode::RecoveryRequired,
     };

@@ -9,6 +9,7 @@ import type {
   SetupAppDto,
 } from "../model";
 import { Icon } from "./Icon";
+import { OffscreenWindowRescuePanel } from "./OffscreenWindowRescuePanel";
 import { PowerToysPanel } from "./PowerToysPanel";
 import { SetupEssentialsPanel } from "./SetupEssentialsPanel";
 
@@ -160,19 +161,27 @@ export function SetupView({
       </div>
 
       {tab !== "essentials" ? null : (
-      <SetupEssentialsPanel
-        audioAction={actions.find((action) => action.id === "setup.audio_output")}
-        bootstrap={bootstrap}
-        dataMode={dataMode}
-        defaultAppsAction={actions.find((action) => action.id === "setup.default_apps")}
-        detectingId={detectionPendingId}
-        onDetect={onDetect}
-        onError={onError}
-        onNotice={onNotice}
-        onPreview={onPreview}
-        previewingId={previewPendingId}
-        windowLayoutAction={actions.find((action) => action.id === "setup.window_layout")}
-      />
+      <>
+        <SetupEssentialsPanel
+          audioAction={actions.find((action) => action.id === "setup.audio_output")}
+          bootstrap={bootstrap}
+          dataMode={dataMode}
+          defaultAppsAction={actions.find((action) => action.id === "setup.default_apps")}
+          detectingId={detectionPendingId}
+          onDetect={onDetect}
+          onError={onError}
+          onNotice={onNotice}
+          onPreview={onPreview}
+          previewingId={previewPendingId}
+          windowLayoutAction={actions.find((action) => action.id === "setup.window_layout")}
+        />
+        <OffscreenWindowRescuePanel
+          bootstrap={bootstrap}
+          dataMode={dataMode}
+          onError={onError}
+          onNotice={onNotice}
+        />
+      </>
       )}
 
       {tab !== "everyday" ? null : (

@@ -13,6 +13,8 @@ import type {
   ImportResult,
   InstallOutcome,
   ManualProfileResult,
+  OffscreenWindowScan,
+  OffscreenWindowUndo,
   SetupAppDto,
   TempCleanupOutcome,
   TempCleanupPlan,
@@ -271,6 +273,22 @@ export function saveWindowLayout(
   return call<WindowLayoutStatus>("save_window_layout", {
     unregisteredGamesClosed,
   });
+}
+
+export function listOffscreenWindows(): Promise<OffscreenWindowScan> {
+  return call<OffscreenWindowScan>("list_offscreen_windows");
+}
+
+export function rescueOffscreenWindow(
+  candidateId: string,
+): Promise<OffscreenWindowUndo> {
+  return call<OffscreenWindowUndo>("rescue_offscreen_window", { candidateId });
+}
+
+export function rollbackOffscreenWindow(
+  undoId: string,
+): Promise<OffscreenWindowUndo> {
+  return call<OffscreenWindowUndo>("rollback_offscreen_window", { undoId });
 }
 
 export function setupCatalog(): Promise<readonly SetupAppDto[]> {
