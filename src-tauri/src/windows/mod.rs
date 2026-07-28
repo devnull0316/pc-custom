@@ -7,6 +7,8 @@ mod execution_state;
 // 実行ファイルを手で打たせない。Windows自身の選択画面を開く。
 mod file_picker;
 mod observations;
+// オーバーレイをタスクバーの上へ置き続けるための、位置と状況の読み取り。
+mod overlay_anchor;
 mod power;
 mod powertoys;
 mod process;
@@ -36,6 +38,9 @@ pub use observations::{
     delete_user_temp_files, plan_user_temp_cleanup, read_startup_inventory,
     read_system_drive_space, read_user_temp_inventory, TempCleanupOutcome, TempCleanupPlan,
     TEMP_CLEANUP_MIN_AGE_DAYS,
+};
+pub use overlay_anchor::{
+    foreground_is_fullscreen, read_taskbar_anchor, TaskbarAnchor, TaskbarEdge,
 };
 pub use power::{active_power_scheme, active_power_scheme_guid, set_active_power_scheme};
 pub use powertoys::read_powertoys_installation;
