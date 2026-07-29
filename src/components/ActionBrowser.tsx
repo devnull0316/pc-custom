@@ -9,6 +9,7 @@ import type {
   DataMode,
 } from "../model";
 import { isMutationAllowed, riskLabel } from "../model";
+import { AppearanceScenesPanel } from "./AppearanceScenesPanel";
 import { ExplorerRestartPanel } from "./ExplorerRestartPanel";
 import { Icon } from "./Icon";
 import { TempCleanupPanel } from "./TempCleanupPanel";
@@ -28,6 +29,7 @@ interface ActionBrowserProps {
   onSelectAction: (actionId: string) => void;
   onDetect: (actionId: string) => void;
   onPreview: (action: ActionPresentation, parameterOverride?: Record<string, string>) => void;
+  onPreviewScene: (sceneId: string) => void;
   onAddToDraft: (action: ActionPresentation) => void;
   onError: (error: unknown) => void;
 }
@@ -85,6 +87,7 @@ export function ActionBrowser({
   onSelectAction,
   onDetect,
   onPreview,
+  onPreviewScene,
   onAddToDraft,
   onError,
 }: ActionBrowserProps) {
@@ -100,6 +103,15 @@ export function ActionBrowser({
           <p>左で結果を選び、右で現在の状態、適用後、戻し方まで確認できます。</p>
         </div>
       </header>
+      {selectedCategory === "appearance" ? (
+        <AppearanceScenesPanel
+          actions={actions}
+          bootstrap={bootstrap}
+          dataMode={dataMode}
+          onPreview={onPreviewScene}
+          previewPendingKey={previewPendingId}
+        />
+      ) : null}
       {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
       {selectedCategory === "appearance" ? <TaskbarAutoHidePanel dataMode={dataMode} /> : null}
       {selectedCategory === "storage" ? <TempCleanupPanel dataMode={dataMode} /> : null}

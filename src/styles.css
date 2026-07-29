@@ -851,3 +851,50 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   border-radius: var(--radius-control); background: var(--surface-muted);
   color: var(--text-secondary); font-size: var(--fs-xs); }
 .taskbar-autohide-panel__error { color: var(--danger); background: var(--danger-soft); }
+
+/* 配色シーンはActionではなく、検証済み3項目の束ね方。
+   一覧へ混ぜず、appearanceカテゴリの冒頭でプレビュー入口として見せる。 */
+.appearance-scenes { display: grid; gap: 12px; margin-bottom: 16px; padding: 15px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.appearance-scenes__header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 34%);
+  gap: 18px; align-items: start; }
+.appearance-scenes__header .eyebrow { margin-bottom: 4px; }
+.appearance-scenes__header h2 { margin: 0; font-size: var(--fs-lg); }
+.appearance-scenes__header > div > p:last-child { margin: 5px 0 0; color: var(--text-secondary);
+  font-size: var(--fs-sm); line-height: 1.55; }
+.appearance-scenes__estimate, .appearance-scenes__unavailable { display: flex; gap: 7px;
+  align-items: flex-start; margin: 0; padding: 9px 10px; border-radius: var(--radius-control);
+  background: var(--surface-muted); color: var(--text-secondary); font-size: var(--fs-xs);
+  line-height: 1.5; }
+.appearance-scenes__estimate svg, .appearance-scenes__unavailable svg { flex: none; margin-top: 1px; }
+.appearance-scenes__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.appearance-scene-card { min-width: 0; display: grid; grid-template-rows: auto 1fr auto; gap: 10px;
+  padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--surface-muted); }
+.appearance-scene-card__swatch { position: relative; height: 54px; overflow: hidden;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-control);
+  background: var(--scene-surface); }
+.appearance-scene-card__swatch--translucent::before { position: absolute; inset: 0; content: "";
+  background: linear-gradient(135deg, rgba(255, 255, 255, .2), transparent 54%);
+  opacity: .72; }
+.appearance-scene-card__swatch span { position: absolute; display: block; background: var(--scene-accent); }
+.appearance-scene-card__swatch span:nth-child(1) { inset: 0 0 auto; height: 7px; }
+.appearance-scene-card__swatch span:nth-child(2) { left: 9px; bottom: 9px; width: 44%; height: 20px;
+  border-radius: 3px; opacity: .78; }
+.appearance-scene-card__swatch span:nth-child(3) { right: 9px; bottom: 9px; width: 28%; height: 20px;
+  border-radius: 3px; opacity: .42; }
+.appearance-scene-card__copy h3 { margin: 0; font-size: var(--fs-base); line-height: 1.4; }
+.appearance-scene-card__copy p { margin: 4px 0 0; color: var(--text-secondary);
+  font-size: var(--fs-xs); line-height: 1.5; }
+.appearance-scene-card__copy ul { display: grid; gap: 2px; margin: 8px 0 0; padding-left: 16px;
+  color: var(--text-tertiary); font-size: var(--fs-xs); line-height: 1.45; }
+.appearance-scene-card > button { width: 100%; justify-content: center; }
+
+@media (max-width: 1100px) {
+  .appearance-scenes__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .appearance-scenes__header { grid-template-columns: 1fr; }
+  .appearance-scenes__grid { grid-template-columns: 1fr; }
+}

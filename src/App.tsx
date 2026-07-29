@@ -19,6 +19,7 @@ import {
   setProfileEnabled,
   setProfileRibbonColor,
 } from "./backend";
+import { appearanceSceneRequest } from "./appearanceScenes";
 import { STATIC_ACTIONS } from "./catalog";
 import { ActionBrowser } from "./components/ActionBrowser";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette";
@@ -38,6 +39,7 @@ import type {
   JsonValue,
   ModeRibbonColor,
   PreviewResponse,
+  PreviewActionsRequest,
   ProfileDraftItem,
   StoredProfile,
   TimelineItem,
@@ -311,12 +313,15 @@ export function App() {
     return navigation.concat(actionCommands);
   }, [actions, navigate, openAction]);
 
-  async function requestActionPreview(actionId: string, parameters: Record<string, JsonValue>) {
+  async function requestPreviewRequest(
+    pendingId: string,
+    request: PreviewActionsRequest,
+  ) {
     if (dataMode !== "live") return;
-    setPreviewPendingId(actionId);
+    setPreviewPendingId(pendingId);
     setUiError(null);
     try {
-      const result = await previewActions({ actions: [{ actionId, parameters }] });
+      const result = await previewActions(request);
       setPreview(result);
       setPreviewConfirmed(false);
     } catch (error: unknown) {
@@ -324,6 +329,17 @@ export function App() {
     } finally {
       setPreviewPendingId(null);
     }
+  }
+
+  function requestActionPreview(actionId: string, parameters: Record<string, JsonValue>) {
+    return requestPreviewRequest(actionId, { actions: [{ actionId, parameters }] });
+  }
+
+  function requestAppearanceScenePreview(sceneId: string) {
+    return requestPreviewRequest(
+      `appearance-scene:${sceneId}`,
+      appearanceSceneRequest(sceneId),
+    );
   }
 
   function requestPreview(action: ActionPresentation, parameterOverride?: Record<string, string>) {
@@ -569,7 +585,7 @@ export function App() {
           {view === "home" ? (
             <HomeView actions={actions} bootstrap={bootstrap} dataMode={dataMode} onOpenAction={openActionById} onOpenCategory={openCategory} onOpenTimeline={() => setView("timeline")} onOpenView={(target) => setView(target)} onReconcile={() => void runReconcile()} recoveryBusy={recoveryBusy} timeline={timeline} />
           ) : view === "actions" ? (
-            <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onError={handleUiError} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
+            <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onError={handleUiError} onPreview={(action) => void requestPreview(action)} onPreviewScene={(sceneId) => void requestAppearanceScenePreview(sceneId)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
           ) : view === "profiles" ? (
             <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} onSetRibbonColor={(id, color) => void handleSetProfileRibbonColor(id, color)} profiles={profiles} />
           ) : view === "setup" ? (

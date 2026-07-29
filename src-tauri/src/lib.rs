@@ -1,5 +1,7 @@
 pub mod action;
 pub mod actions;
+#[cfg(test)]
+mod appearance_scene_contract;
 pub mod backup;
 mod bootstrap;
 mod commands;

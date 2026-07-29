@@ -1,0 +1,142 @@
+[
+  {
+    "id": "dark-graphite-solid",
+    "name": "暗く、グラファイトでまとめる",
+    "description": "ダーク表示、透過効果なし、グラファイトのウィンドウ色をまとめて試します。",
+    "details": [
+      "Windows表示: ダーク",
+      "透過効果: オフ",
+      "ウィンドウ色: グラファイト"
+    ],
+    "swatch": {
+      "surface": "#202020",
+      "accent": "#4c4a48",
+      "translucent": false
+    },
+    "actions": [
+      {
+        "actionId": "theme.color_mode",
+        "parameters": {
+          "mode": "dark"
+        }
+      },
+      {
+        "actionId": "appearance.transparency",
+        "parameters": {
+          "enabled": false
+        }
+      },
+      {
+        "actionId": "appearance.window_color",
+        "parameters": {
+          "color": "graphite"
+        }
+      }
+    ]
+  },
+  {
+    "id": "dark-teal-translucent",
+    "name": "暗く、青緑を添える",
+    "description": "ダーク表示、透過効果あり、青緑のウィンドウ色をまとめて試します。",
+    "details": [
+      "Windows表示: ダーク",
+      "透過効果: オン",
+      "ウィンドウ色: 青緑"
+    ],
+    "swatch": {
+      "surface": "#202020",
+      "accent": "#00b7c3",
+      "translucent": true
+    },
+    "actions": [
+      {
+        "actionId": "theme.color_mode",
+        "parameters": {
+          "mode": "dark"
+        }
+      },
+      {
+        "actionId": "appearance.transparency",
+        "parameters": {
+          "enabled": true
+        }
+      },
+      {
+        "actionId": "appearance.window_color",
+        "parameters": {
+          "color": "teal"
+        }
+      }
+    ]
+  },
+  {
+    "id": "light-blue-translucent",
+    "name": "明るく、青を添える",
+    "description": "ライト表示、透過効果あり、Windowsの青のウィンドウ色をまとめて試します。",
+    "details": [
+      "Windows表示: ライト",
+      "透過効果: オン",
+      "ウィンドウ色: Windowsの青"
+    ],
+    "swatch": {
+      "surface": "#f3f3f3",
+      "accent": "#0078d4",
+      "translucent": true
+    },
+    "actions": [
+      {
+        "actionId": "theme.color_mode",
+        "parameters": {
+          "mode": "light"
+        }
+      },
+      {
+        "actionId": "appearance.transparency",
+        "parameters": {
+          "enabled": true
+        }
+      },
+      {
+        "actionId": "appearance.window_color",
+        "parameters": {
+          "color": "windows_blue"
+        }
+      }
+    ]
+  },
+  {
+    "id": "light-amber-solid",
+    "name": "明るく、橙を添える",
+    "description": "ライト表示、透過効果なし、橙のウィンドウ色をまとめて試します。",
+    "details": [
+      "Windows表示: ライト",
+      "透過効果: オフ",
+      "ウィンドウ色: 橙"
+    ],
+    "swatch": {
+      "surface": "#f3f3f3",
+      "accent": "#ffb900",
+      "translucent": false
+    },
+    "actions": [
+      {
+        "actionId": "theme.color_mode",
+        "parameters": {
+          "mode": "light"
+        }
+      },
+      {
+        "actionId": "appearance.transparency",
+        "parameters": {
+          "enabled": false
+        }
+      },
+      {
+        "actionId": "appearance.window_color",
+        "parameters": {
+          "color": "amber"
+        }
+      }
+    ]
+  }
+]
