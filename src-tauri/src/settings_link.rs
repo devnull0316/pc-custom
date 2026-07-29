@@ -57,7 +57,7 @@ pub const fn settings_page_for(action: ActionId) -> Option<&'static str> {
         ActionId::GamesGameMode => "ms-settings:gaming-gamemode",
         ActionId::GamesControllerGameBar => "ms-settings:gaming-gamebar",
         ActionId::DevicesAutoplay => "ms-settings:autoplay",
-        ActionId::SetupAudioOutput => "ms-settings:sound",
+        ActionId::SetupAudioOutput | ActionId::AudioCommsMicMute => "ms-settings:sound",
         // 電源・ストレージ
         ActionId::PowerActiveSchemeCheck
         | ActionId::PowerActiveSchemeSwitch

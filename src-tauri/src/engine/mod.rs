@@ -877,6 +877,7 @@ fn probe_backup(payload: &BackupPayload) -> (HealthProbe, Option<String>) {
         // 現在値も公開 API で読み直せる。レジストリではないが照合できる。
         BackupPayload::PowerMode(backup) => return probe_power_mode(backup),
         BackupPayload::PointerFeel(backup) => return probe_pointer_feel(backup),
+        BackupPayload::CommsMicMute(backup) => return probe_comms_mic_mute(backup),
         // それ以外（セッション設定やウィンドウ配置）は、
         // 「適用したときの値」を今の環境から読み直す手段がない。無いものを在るとは言わない。
         _ => Vec::new(),
@@ -905,6 +906,30 @@ fn probe_backup(payload: &BackupPayload) -> (HealthProbe, Option<String>) {
         }
     }
     (combine_probe(counts), None)
+}
+
+fn probe_comms_mic_mute(
+    backup: &crate::backup::CommsMicMuteBackup,
+) -> (HealthProbe, Option<String>) {
+    let current = match crate::windows::read_comms_mic_mute_by_id(&backup.original.device_id) {
+        Ok(current) => current,
+        Err(_) => {
+            return (
+                HealthProbe::Uncomparable,
+                Some("保存した通話マイクの状態を読み取れませんでした。".to_owned()),
+            )
+        }
+    };
+    if current == backup.intended {
+        (HealthProbe::HoldsApplied, None)
+    } else if current == backup.original {
+        (HealthProbe::BackToPrevious, None)
+    } else {
+        (
+            HealthProbe::Neither,
+            Some("保存後に通話マイクのmute設定が別のものから変更されています。".to_owned()),
+        )
+    }
 }
 
 /// 電源モードを照合する。控えの生バイト列と、いまの値を突き合わせる。

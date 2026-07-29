@@ -4,6 +4,7 @@ mod active_scheme_check;
 mod app_launch;
 mod color_mode;
 mod common;
+mod comms_mic_mute;
 mod explorer_visibility;
 mod game_readiness;
 mod guided_setup;
@@ -21,6 +22,7 @@ mod window_layout;
 pub use active_scheme_check::{ActiveSchemeCheckAction, ACTIVE_SCHEME_CHECK_ACTION};
 pub use app_launch::{LaunchAppsAction, LAUNCH_APPS_ACTION};
 pub use color_mode::{ColorModeAction, COLOR_MODE_ACTION};
+pub use comms_mic_mute::{CommsMicMuteAction, COMMS_MIC_MUTE_ACTION};
 pub use explorer_visibility::{
     ClockSecondsAction, CompactViewAction, ItemCheckboxesAction, ShowExtensionsAction,
     ShowHiddenAction, TaskViewAction, TransparencyAction, WidgetsAction, CLOCK_SECONDS_ACTION,

@@ -120,6 +120,8 @@ pub enum ActionParameters {
     PowerModeSwitch { mode: PowerModeChoice },
     #[serde(rename = "input.pointer_feel")]
     InputPointerFeel { acceleration: bool },
+    #[serde(rename = "audio.comms_mic_mute")]
+    AudioCommsMicMute {},
     #[serde(rename = "explorer.show_extensions")]
     ExplorerShowExtensions { show: bool },
     #[serde(rename = "explorer.show_hidden")]
@@ -259,6 +261,7 @@ impl ActionParameters {
             Self::PowerActiveSchemeSwitch { .. } => ActionId::PowerActiveSchemeSwitch,
             Self::PowerModeSwitch { .. } => ActionId::PowerModeSwitch,
             Self::InputPointerFeel { .. } => ActionId::InputPointerFeel,
+            Self::AudioCommsMicMute { .. } => ActionId::AudioCommsMicMute,
             Self::ExplorerShowExtensions { .. } => ActionId::ExplorerShowExtensions,
             Self::ExplorerShowHidden { .. } => ActionId::ExplorerShowHidden,
             Self::ExplorerClockSeconds { .. } => ActionId::ExplorerClockSeconds,

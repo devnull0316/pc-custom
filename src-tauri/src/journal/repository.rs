@@ -873,6 +873,7 @@ fn primitive_name(payload: &BackupPayload) -> &'static str {
         BackupPayload::PowerScheme(_) => "power_scheme",
         BackupPayload::PowerMode(_) => "power_mode",
         BackupPayload::PointerFeel(_) => "pointer_feel",
+        BackupPayload::CommsMicMute(_) => "comms_mic_mute",
         BackupPayload::WindowLayout(_) => "window_layout",
         BackupPayload::ShiftInterruptionGuard(_) => "shift_interruption_guard",
     }

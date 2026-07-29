@@ -42,7 +42,10 @@ pub use app_launch::{
     apps_for_bundle, launch_known_apps, observe_known_apps, resolve_known_app,
     resolve_powertoys_app_path, KnownApp,
 };
-pub use audio::read_audio_output_observation;
+pub use audio::{
+    read_audio_output_observation, read_comms_mic_mute_by_id, read_default_comms_mic_mute,
+    replace_comms_mic_mute_by_id, replace_default_comms_mic_mute, CommsMicMuteState,
+};
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
 pub use file_picker::pick_executable;

@@ -261,6 +261,13 @@ pub fn action_presentation(
             "入力の補助機能を現在使用中の場合は、安全のため適用しません。".to_owned(),
         ]);
     }
+    if metadata.id == ActionId::AudioCommsMicMute {
+        detail_points.extend([
+            "対象は、その時点でWindowsが既定の通話用入力としている1台だけです。".to_owned(),
+            "別の入力デバイスを指定したアプリや、排他モードの音声には効かないことがあります。無音は保証しません。".to_owned(),
+            "復元は保存したdevice IDだけを対象にし、既定端末が変わっても新しい端末は触りません。".to_owned(),
+        ]);
+    }
     ActionPresentation {
         id: metadata.id.as_str().to_owned(),
         action_version: metadata.action_version,
@@ -454,6 +461,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::InputPointerFeel => ActionParameters::InputPointerFeel {
             acceleration: false,
         },
+        ActionId::AudioCommsMicMute => ActionParameters::AudioCommsMicMute {},
         ActionId::ExplorerShowExtensions => ActionParameters::ExplorerShowExtensions { show: true },
         ActionId::ExplorerShowHidden => ActionParameters::ExplorerShowHidden { show: true },
         ActionId::ExplorerClockSeconds => ActionParameters::ExplorerClockSeconds { show: true },
@@ -682,7 +690,8 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::InputDoubleSpacePeriod
         | ActionId::InputAutoShift
         | ActionId::InputVoiceTypingKey
-        | ActionId::InputMultilingualSuggestions => "input",
+        | ActionId::InputMultilingualSuggestions
+        | ActionId::AudioCommsMicMute => "input",
     }
 }
 
@@ -701,6 +710,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         }
         ActionId::InputPointerFeel => {
             "ゲームと普段の作業でマウスの動き方を変えたい人向け。ゲーム側が独自にマウスを読んでいる場合は届きません"
+        }
+        ActionId::AudioCommsMicMute => {
+            "会議前にWindowsの既定の通話用入力1台をミュート設定にしたい人向け。別の入力端末を使うアプリには届きません"
         }
         ActionId::ExplorerShowExtensions => "ファイルの種類を見分け、誤操作を減らしたい人向け",
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
@@ -800,6 +812,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::PowerActiveSchemeSwitch => "選択したWindows標準の電源プラン",
         ActionId::PowerModeSwitch => "選択した電源モード（電源接続時と電池使用時の両方）",
         ActionId::InputPointerFeel => "選択したポインターの動き方",
+        ActionId::AudioCommsMicMute => "既定の通話用入力デバイス1台をミュート設定にする",
         ActionId::ExplorerShowExtensions => "拡張子を表示",
         ActionId::ExplorerShowHidden => "隠しファイルを表示",
         ActionId::ExplorerClockSeconds => "タスクバーの時計に秒を表示",
@@ -916,6 +929,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::InputShiftInterruptionGuard => {
             "Windowsが公開している入力設定の機能で、確認画面を開く動作だけを一時停止"
         }
+        ActionId::AudioCommsMicMute => {
+            "Core AudioでeCommunicationsの既定入力1台を特定し、EndpointVolumeのmute設定だけを変更"
+        }
         ActionId::SetupStartupInventory => {
             "固定HKCU/HKLM RunキーとKnown Startup Folderの上限付き読み取り"
         }
@@ -965,6 +981,13 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
                 "加速なし"
             };
             format!("{acceleration}、速さ{speed}")
+        }
+        ObservedValue::CommunicationsMicrophone { muted } => {
+            if *muted {
+                "既定の通話マイクはミュート設定".to_owned()
+            } else {
+                "既定の通話マイクはミュート解除設定".to_owned()
+            }
         }
         ObservedValue::PowerMode {
             requested_ac,
@@ -1188,6 +1211,10 @@ fn observed_detail(value: &ObservedValue) -> String {
             "Windowsのポインター設定を読んでいます。ゲームが独自にマウスを読んでいる場合、この設定は届きません。"
                 .to_owned()
         }
+        ObservedValue::CommunicationsMicrophone { .. } => {
+            "Windowsの既定の通話用入力1台のsoftware mute設定を読みました。別の入力端末を使うアプリや排他モードでの無音は保証しません。"
+                .to_owned()
+        }
         ObservedValue::PowerMode { .. } => {
             "選んだモードと、Windowsがいま効いていると報告するモードは別々に確認しています。             選んだほうは他の設定に上書きされることがあります。"
                 .to_owned()
@@ -1328,6 +1355,14 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
                 }
             })
             .collect(),
+        ObservedValue::CommunicationsMicrophone { muted } => vec![format!(
+            "既定の通話用入力1台 — {}（排他モード等での無音は保証外）",
+            if *muted {
+                "ミュート設定"
+            } else {
+                "ミュート解除設定"
+            }
+        )],
         ObservedValue::WindowLayout(value) => value
             .issues
             .iter()
@@ -2070,7 +2105,7 @@ mod count_report {
             guided_candidate,
             guided_settings
         );
-        assert_eq!(total, 70, "総数が変わったら README も直すこと");
+        assert_eq!(total, 71, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"

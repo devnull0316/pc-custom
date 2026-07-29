@@ -16,6 +16,8 @@ pub enum ActionId {
     PowerActiveSchemeSwitch,
     PowerModeSwitch,
     InputPointerFeel,
+    #[serde(rename = "audio.comms_mic_mute")]
+    AudioCommsMicMute,
     #[serde(rename = "explorer.show_extensions")]
     ExplorerShowExtensions,
     #[serde(rename = "explorer.show_hidden")]
@@ -147,13 +149,14 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 70] = [
+    pub const ALL: [Self; 71] = [
         Self::SessionPreventSleep,
         Self::InputShiftInterruptionGuard,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
         Self::PowerModeSwitch,
         Self::InputPointerFeel,
+        Self::AudioCommsMicMute,
         Self::ExplorerShowExtensions,
         Self::ExplorerShowHidden,
         Self::ExplorerClockSeconds,
@@ -228,6 +231,7 @@ impl ActionId {
             Self::PowerActiveSchemeSwitch => "power.active_scheme_switch",
             Self::PowerModeSwitch => "power.mode_switch",
             Self::InputPointerFeel => "input.pointer_feel",
+            Self::AudioCommsMicMute => "audio.comms_mic_mute",
             Self::ExplorerShowExtensions => "explorer.show_extensions",
             Self::ExplorerShowHidden => "explorer.show_hidden",
             Self::ExplorerClockSeconds => "explorer.clock_seconds",
@@ -324,6 +328,7 @@ impl FromStr for ActionId {
             "power.active_scheme_switch" => Ok(Self::PowerActiveSchemeSwitch),
             "power.mode_switch" => Ok(Self::PowerModeSwitch),
             "input.pointer_feel" => Ok(Self::InputPointerFeel),
+            "audio.comms_mic_mute" => Ok(Self::AudioCommsMicMute),
             "explorer.show_extensions" => Ok(Self::ExplorerShowExtensions),
             "explorer.show_hidden" => Ok(Self::ExplorerShowHidden),
             "explorer.clock_seconds" => Ok(Self::ExplorerClockSeconds),

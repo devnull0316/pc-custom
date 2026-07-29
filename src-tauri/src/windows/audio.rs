@@ -7,9 +7,56 @@ const MAX_FRIENDLY_NAME_UTF16: usize = 256;
 const MAX_ENDPOINT_ID_UTF16: usize = 4_096;
 const MAX_TOPOLOGY_ATTEMPTS: usize = 3;
 
+/// The exact communications capture endpoint and its software-mute setting.
+///
+/// The endpoint identifier is kept as UTF-16 so rollback can address the same
+/// Windows endpoint without lossy conversion or selecting a new default.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommsMicMuteState {
+    pub device_id: Vec<u16>,
+    pub muted: bool,
+}
+
+impl CommsMicMuteState {
+    pub fn with_mute(&self, muted: bool) -> Self {
+        Self {
+            device_id: self.device_id.clone(),
+            muted,
+        }
+    }
+
+    pub fn fingerprint(&self) -> crate::backup::Fingerprint {
+        let mut bytes = Vec::with_capacity(self.device_id.len() * 2 + 1);
+        for code_unit in &self.device_id {
+            bytes.extend_from_slice(&code_unit.to_le_bytes());
+        }
+        bytes.push(u8::from(self.muted));
+        crate::backup::Fingerprint::of_bytes(&bytes)
+    }
+}
+
 struct RawAudioEndpoint {
     friendly_name: String,
     endpoint_id: Vec<u16>,
+}
+
+fn validate_endpoint_id(endpoint_id: &[u16]) -> WindowsResult<()> {
+    if endpoint_id.is_empty()
+        || endpoint_id.len() > MAX_ENDPOINT_ID_UTF16
+        || endpoint_id.contains(&0)
+    {
+        return Err(WindowsError::new(
+            if endpoint_id.len() > MAX_ENDPOINT_ID_UTF16 {
+                WindowsErrorKind::ResourceLimit
+            } else {
+                WindowsErrorKind::InvalidData
+            },
+            "validate Core Audio endpoint identifier",
+            None,
+        ));
+    }
+    Ok(())
 }
 
 fn bounded_friendly_name(wide: &[u16]) -> WindowsResult<String> {
@@ -84,6 +131,8 @@ fn api_error(operation: &'static str, error: windows::core::Error) -> WindowsErr
     let code = error.code().0;
     let kind = if code as u32 == 0x8007_0005 {
         WindowsErrorKind::AccessDenied
+    } else if code as u32 == 0x8007_0490 {
+        WindowsErrorKind::InvalidData
     } else {
         WindowsErrorKind::ApiFailure
     };
@@ -126,6 +175,7 @@ fn read_endpoint_id(endpoint: &windows::Win32::Media::Audio::IMMDevice) -> Windo
                     None,
                 ));
             }
+            validate_endpoint_id(&endpoint_id)?;
             return Ok(endpoint_id);
         }
         if index == MAX_ENDPOINT_ID_UTF16 {
@@ -138,6 +188,272 @@ fn read_endpoint_id(endpoint: &windows::Win32::Media::Audio::IMMDevice) -> Windo
         WindowsErrorKind::ResourceLimit,
         "bound Core Audio endpoint identifier",
         None,
+    ))
+}
+
+#[cfg(windows)]
+fn audio_enumerator() -> WindowsResult<windows::Win32::Media::Audio::IMMDeviceEnumerator> {
+    use windows::Win32::{
+        Media::Audio::{IMMDeviceEnumerator, MMDeviceEnumerator},
+        System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER},
+    };
+
+    unsafe {
+        CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_INPROC_SERVER)
+    }
+    .map_err(|error| api_error("CoCreateInstance MMDeviceEnumerator", error))
+}
+
+#[cfg(windows)]
+fn ensure_active_capture_endpoint(
+    endpoint: &windows::Win32::Media::Audio::IMMDevice,
+) -> WindowsResult<()> {
+    use windows::Win32::Media::Audio::DEVICE_STATE_ACTIVE;
+
+    let state = unsafe { endpoint.GetState() }
+        .map_err(|error| api_error("IMMDevice GetState for communications microphone", error))?;
+    if state != DEVICE_STATE_ACTIVE {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "communications microphone endpoint is not active",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn endpoint_mute_state(
+    endpoint: &windows::Win32::Media::Audio::IMMDevice,
+) -> WindowsResult<CommsMicMuteState> {
+    use windows::Win32::{Media::Audio::Endpoints::IAudioEndpointVolume, System::Com::CLSCTX_ALL};
+
+    ensure_active_capture_endpoint(endpoint)?;
+    let device_id = read_endpoint_id(endpoint)?;
+    let volume: IAudioEndpointVolume = unsafe { endpoint.Activate(CLSCTX_ALL, None) }
+        .map_err(|error| api_error("IMMDevice Activate IAudioEndpointVolume", error))?;
+    let muted = unsafe { volume.GetMute() }
+        .map_err(|error| api_error("IAudioEndpointVolume GetMute", error))?
+        .as_bool();
+    Ok(CommsMicMuteState { device_id, muted })
+}
+
+#[cfg(windows)]
+fn default_comms_capture_endpoint(
+    enumerator: &windows::Win32::Media::Audio::IMMDeviceEnumerator,
+) -> WindowsResult<windows::Win32::Media::Audio::IMMDevice> {
+    use windows::Win32::Media::Audio::{eCapture, eCommunications};
+
+    unsafe { enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications) }.map_err(|error| {
+        api_error(
+            "IMMDeviceEnumerator GetDefaultAudioEndpoint eCapture eCommunications",
+            error,
+        )
+    })
+}
+
+#[cfg(windows)]
+fn endpoint_by_id(
+    enumerator: &windows::Win32::Media::Audio::IMMDeviceEnumerator,
+    endpoint_id: &[u16],
+) -> WindowsResult<windows::Win32::Media::Audio::IMMDevice> {
+    use windows::core::PCWSTR;
+
+    validate_endpoint_id(endpoint_id)?;
+    let mut terminated = Vec::with_capacity(endpoint_id.len() + 1);
+    terminated.extend_from_slice(endpoint_id);
+    terminated.push(0);
+    unsafe { enumerator.GetDevice(PCWSTR::from_raw(terminated.as_ptr())) }
+        .map_err(|error| api_error("IMMDeviceEnumerator GetDevice by saved identifier", error))
+}
+
+#[cfg(windows)]
+fn set_endpoint_mute(
+    endpoint: &windows::Win32::Media::Audio::IMMDevice,
+    muted: bool,
+) -> WindowsResult<()> {
+    use windows::Win32::{
+        Foundation::BOOL, Media::Audio::Endpoints::IAudioEndpointVolume, System::Com::CLSCTX_ALL,
+    };
+
+    let volume: IAudioEndpointVolume = unsafe { endpoint.Activate(CLSCTX_ALL, None) }
+        .map_err(|error| api_error("IMMDevice Activate IAudioEndpointVolume", error))?;
+    unsafe { volume.SetMute(BOOL::from(muted), std::ptr::null()) }
+        .map_err(|error| api_error("IAudioEndpointVolume SetMute", error))
+}
+
+#[cfg(windows)]
+fn replace_endpoint_mute(
+    endpoint: &windows::Win32::Media::Audio::IMMDevice,
+    expected: &CommsMicMuteState,
+    muted: bool,
+) -> WindowsResult<CommsMicMuteState> {
+    let current = endpoint_mute_state(endpoint)?;
+    if current != *expected {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ExternalConflict,
+            "communications microphone changed by something else",
+            None,
+        ));
+    }
+    set_endpoint_mute(endpoint, muted)?;
+    let changed = endpoint_mute_state(endpoint)?;
+    if changed.device_id != expected.device_id || changed.muted != muted {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "verify communications microphone mute write",
+            None,
+        ));
+    }
+    Ok(changed)
+}
+
+#[cfg(windows)]
+fn run_on_audio_com_thread<T, F>(
+    thread_name: &'static str,
+    join_operation: &'static str,
+    operation: F,
+) -> WindowsResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> WindowsResult<T> + Send + 'static,
+{
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+
+    std::thread::Builder::new()
+        .name(thread_name.to_owned())
+        .spawn(move || {
+            let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            if initialized.is_err() {
+                return Err(WindowsError::new(
+                    WindowsErrorKind::ApiFailure,
+                    "CoInitializeEx for Core Audio communications microphone",
+                    Some(i64::from(initialized.0)),
+                ));
+            }
+            struct Uninitialize;
+            impl Drop for Uninitialize {
+                fn drop(&mut self) {
+                    unsafe { CoUninitialize() };
+                }
+            }
+            let _uninitialize = Uninitialize;
+            operation()
+        })
+        .map_err(|error| WindowsError::io("spawn Core Audio COM thread", &error))?
+        .join()
+        .map_err(|_| WindowsError::new(WindowsErrorKind::ApiFailure, join_operation, None))?
+}
+
+/// Reads the current `eCommunications` default capture endpoint and its mute bit.
+#[cfg(windows)]
+pub fn read_default_comms_mic_mute() -> WindowsResult<CommsMicMuteState> {
+    run_on_audio_com_thread(
+        "totonoe-comms-mic-read-default",
+        "join Core Audio default communications microphone read thread",
+        || {
+            let enumerator = audio_enumerator()?;
+            let endpoint = default_comms_capture_endpoint(&enumerator)?;
+            endpoint_mute_state(&endpoint)
+        },
+    )
+}
+
+/// Re-reads one saved endpoint by its exact identifier.
+#[cfg(windows)]
+pub fn read_comms_mic_mute_by_id(endpoint_id: &[u16]) -> WindowsResult<CommsMicMuteState> {
+    validate_endpoint_id(endpoint_id)?;
+    let endpoint_id = endpoint_id.to_vec();
+    run_on_audio_com_thread(
+        "totonoe-comms-mic-read-saved",
+        "join Core Audio saved communications microphone read thread",
+        move || {
+            let enumerator = audio_enumerator()?;
+            let endpoint = endpoint_by_id(&enumerator, &endpoint_id)?;
+            let observed = endpoint_mute_state(&endpoint)?;
+            if observed.device_id != endpoint_id {
+                return Err(WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "match saved communications microphone endpoint identifier",
+                    None,
+                ));
+            }
+            Ok(observed)
+        },
+    )
+}
+
+/// Changes the default communications microphone only if its exact saved state
+/// is still current.
+#[cfg(windows)]
+pub fn replace_default_comms_mic_mute(
+    expected: &CommsMicMuteState,
+    muted: bool,
+) -> WindowsResult<CommsMicMuteState> {
+    validate_endpoint_id(&expected.device_id)?;
+    let expected = expected.clone();
+    run_on_audio_com_thread(
+        "totonoe-comms-mic-write-default",
+        "join Core Audio default communications microphone write thread",
+        move || {
+            let enumerator = audio_enumerator()?;
+            let endpoint = default_comms_capture_endpoint(&enumerator)?;
+            replace_endpoint_mute(&endpoint, &expected, muted)
+        },
+    )
+}
+
+/// Changes only the saved endpoint. It never resolves or touches the current
+/// default endpoint, so a default-device switch cannot redirect rollback.
+#[cfg(windows)]
+pub fn replace_comms_mic_mute_by_id(
+    expected: &CommsMicMuteState,
+    muted: bool,
+) -> WindowsResult<CommsMicMuteState> {
+    validate_endpoint_id(&expected.device_id)?;
+    let expected = expected.clone();
+    run_on_audio_com_thread(
+        "totonoe-comms-mic-write-saved",
+        "join Core Audio saved communications microphone write thread",
+        move || {
+            let enumerator = audio_enumerator()?;
+            let endpoint = endpoint_by_id(&enumerator, &expected.device_id)?;
+            replace_endpoint_mute(&endpoint, &expected, muted)
+        },
+    )
+}
+
+#[cfg(not(windows))]
+pub fn read_default_comms_mic_mute() -> WindowsResult<CommsMicMuteState> {
+    Err(WindowsError::unsupported(
+        "read default communications microphone mute",
+    ))
+}
+
+#[cfg(not(windows))]
+pub fn read_comms_mic_mute_by_id(_endpoint_id: &[u16]) -> WindowsResult<CommsMicMuteState> {
+    Err(WindowsError::unsupported(
+        "read saved communications microphone mute",
+    ))
+}
+
+#[cfg(not(windows))]
+pub fn replace_default_comms_mic_mute(
+    _expected: &CommsMicMuteState,
+    _muted: bool,
+) -> WindowsResult<CommsMicMuteState> {
+    Err(WindowsError::unsupported(
+        "write default communications microphone mute",
+    ))
+}
+
+#[cfg(not(windows))]
+pub fn replace_comms_mic_mute_by_id(
+    _expected: &CommsMicMuteState,
+    _muted: bool,
+) -> WindowsResult<CommsMicMuteState> {
+    Err(WindowsError::unsupported(
+        "write saved communications microphone mute",
     ))
 }
 
@@ -395,7 +711,82 @@ mod tests {
         assert_eq!(error.kind, WindowsErrorKind::ResourceLimit);
     }
 
+    #[test]
+    fn communications_mic_state_fingerprint_covers_id_and_mute() {
+        let base = CommsMicMuteState {
+            device_id: vec![1, 2, 3],
+            muted: false,
+        };
+        assert_ne!(base.fingerprint(), base.with_mute(true).fingerprint());
+        assert_ne!(
+            base.fingerprint(),
+            CommsMicMuteState {
+                device_id: vec![1, 2, 4],
+                muted: false,
+            }
+            .fingerprint()
+        );
+    }
+
+    #[test]
+    fn saved_endpoint_identifiers_are_strictly_bounded() {
+        assert!(validate_endpoint_id(&[1]).is_ok());
+        assert_eq!(
+            validate_endpoint_id(&[])
+                .expect_err("empty identifier")
+                .kind,
+            WindowsErrorKind::InvalidData
+        );
+        assert_eq!(
+            validate_endpoint_id(&[1, 0])
+                .expect_err("embedded nul")
+                .kind,
+            WindowsErrorKind::InvalidData
+        );
+        assert_eq!(
+            validate_endpoint_id(&vec![1; MAX_ENDPOINT_ID_UTF16 + 1])
+                .expect_err("overlong identifier")
+                .kind,
+            WindowsErrorKind::ResourceLimit
+        );
+    }
+
     #[cfg(windows)]
+    /// 保存した端末が見つからないとき、**既定の端末へすり替わらない**こと。
+    ///
+    /// これがこの機能で一番怖いところ。抜き差しで既定が変わったあとに
+    /// 「戻す」を押したら別のマイクがミュートされる、という事故になる。
+    /// 存在しない ID を渡して、既定の状態が返ってこないことを実機で確かめる。
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "実機の音声端末を読む"]
+    fn a_saved_endpoint_that_is_gone_never_falls_back_to_the_current_default() {
+        let Ok(current) = read_default_comms_mic_mute() else {
+            println!("EVIDENCE: comms_mic_fallback skipped (既定の通話マイクが無い)");
+            return;
+        };
+        // 実在しない端末 ID。形は本物に似せる。
+        let bogus: Vec<u16> = "{0.0.1.00000000}.{00000000-0000-0000-0000-000000000000}"
+            .encode_utf16()
+            .collect();
+        assert_ne!(
+            bogus, current.device_id,
+            "取り違え用の ID が本物と一致している"
+        );
+
+        let outcome = read_comms_mic_mute_by_id(&bogus);
+        println!(
+            "EVIDENCE: comms_mic_fallback bogus_id_read_is_err={} detail={:?}",
+            outcome.is_err(),
+            outcome.as_ref().err()
+        );
+        let observed = outcome.err();
+        assert!(
+            observed.is_some(),
+            "見つからない端末で既定の状態を返してはいけない"
+        );
+    }
+
     #[test]
     #[ignore = "real-machine Core Audio read-only smoke"]
     fn real_machine_audio_output_smoke_prints_no_names() {

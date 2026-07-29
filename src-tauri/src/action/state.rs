@@ -256,6 +256,13 @@ pub enum ObservedValue {
         /// Windows が扱う 1〜20 の速さ。
         speed: i32,
     },
+    /// Software-mute bit on the one saved `eCommunications` capture endpoint.
+    ///
+    /// The machine-specific endpoint identifier remains in the private backup,
+    /// not in presentation state.
+    CommunicationsMicrophone {
+        muted: bool,
+    },
     /// 電源モード。**要求値と実効値を1つにまとめない。**
     /// Windows は前者を「他の signal に上書きされ得る vote」と説明している。
     PowerMode {

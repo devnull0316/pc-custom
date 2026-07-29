@@ -154,6 +154,7 @@ pub enum BackupPayload {
     ShiftInterruptionGuard(ShiftInterruptionGuardBackup),
     PowerMode(PowerModeBackup),
     PointerFeel(PointerFeelBackup),
+    CommsMicMute(CommsMicMuteBackup),
 }
 
 /// ポインターの動き方の変更前状態。
@@ -165,6 +166,17 @@ pub enum BackupPayload {
 pub struct PointerFeelBackup {
     pub original: crate::windows::PointerFeel,
     pub intended: crate::windows::PointerFeel,
+}
+
+/// The exact default communications capture endpoint changed by this Action.
+///
+/// Rollback resolves `device_id` directly and never asks Windows for the new
+/// default endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommsMicMuteBackup {
+    pub original: crate::windows::CommsMicMuteState,
+    pub intended: crate::windows::CommsMicMuteState,
 }
 
 /// 電源モードの変更前状態。
