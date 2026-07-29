@@ -1641,3 +1641,50 @@ npm run build
 ✓ 61 modules transformed
 ✓ built（CSS構文警告0件）
 ```
+
+## 画面共有の前と後（2026-07-29）
+
+- モード画面に会議前後の専用パネルを追加した。項目は
+  「このアプリが自動で確認・変更したもの」「利用者自身に確認してもらうもの」
+  「確認できないもの」の3区分で、総合点や一括の完了表示は作っていない。
+- 自動変更は既存の `setup.window_layout` と `session.prevent_sleep` の2件だけ。
+  固定要求を既存の `preview -> commit -> journal` へ渡し、終了時は記録したitemを逆順に戻す。
+  Actionは追加しておらず **71件のまま**。
+- 実行中のitem参照は `share-session.json` へ上限付き・未知field拒否で耐久保存する。
+  復元前にtransaction ID、item ID、Action IDの対応をjournalで再確認する。
+  各itemの復元後に残りを保存するため、途中終了後も残件だけを続行できる。
+- 会議中に外部移動された窓は既存の配置Actionが上書きせず、理由を終了結果へ出す。
+  マイクと既定音声は既存の独立probeで現在値だけを表示し、変更しない。
+  通知は固定のWindows設定ページへ案内し、Teams、Zoom、ブラウザーなどの状態は
+  「確認できないもの」へ分離した。
+- 画面文言の3区分と、誤解を招く指定語句が含まれないことを単体テストで固定した。
+
+実機ignored test:
+
+```text
+EVIDENCE: share_session item=sleep measured=true during_active=true after_active=false reason=independent_lease_snapshot_before_and_after
+EVIDENCE: share_session item=window_layout measured=true desired=[(120,140 360x240 show=1),(520,180 360x240 show=1)] before=[(460,360 360x240 show=1),(900,390 360x240 show=1)] applied=[(120,140 360x240 show=1),(520,180 360x240 show=1)] externally_changed=[(1180,650 360x240 show=1),(520,180 360x240 show=1)] after=[(1180,650 360x240 show=1),(900,390 360x240 show=1)] reason=coordinates_read_by_separate_process
+EVIDENCE: share_session item=microphone measured=true muted=false reason=windows_default_comms_input_only_meeting_app_delivery_not_measured
+EVIDENCE: share_session item=audio_output measured=true endpoints=8 default_exists=true reason=windows_default_output_only_meeting_app_route_not_measured
+EVIDENCE: share_session item=notifications measured=false reason=no_general_probe_for_priority_or_app_notifications
+```
+
+完了コマンド:
+
+```text
+cargo test --lib -- --test-threads=1
+test result: ok. 334 passed; 0 failed; 65 ignored; 0 measured; 0 filtered out
+
+cargo test --lib presentation::count_report::dump_action_counts -- --exact --nocapture --test-threads=1
+総数=71 変更できる(persistent+session)=16 確認のみ=9 表示専用=39 設定案内=6
+
+cargo clippy --all-targets -- -D warnings
+Finished dev profile
+
+cargo fmt --check
+exit code 0
+
+npm run build
+✓ 63 modules transformed
+✓ built（CSS構文警告0件）
+```

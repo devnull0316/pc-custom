@@ -255,6 +255,27 @@ pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreRes
 }
 
 #[tauri::command]
+pub fn share_session_state(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::share_session::ShareSessionState> {
+    Ok(state.share_session_store()?.state())
+}
+
+#[tauri::command]
+pub fn share_session_start(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::share_session::ShareSessionResult> {
+    crate::share_session::start(state.engine()?, state.share_session_store()?)
+}
+
+#[tauri::command]
+pub fn share_session_finish(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::share_session::ShareSessionResult> {
+    crate::share_session::finish(state.engine()?, state.share_session_store()?)
+}
+
+#[tauri::command]
 pub fn theme_schedule_get(
     state: State<'_, ApplicationState>,
 ) -> CoreResult<crate::theme_schedule::ThemeScheduleState> {

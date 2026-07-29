@@ -14,6 +14,7 @@ import type {
 import { GameReadinessPanel } from "./GameReadinessPanel";
 import { HotCornerPanel } from "./HotCornerPanel";
 import { Icon } from "./Icon";
+import { ShareSessionPanel } from "./ShareSessionPanel";
 
 interface ProfilesViewProps {
   dataMode: DataMode;
@@ -214,6 +215,7 @@ export function ProfilesView({
       )}
 
       <HotCornerPanel dataMode={dataMode} />
+      <ShareSessionPanel dataMode={dataMode} />
 
       <div className="inline-note" role="note">
         <Icon name="undo" />

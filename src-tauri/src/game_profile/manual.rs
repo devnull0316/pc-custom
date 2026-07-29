@@ -624,4 +624,118 @@ mod tests {
             ended.details,
         );
     }
+
+    #[test]
+    #[ignore = "real-machine screen-sharing session probes and rollback smoke"]
+    fn share_session_measures_each_item_without_combining_unmeasured_results() {
+        let directory = tempfile::tempdir().expect("private screen-sharing session directory");
+        let profile_store = Arc::new(
+            ProfileStore::open(directory.path().join("profiles.json"))
+                .expect("screen-sharing profile store"),
+        );
+        let layout_store = Arc::new(
+            WindowLayoutStore::open(directory.path().join("window-layout.json"))
+                .expect("screen-sharing layout store"),
+        );
+        let share_store = Arc::new(
+            crate::share_session::ShareSessionStore::open(
+                directory.path().join("share-session.json"),
+            )
+            .expect("screen-sharing session store"),
+        );
+        let journal = Arc::new(JournalDatabase::open_in_memory().expect("screen-sharing journal"));
+        let mut child = WorkspaceChildProcess::start();
+
+        let desired = child.request("read");
+        assert_eq!(desired.len(), 2);
+        let snapshot =
+            crate::windows::capture_window_layout_for_process_for_test(child.process_id())
+                .expect("capture screen-sharing child windows");
+        layout_store
+            .replace(snapshot)
+            .expect("save screen-sharing layout");
+        let before = child.request("move_before");
+        assert_ne!(before, desired);
+
+        let engine = Arc::new(
+            PcCustomEngine::new_with_runtime_stores(
+                journal,
+                Some(OsIdentity::load().expect("real Windows identity")),
+                Some(profile_store),
+                Some(layout_store),
+            )
+            .expect("screen-sharing engine"),
+        );
+        let started = crate::share_session::start(engine.clone(), share_store.clone())
+            .expect("start through preview, commit, and journal");
+        assert_eq!(started.status, "started");
+
+        let sleep_item_id = share_store
+            .sleep_item_id_for_test()
+            .expect("persisted sleep item reference");
+        let sleep_during = crate::windows::sleep_lease_manager()
+            .and_then(|manager| manager.snapshot_for(sleep_item_id))
+            .expect("read sleep request through manager probe");
+        assert!(sleep_during.requested_owner_active);
+
+        let applied = child.request("read");
+        assert_eq!(applied, desired);
+        let externally_changed = child.request("move_external");
+        assert_ne!(externally_changed[0], applied[0]);
+        assert_eq!(externally_changed[1], applied[1]);
+
+        let microphone_evidence = match crate::windows::read_default_comms_mic_mute() {
+            Ok(observed) => format!(
+                "EVIDENCE: share_session item=microphone measured=true muted={} reason=windows_default_comms_input_only_meeting_app_delivery_not_measured",
+                observed.muted
+            ),
+            Err(_) => "EVIDENCE: share_session item=microphone measured=false reason=windows_default_comms_input_probe_unavailable".to_owned(),
+        };
+        let audio_evidence = match crate::windows::read_audio_output_observation() {
+            Ok(observed) => format!(
+                "EVIDENCE: share_session item=audio_output measured=true endpoints={} default_exists={} reason=windows_default_output_only_meeting_app_route_not_measured",
+                observed.endpoints.len(),
+                observed.endpoints.iter().any(|endpoint| endpoint.is_default),
+            ),
+            Err(_) => "EVIDENCE: share_session item=audio_output measured=false reason=windows_default_output_probe_unavailable".to_owned(),
+        };
+
+        let finished = crate::share_session::finish(engine, share_store.clone())
+            .expect("finish through reverse journal rollback");
+        assert_eq!(finished.status, "finished");
+        assert!(
+            finished
+                .details
+                .iter()
+                .any(|detail| detail.contains("外部から移動")),
+            "the skipped window must be explained separately"
+        );
+        let after = child.request("read");
+        assert_eq!(after[0], externally_changed[0]);
+        assert_eq!(after[1], before[1]);
+
+        let sleep_after = crate::windows::sleep_lease_manager()
+            .and_then(|manager| manager.snapshot_for(sleep_item_id))
+            .expect("read released sleep request through manager probe");
+        assert!(!sleep_after.requested_owner_active);
+        assert!(!share_store.state().active);
+
+        println!(
+            "EVIDENCE: share_session item=sleep measured=true during_active={} after_active={} reason=independent_lease_snapshot_before_and_after",
+            sleep_during.requested_owner_active, sleep_after.requested_owner_active
+        );
+        println!(
+            "EVIDENCE: share_session item=window_layout measured=true desired=[{}] before=[{}] applied=[{}] externally_changed=[{}] after=[{}] reason=coordinates_read_by_separate_process",
+            probe_text(&desired),
+            probe_text(&before),
+            probe_text(&applied),
+            probe_text(&externally_changed),
+            probe_text(&after),
+        );
+        println!("{microphone_evidence}");
+        println!("{audio_evidence}");
+        println!(
+            "EVIDENCE: share_session item=notifications measured=false reason=no_general_probe_for_priority_or_app_notifications"
+        );
+    }
 }

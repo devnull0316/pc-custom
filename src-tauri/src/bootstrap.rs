@@ -20,6 +20,7 @@ pub struct ApplicationState {
     theme_schedule_store: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     taskbar_store: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
     hot_corner_store: Option<Arc<crate::hot_corner::HotCornerStore>>,
+    share_session_store: Option<Arc<crate::share_session::ShareSessionStore>>,
     hot_corner_presenter: Option<Arc<crate::hot_corner::HotCornerPresenter>>,
     mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
     initialization_error: Option<CoreError>,
@@ -37,6 +38,7 @@ impl ApplicationState {
                 theme_schedule_store,
                 taskbar_store,
                 hot_corner_store,
+                share_session_store,
             )) => {
                 let engine = Arc::new(engine);
                 let hot_corner_presenter =
@@ -69,6 +71,7 @@ impl ApplicationState {
                         theme_schedule_store: Some(theme_schedule_store),
                         taskbar_store: Some(taskbar_store),
                         hot_corner_store: Some(hot_corner_store),
+                        share_session_store: Some(share_session_store),
                         hot_corner_presenter: Some(hot_corner_presenter),
                         mode_ribbon,
                         initialization_error: None,
@@ -83,6 +86,7 @@ impl ApplicationState {
                         theme_schedule_store: Some(theme_schedule_store),
                         taskbar_store: Some(taskbar_store),
                         hot_corner_store: Some(hot_corner_store),
+                        share_session_store: Some(share_session_store),
                         hot_corner_presenter: Some(hot_corner_presenter),
                         mode_ribbon,
                         initialization_error: Some(error),
@@ -97,6 +101,7 @@ impl ApplicationState {
                 theme_schedule_store: None,
                 taskbar_store: None,
                 hot_corner_store: None,
+                share_session_store: None,
                 hot_corner_presenter: None,
                 mode_ribbon: None,
                 initialization_error: Some(error),
@@ -118,6 +123,14 @@ impl ApplicationState {
         self.hot_corner_store.clone().ok_or_else(|| {
             CoreError::recovery_required(
                 "ホットコーナー設定の保存領域を初期化できなかったため、操作を停止しました。",
+            )
+        })
+    }
+
+    pub fn share_session_store(&self) -> CoreResult<Arc<crate::share_session::ShareSessionStore>> {
+        self.share_session_store.clone().ok_or_else(|| {
+            CoreError::recovery_required(
+                "画面共有セッションの保存領域を初期化できなかったため、操作を停止しました。",
             )
         })
     }
@@ -286,6 +299,7 @@ type EngineBootstrap = (
     Arc<crate::theme_schedule::ThemeScheduleStore>,
     Arc<crate::taskbar_watcher::TaskbarAutoHideStore>,
     Arc<crate::hot_corner::HotCornerStore>,
+    Arc<crate::share_session::ShareSessionStore>,
 );
 
 fn initialize_engine() -> CoreResult<EngineBootstrap> {
@@ -332,6 +346,9 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
     let hot_corner_store = Arc::new(crate::hot_corner::HotCornerStore::open(
         data_directory.join("hot-corners.json"),
     )?);
+    let share_session_store = Arc::new(crate::share_session::ShareSessionStore::open(
+        data_directory.join("share-session.json"),
+    )?);
     Ok((
         engine,
         instance_guard,
@@ -339,6 +356,7 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
         theme_schedule_store,
         taskbar_store,
         hot_corner_store,
+        share_session_store,
     ))
 }
 

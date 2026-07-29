@@ -35,6 +35,8 @@ import type {
   TimelineItem,
   WindowLayoutStatus,
   ShellRestartOutcome,
+  ShareSessionResult,
+  ShareSessionState,
 } from "./model";
 
 export interface CoreSnapshot {
@@ -183,6 +185,19 @@ export function runProfileNow(id: string): Promise<ManualProfileResult> {
 export function restoreProfileNow(id: string): Promise<ManualProfileResult> {
   return call<ManualProfileResult>("profile_restore_now", { id });
 }
+
+export function getShareSessionState(): Promise<ShareSessionState> {
+  return call<ShareSessionState>("share_session_state");
+}
+
+export function startShareSession(): Promise<ShareSessionResult> {
+  return call<ShareSessionResult>("share_session_start");
+}
+
+export function finishShareSession(): Promise<ShareSessionResult> {
+  return call<ShareSessionResult>("share_session_finish");
+}
+
 export function deleteProfile(id: string): Promise<void> {
   return call<void>("profile_delete", { id });
 }

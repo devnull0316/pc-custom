@@ -19,6 +19,7 @@ pub mod presentation;
 mod settings_file;
 pub mod settings_link;
 pub mod setup;
+pub mod share_session;
 pub mod storage_history;
 pub mod taskbar_watcher;
 pub mod theme_schedule;
@@ -77,6 +78,9 @@ pub fn run() {
             commands::profile_run_now,
             commands::profile_restore_now,
             commands::profile_delete,
+            commands::share_session_state,
+            commands::share_session_start,
+            commands::share_session_finish,
             commands::config_export,
             commands::config_import_preview,
             commands::config_import_apply,

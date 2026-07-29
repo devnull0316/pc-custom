@@ -273,6 +273,19 @@ export interface ManualProfileResult {
   message: string;
   details: readonly string[];
 }
+
+export interface ShareSessionState {
+  active: boolean;
+  reversibleItemCount: number;
+}
+
+export interface ShareSessionResult {
+  status: "started" | "finished";
+  message: string;
+  details: readonly string[];
+  state: ShareSessionState;
+}
+
 export interface ImportPreviewItem {
   name: string;
   executablePath: string;

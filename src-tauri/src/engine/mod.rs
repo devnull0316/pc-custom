@@ -457,6 +457,19 @@ impl PcCustomEngine {
         Ok(timeline)
     }
 
+    pub(crate) fn journal_item_identity(
+        &self,
+        item_id: Uuid,
+    ) -> CoreResult<Option<(Uuid, ActionId, bool)>> {
+        Ok(self.journal.load_item(item_id)?.map(|item| {
+            (
+                item.transaction_id,
+                item.action_id,
+                matches!(item.state, ItemState::Applied | ItemState::RollingBack),
+            )
+        }))
+    }
+
     pub fn capture_storage_history(
         &self,
         categories: Vec<crate::storage_history::StorageCategory>,
