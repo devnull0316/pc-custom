@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { BootstrapStatus, DataMode, TimelineItem } from "../model";
 import { timelineStatusLabel } from "../model";
+import { screenText } from "../publicCopy";
 import { HealthPanel } from "./HealthPanel";
 import { Icon } from "./Icon";
 
@@ -43,10 +44,10 @@ export function TimelineView({ dataMode, bootstrap, items, rollbackPendingId, re
               <li className="timeline-entry" key={item.itemId}>
                 <div className={`timeline-marker timeline-marker--${item.status}`}><Icon name={alert ? "warning" : "check"} size={15} /></div>
                 <article>
-                  <header className="timeline-entry__header"><div><time dateTime={item.startedAt}>{formatDate(item.startedAt)}</time><h2>{item.title}</h2><p>{item.summary}</p></div><span className={`status-pill status-pill--${item.status}`}>{timelineStatusLabel(item.status)}</span></header>
-                  <div className="timeline-state-change"><span><small>変更前</small><strong>{item.before}</strong></span><Icon name="arrow" /><span><small>変更後</small><strong>{item.after}</strong></span></div>
+                  <header className="timeline-entry__header"><div><time dateTime={item.startedAt}>{formatDate(item.startedAt)}</time><h2>{item.title}</h2><p>{screenText(item.summary, "この項目の処理結果です。")}</p></div><span className={`status-pill status-pill--${item.status}`}>{timelineStatusLabel(item.status)}</span></header>
+                  <div className="timeline-state-change"><span><small>変更前</small><strong>{screenText(item.before, "Windowsから読み取った状態")}</strong></span><Icon name="arrow" /><span><small>変更後</small><strong>{screenText(item.after, "この項目に必要な状態")}</strong></span></div>
                   {expanded ? (
-                    <div className="timeline-details" id={`timeline-details-${item.itemId}`}><ol aria-label="処理結果">{item.stages.map((stage) => <li className={`stage stage--${stage.status}`} key={stage.name}><span><Icon name={stage.status === "failed" ? "warning" : "check"} size={13} /></span>{stage.name}</li>)}</ol><dl><div><dt>項目ID</dt><dd><code>{item.actionId}</code></dd></div><div><dt>まとまりID</dt><dd><code>{item.transactionId}</code></dd></div>{item.diagnosticId == null ? null : <div><dt>診断ID</dt><dd><code>{item.diagnosticId}</code></dd></div>}</dl></div>
+                    <div className="timeline-details" id={`timeline-details-${item.itemId}`}><ol aria-label="処理結果">{item.stages.map((stage) => <li className={`stage stage--${stage.status}`} key={stage.name}><span><Icon name={stage.status === "failed" ? "warning" : "check"} size={13} /></span>{stage.name}</li>)}</ol></div>
                   ) : null}
                   <div className="timeline-entry__actions">
                     <button aria-controls={`timeline-details-${item.itemId}`} aria-expanded={expanded} className="text-button" onClick={() => setExpandedId((current) => current === item.itemId ? null : item.itemId)} type="button">{expanded ? "内容・結果を閉じる" : "内容・結果を見る"}</button>

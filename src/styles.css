@@ -611,11 +611,6 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .powertoys-status small { color: var(--text-tertiary); }
 .powertoys-status strong { font-size: var(--fs-base); }
 .powertoys-panel__actions { display: flex; flex-wrap: wrap; gap: .55rem; }
-  background: color-mix(in srgb, var(--text) 3%, transparent); border: 1px solid color-mix(in srgb, var(--text) 11%, transparent); }
-/* アクセント色は面の装飾用で、小さい文字に使うとAA(4.5:1)へ届かない。
-   機能名は本文色で出し、アクセントは下の縁取りだけに使う。 */
-  color: var(--text); background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); }
 @media (max-width: 780px) {
   .setup-essentials__grid { grid-template-columns: 1fr; }
   .setup-essential-card--wide { grid-column: auto; }

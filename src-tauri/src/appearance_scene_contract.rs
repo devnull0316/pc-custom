@@ -123,7 +123,7 @@ fn appearance_scene_copy_stays_within_the_evidence() {
 }
 
 #[test]
-fn appearance_scene_requests_prepare_one_existing_journal_item_per_action() {
+fn parsed_scene_actions_can_be_recorded_as_three_distinct_journal_items() {
     for scene in scenes() {
         let journal = JournalDatabase::open_in_memory().expect("scene journal");
         let transaction_id = Uuid::new_v4();

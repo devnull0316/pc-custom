@@ -204,10 +204,7 @@ impl HotCornerStore {
             setting,
         })
         .map_err(|_| CoreError::storage())?;
-        let mut temporary = self.path.clone();
-        temporary.set_extension("json.tmp");
-        std::fs::write(&temporary, bytes).map_err(|_| CoreError::storage())?;
-        std::fs::rename(&temporary, &self.path).map_err(|_| CoreError::storage())?;
+        crate::settings_file::replace(&self.path, &bytes)?;
         *self.setting.lock() = setting;
         *self.last_error.lock() = None;
         Ok(setting)
@@ -633,5 +630,23 @@ mod tests {
         let setting = enabled();
         store.set(setting).expect("set");
         assert_eq!(HotCornerStore::open(path).expect("reopen").get(), setting);
+    }
+
+    #[test]
+    fn store_can_replace_an_existing_setting_file() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let path = temporary.path().join("hot-corners.json");
+        let store = HotCornerStore::open(path.clone()).expect("open");
+        store.set(enabled()).expect("first set");
+        let replacement = HotCornerSetting {
+            top_left: HotCornerAction::None,
+            top_right: HotCornerAction::OpenModes,
+            ..enabled()
+        };
+        store.set(replacement).expect("replace existing setting");
+        assert_eq!(
+            HotCornerStore::open(path).expect("reopen").get(),
+            replacement
+        );
     }
 }

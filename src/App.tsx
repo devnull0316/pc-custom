@@ -46,6 +46,7 @@ import type {
   ViewId,
   CommitItem,
 } from "./model";
+import { screenText } from "./publicCopy";
 
 interface UiError {
   message: string;
@@ -621,7 +622,7 @@ export function App() {
           width="wide"
         >
           <div className="preview-list">
-            {preview.changes.map((change) => <article className="preview-change" key={change.actionId}><header><span className={`risk-label risk-label--${change.riskLevel}`}>{change.riskLevel === "safe" ? "低リスク" : change.riskLevel === "caution" ? "注意" : "実験的"}</span><h3>{change.title}</h3></header><div><span><small>現在</small><strong>{change.before}</strong></span><Icon name="arrow" /><span><small>適用後</small><strong>{change.after}</strong></span></div><p>{change.method}</p><small>対象: {change.resourceLabel} ／ {change.reversible ? "元に戻せます" : "変更はありません"}</small></article>)}
+            {preview.changes.map((change) => <article className="preview-change" key={change.actionId}><header><span className={`risk-label risk-label--${change.riskLevel}`}>{change.riskLevel === "safe" ? "低リスク" : change.riskLevel === "caution" ? "注意" : "実験的"}</span><h3>{change.title}</h3></header><div><span><small>現在</small><strong>{screenText(change.before, "Windowsから読み取った状態")}</strong></span><Icon name="arrow" /><span><small>適用後</small><strong>{screenText(change.after, "この項目に必要な状態")}</strong></span></div><p>Windowsのこの項目に必要な範囲だけを扱います。</p><small>{change.reversible ? "変更前の状態を保存し、この変更だけ元へ戻せます" : "Windowsの状態は変更しません"}</small></article>)}
           </div>
           {preview.warnings.length === 0 ? null : <div className="preview-warnings"><strong><Icon name="warning" />確認事項</strong><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
           <label className="confirmation-check"><input checked={previewConfirmed} onChange={(event) => setPreviewConfirmed(event.target.checked)} type="checkbox" /><span>変更前の状態が保存され、失敗時は逆順で復元されることを確認しました。</span></label>
@@ -644,7 +645,7 @@ export function App() {
           onClose={() => setDraftOpen(false)}
           title="モードの下書き"
         >
-          {profileDraft.length === 0 ? <div className="dialog-empty"><Icon name="plus" /><strong>Actionはまだありません</strong><span>Action詳細から「モードへ追加」を選んでください。</span></div> : <ul className="draft-list">{profileDraft.map((item) => <li key={item.actionId}><span><strong>{item.title}</strong><code>{item.actionId}</code></span><button aria-label={`${item.title}を下書きから削除`} onClick={() => setProfileDraft((current) => current.filter((candidate) => candidate.actionId !== item.actionId))} type="button"><Icon name="close" /></button></li>)}</ul>}
+          {profileDraft.length === 0 ? <div className="dialog-empty"><Icon name="plus" /><strong>Actionはまだありません</strong><span>Action詳細から「モードへ追加」を選んでください。</span></div> : <ul className="draft-list">{profileDraft.map((item) => <li key={item.actionId}><span><strong>{item.title}</strong></span><button aria-label={`${item.title}を下書きから削除`} onClick={() => setProfileDraft((current) => current.filter((candidate) => candidate.actionId !== item.actionId))} type="button"><Icon name="close" /></button></li>)}</ul>}
         </Dialog>
       ) : null}
       {justApplied.length === 0 ? null : (

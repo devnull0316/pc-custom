@@ -610,7 +610,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     #[ignore = "実機にクリック透過の窓を一時表示する。Windows設定は変更しない"]
-    fn the_ribbon_declares_itself_transparent_to_the_mouse() {
+    fn reports_mouse_transparency_when_the_taskbar_layout_is_supported() {
         use windows::Win32::{
             Foundation::{LPARAM, WPARAM},
             UI::WindowsAndMessaging::{
@@ -628,7 +628,9 @@ mod tests {
 
         let anchor = super::super::read_taskbar_anchor().expect("taskbar anchor must be readable");
         let Some(rect) = mode_ribbon_rect(anchor) else {
-            println!("EVIDENCE: ribbon_transparency skipped (この配置では出さない)");
+            println!(
+                "EVIDENCE: ribbon_transparency measured=false reason=この配置ではリボンを出さない"
+            );
             return;
         };
         let window =
@@ -644,7 +646,7 @@ mod tests {
         let hit = unsafe { SendMessageW(window.hwnd, WM_NCHITTEST, WPARAM(0), packed) };
 
         println!(
-            "EVIDENCE: ribbon_transparency ex_style=0x{ex_style:08X} ws_ex_transparent={has_transparent}              nchittest={} htransparent={}",
+            "EVIDENCE: ribbon_transparency measured=true ex_style=0x{ex_style:08X} ws_ex_transparent={has_transparent}              nchittest={} htransparent={}",
             hit.0,
             hit.0 == HTTRANSPARENT as isize
         );
@@ -675,7 +677,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     #[ignore = "実機に一時的な窓を出す。Windows設定は変更しない"]
-    fn the_click_through_probe_can_actually_see_a_window_that_is_not_transparent() {
+    fn reports_whether_window_from_point_can_measure_an_opaque_probe() {
         use windows::Win32::{
             Foundation::{HINSTANCE, HWND},
             UI::WindowsAndMessaging::{
@@ -701,7 +703,7 @@ mod tests {
 
         let anchor = super::super::read_taskbar_anchor().expect("taskbar anchor must be readable");
         let Some(rect) = mode_ribbon_rect(anchor) else {
-            println!("EVIDENCE: ribbon_probe skipped (この配置では出さない)");
+            println!("EVIDENCE: ribbon_probe measured=false reason=この配置ではリボンを出さない");
             return;
         };
 
@@ -769,14 +771,15 @@ mod tests {
         }
         let visible_to_probe = hit == owned.0;
         println!(
-            "EVIDENCE: ribbon_probe opaque_hwnd=0x{:X} WindowFromPoint=0x{:X} probe_sees_it={}",
+            "EVIDENCE: ribbon_probe measured={} opaque_hwnd=0x{:X} WindowFromPoint=0x{:X} probe_sees_it={}",
+            visible_to_probe,
             owned.0 .0 as usize, hit.0 as usize, visible_to_probe
         );
         if !visible_to_probe {
             // 画面いっぱいの窓が手前にあると、透過していてもいなくても同じ結果になる。
             // この機の常態がそれなので、見送る形にする。
             // **見送りを透過の合格として読まないこと。**
-            // 透過そのものは `the_ribbon_declares_itself_transparent_to_the_mouse` が
+            // 透過そのものは `reports_mouse_transparency_when_the_taskbar_layout_is_supported` が
             // Z順に依存しない形で測っている。ここはその上に乗る確認でしかない。
             println!(
                 "EVIDENCE: ribbon_probe skipped=cannot_measure                  reason=リボンの位置を覆う窓があり、WindowFromPoint では区別できない"
@@ -788,7 +791,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     #[ignore = "実機にクリック透過のモードリボンを一時表示する。Windows設定は変更しない"]
-    fn mode_ribbon_geometry_and_click_through_on_real_taskbar() {
+    fn reports_geometry_and_click_through_when_window_from_point_can_measure_them() {
         use windows::Win32::{
             Foundation::HWND,
             UI::WindowsAndMessaging::{DispatchMessageW, PeekMessageW, MSG, PM_REMOVE},
@@ -823,10 +826,10 @@ mod tests {
             if covers_everything {
                 // 見送る。**ただし透過そのものが未証明のまま通すわけではない。**
                 // Z順に依存しない証拠は
-                // `the_ribbon_declares_itself_transparent_to_the_mouse` が取っている。
+                // `reports_mouse_transparency_when_the_taskbar_layout_is_supported` が取っている。
                 // ここは画面が空いているときにだけ意味を持つ、より強い端から端までの確認。
                 println!(
-                    "EVIDENCE: mode_ribbon skipped=cannot_measure covering_rect=({},{},{},{})                      reason=画面いっぱいの窓が手前にあり、透過の有無を区別できない。                     透過の証拠は the_ribbon_declares_itself_transparent_to_the_mouse を見ること",
+                    "EVIDENCE: mode_ribbon measured=false skipped=cannot_measure covering_rect=({},{},{},{})                      reason=画面いっぱいの窓が手前にあり、透過の有無を区別できない。                     透過の証拠は reports_mouse_transparency_when_the_taskbar_layout_is_supported を見ること",
                     covering.left, covering.top, covering.right, covering.bottom
                 );
                 return;
@@ -857,7 +860,7 @@ mod tests {
         );
 
         println!(
-            "EVIDENCE: taskbar=({},{},{},{}) ribbon=({},{},{},{}) ribbon_hwnd=0x{:X} WindowFromPoint(before=0x{:X},during=0x{:X},after=0x{:X}) click_through={} restored={}",
+            "EVIDENCE: mode_ribbon measured=true taskbar=({},{},{},{}) ribbon=({},{},{},{}) ribbon_hwnd=0x{:X} WindowFromPoint(before=0x{:X},during=0x{:X},after=0x{:X}) click_through={} restored={}",
             anchor.left,
             anchor.top,
             anchor.right,

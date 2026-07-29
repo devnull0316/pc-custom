@@ -425,7 +425,7 @@ mod tests {
         let outer = crate::hot_corner::external_corner_points(primary, &observation.monitors);
         // 名前のとおり CPU 時間も測る。**常駐するものは、費用を数字で出す。**
         // 25回のポーリングの前後で、このプロセスが使ったカーネル時間とユーザー時間の差を取る。
-        fn process_cpu_100ns() -> u64 {
+        fn process_cpu_100ns() -> super::WindowsResult<u64> {
             use windows::Win32::{
                 Foundation::FILETIME,
                 System::Threading::{GetCurrentProcess, GetProcessTimes},
@@ -434,7 +434,7 @@ mod tests {
             let mut exit = FILETIME::default();
             let mut kernel = FILETIME::default();
             let mut user = FILETIME::default();
-            let ok = unsafe {
+            unsafe {
                 GetProcessTimes(
                     GetCurrentProcess(),
                     &mut creation,
@@ -443,17 +443,20 @@ mod tests {
                     &mut user,
                 )
             }
-            .is_ok();
-            if !ok {
-                return 0;
-            }
+            .map_err(|error| {
+                super::WindowsError::new(
+                    super::WindowsErrorKind::ApiFailure,
+                    "GetProcessTimes for hot-corner evidence",
+                    Some(i64::from(error.code().0)),
+                )
+            })?;
             let join = |value: FILETIME| {
                 (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime)
             };
-            join(kernel) + join(user)
+            Ok(join(kernel) + join(user))
         }
 
-        let cpu_before = process_cpu_100ns();
+        let cpu_before = process_cpu_100ns().expect("read CPU time before polling");
         let wall_before = std::time::Instant::now();
         for _ in 0..25 {
             let _ = super::read_cursor_desktop_observation().expect("poll cursor and monitors");
@@ -467,9 +470,12 @@ mod tests {
         // それは「1ティック分」であって「15.6ms 使った」ではない。
         // 実際の消費は 0 から 15.6ms のどこか。**上限しか言えない。**
         // 上限として、1コアの約 0.3% を超えないことだけが分かる。
-        let cpu_us = process_cpu_100ns().saturating_sub(cpu_before) / 10;
+        let cpu_us = process_cpu_100ns()
+            .expect("read CPU time after polling")
+            .saturating_sub(cpu_before)
+            / 10;
         println!(
-            "EVIDENCE: cursor=({}, {}) primary=({}, {}, {}, {}) outer_corners={outer:?} polls=25 wall_ms={wall_ms} cpu_us={cpu_us}",
+            "EVIDENCE: hot_corner measured=true cursor=({}, {}) primary=({}, {}, {}, {}) outer_corners={outer:?} polls=25 wall_ms={wall_ms} cpu_us={cpu_us}",
             observation.cursor.x,
             observation.cursor.y,
             primary.left,

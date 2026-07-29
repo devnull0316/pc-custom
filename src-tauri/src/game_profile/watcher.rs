@@ -346,14 +346,34 @@ fn restore_taskbar_if_we_hid_it(
 
 /// 記録してある戻し先へ戻す。起動直後の復旧にも使う。
 fn restore_taskbar_to(store: &crate::taskbar_watcher::TaskbarAutoHideStore, baseline: bool) {
-    let Ok(observation) = crate::windows::observe_taskbar_auto_hide() else {
-        return;
+    let observation = match crate::windows::observe_taskbar_auto_hide() {
+        Ok(observation) => observation,
+        Err(_) => {
+            store.record_error(Some(
+                "タスクバーの元の設定を確認できないため、復旧記録を残しています。".to_owned(),
+            ));
+            return;
+        }
     };
-    if observation.auto_hide_bit != baseline {
-        // 第三者が既に触っていれば拒否される。取り返さない。
-        let _ = crate::windows::replace_taskbar_auto_hide(observation.auto_hide_bit, baseline);
+    let restored = if observation.auto_hide_bit == baseline {
+        true
+    } else {
+        crate::windows::replace_taskbar_auto_hide(observation.auto_hide_bit, baseline)
+            .is_ok_and(|after| after.auto_hide_bit == baseline)
+    };
+    if !restored {
+        store.record_error(Some(
+            "タスクバーを元の設定へ戻せないため、復旧記録を残しています。".to_owned(),
+        ));
+        return;
     }
-    let _ = store.clear_hiding();
+    if store.clear_hiding().is_err() {
+        store.record_error(Some(
+            "タスクバーは元へ戻りましたが、復旧記録を更新できませんでした。".to_owned(),
+        ));
+        return;
+    }
+    store.record_error(None);
 }
 
 /// 前回、隠したまま終わっていたら戻す。
@@ -427,18 +447,33 @@ fn follow_taskbar_auto_hide(
         WatcherDecision::Show => false,
     };
 
+    // 強制終了では Drop が走らない。実際に隠すより先に戻し先を永続化する。
+    if target {
+        let Some(baseline) = watcher.baseline() else {
+            store.record_error(Some(
+                "タスクバーの元の設定を確認できないため、変更しませんでした。".to_owned(),
+            ));
+            *watcher = crate::taskbar_watcher::TaskbarWatcher::default();
+            return;
+        };
+        if store.record_hiding(baseline).is_err() {
+            store.record_error(Some(
+                "タスクバーの復旧記録を保存できないため、変更しませんでした。".to_owned(),
+            ));
+            *watcher = crate::taskbar_watcher::TaskbarWatcher::default();
+            return;
+        }
+    }
+
     match crate::windows::replace_taskbar_auto_hide(observation.auto_hide_bit, target) {
         Ok(after) if after.auto_hide_bit == target => {
             store.record_error(None);
-            // 隠したことを先に残す。強制終了されてもここから戻せる。
-            match (target, watcher.baseline()) {
-                (true, Some(baseline)) => {
-                    let _ = store.record_hiding(baseline);
-                }
-                (false, _) => {
-                    let _ = store.clear_hiding();
-                }
-                _ => {}
+            if !target && store.clear_hiding().is_err() {
+                // 設定は戻っている。記録の消去だけ失敗したなら、次回起動時に
+                // 同じ戻し先を再確認できるよう記録を保つ。
+                store.record_error(Some(
+                    "タスクバーは元へ戻りましたが、復旧記録を更新できませんでした。".to_owned(),
+                ));
             }
         }
         Ok(_) => store.record_error(Some(

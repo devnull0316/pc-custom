@@ -16,6 +16,7 @@ pub mod hot_corner;
 pub mod ipc;
 pub mod journal;
 pub mod presentation;
+mod settings_file;
 pub mod settings_link;
 pub mod setup;
 pub mod taskbar_watcher;

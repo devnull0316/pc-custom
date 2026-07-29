@@ -9,6 +9,7 @@ import type {
   DataMode,
 } from "../model";
 import { isMutationAllowed, riskLabel } from "../model";
+import { detailPointsForScreen, methodSummaryForScreen, screenText } from "../publicCopy";
 import { AppearanceScenesPanel } from "./AppearanceScenesPanel";
 import { ExplorerRestartPanel } from "./ExplorerRestartPanel";
 import { Icon } from "./Icon";
@@ -41,13 +42,13 @@ function updateImpactLabel(impact: ActionPresentation["updateImpact"]): string {
 }
 
 function methodClassLabel(methodClass: ActionPresentation["methodClass"]): string {
-  if (methodClass === "public_api") return "Windows公開API";
-  if (methodClass === "microsoft_cli") return "Microsoft公式CLI";
-  if (methodClass === "winget") return "WinGet";
-  if (methodClass === "official_module") return "Microsoft公式モジュール";
-  if (methodClass === "documented_registry") return "文書化registry";
+  if (methodClass === "public_api") return "Windowsの公開された仕組み";
+  if (methodClass === "microsoft_cli") return "Microsoftの標準機能";
+  if (methodClass === "winget") return "Windowsのアプリ導入機能";
+  if (methodClass === "official_module") return "Microsoftの標準機能";
+  if (methodClass === "documented_registry") return "Windowsが保存する設定";
   if (methodClass === "limited_external") return "検証済み限定連携";
-  if (methodClass === "unverified_storage") return "未立証storage（読取のみ）";
+  if (methodClass === "unverified_storage") return "根拠確認中の保存情報（読み取りのみ）";
   return "分類情報なし";
 }
 
@@ -184,7 +185,7 @@ export function ActionBrowser({
                 <span className={`risk-rail risk-rail--${action.riskLevel}`} />
                 <span className="action-row__copy">
                   <strong>{action.name}</strong>
-                  <small>{action.currentState?.label ?? "現在の状態を確認"}</small>
+                  <small>{action.currentState == null ? "現在の状態を確認" : screenText(action.currentState.label, "Windowsから読み取った状態")}</small>
                 </span>
                 <span className="action-row__kind">{availabilityLabel(action)}</span>
                 <Icon name="chevron" size={16} />
@@ -251,10 +252,10 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
       <div className="detail-title-row">
         <div>
           <h2>{action.name}</h2>
-          <p>{action.description}</p>
+          <p>{screenText(action.description, "Windowsのこの項目について、現在の状態を確認してから安全な範囲だけを扱います。")}</p>
         </div>
       </div>
-      <p className="audience-line"><Icon name="info" size={16} />{action.audience}</p>
+      <p className="audience-line"><Icon name="info" size={16} />{screenText(action.audience, "この項目の状態を確認してから変更したい人向け")}</p>
       {!picksPowerMode ? null : (
         <div aria-label="どのモードにするか" className="mode-choice">
           <span>どれにしますか</span>
@@ -283,13 +284,15 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
       <div aria-label="現在と適用後の状態" className="state-comparison">
         <div className={`state-panel state-panel--${current?.kind ?? "unknown"}`}>
           <span>現在</span>
-          {detecting ? <strong className="state-loading"><Icon className="spin" name="spinner" />確認中</strong> : <strong>{current?.label ?? "未検出"}</strong>}
-          <small>{current?.detail ?? (dataMode === "catalog" ? "安全コア未接続のため現在値は表示していません。" : "状態を確認してください。")}</small>
+          {detecting ? <strong className="state-loading"><Icon className="spin" name="spinner" />確認中</strong> : <strong>{current == null ? "未検出" : screenText(current.label, "Windowsから読み取った状態")}</strong>}
+          <small>{current?.detail === undefined
+            ? (dataMode === "catalog" ? "安全コア未接続のため現在値は表示していません。" : "状態を確認してください。")
+            : screenText(current.detail, "Windowsから読み取った現在の状態です。")}</small>
           {current?.items === undefined || current.items.length === 0 ? null : (
             <div aria-label="検出した項目" className="state-item-list">
               <span>検出した項目</span>
               <ul>
-                {current.items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+                {current.items.map((item, index) => <li key={`${item}-${index}`}>{screenText(item, "Windowsから読み取った項目です。")}</li>)}
               </ul>
             </div>
           )}
@@ -297,7 +300,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         <span className="state-arrow"><Icon name="arrow" /></span>
         <div className="state-panel state-panel--desired">
           <span>{guidedCandidate ? "設計状態" : action.kind === "guided" ? "案内先" : action.kind === "observation" ? "確認する内容" : "適用後"}</span>
-          <strong>{action.desiredState}</strong>
+          <strong>{screenText(action.desiredState, "この項目に必要な範囲だけを扱う")}</strong>
         </div>
       </div>
       {/* 常に5個並べると2行を占め、どれも同じ重みで読まれない。
@@ -314,13 +317,9 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
       </div>
       {detailsOpen ? (
         <div className="detail-disclosure" id={`details-${action.id}`}>
-          <div><span className="detail-disclosure__label">{observationLike ? "確認方法" : "変更方法"}</span><p>{action.methodSummary}</p></div>
-          <ul>{action.detailPoints.map((point) => <li key={point}>{point}</li>)}</ul>
+          <div><span className="detail-disclosure__label">{observationLike ? "確認方法" : "変更方法"}</span><p>{methodSummaryForScreen(action)}</p></div>
+          <ul>{detailPointsForScreen(action).map((point) => <li key={point}>{point}</li>)}</ul>
           <dl className="compatibility-grid">
-            <div><dt>内部ID</dt><dd><code>{action.id}</code></dd></div>
-            <div><dt>版</dt><dd>v{action.actionVersion}</dd></div>
-            <div><dt>最小build</dt><dd>{action.minimumBuild}</dd></div>
-            <div><dt>試験上限</dt><dd>{action.maximumTestedBuild ?? "実機確認待ち"}</dd></div>
             <div><dt>方式</dt><dd>{action.kind === "persistent" ? "永続設定" : action.kind === "session" ? "セッション" : guidedCandidate ? "設計候補（変更不可）" : action.kind === "guided" ? "Windows設定案内（PCカスタム変更なし）" : "観測"}</dd></div>
             <div><dt>根拠分類</dt><dd>{methodClassLabel(action.methodClass)}</dd></div>
             <div><dt>危険度</dt><dd>{riskLabel(action.riskLevel)}</dd></div>

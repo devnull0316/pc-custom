@@ -265,7 +265,7 @@ pub fn action_presentation(
         detail_points.extend([
             "対象は、その時点でWindowsが既定の通話用入力としている1台だけです。".to_owned(),
             "別の入力デバイスを指定したアプリや、排他モードの音声には効かないことがあります。無音は保証しません。".to_owned(),
-            "復元は保存したdevice IDだけを対象にし、既定端末が変わっても新しい端末は触りません。".to_owned(),
+            "復元は適用前に保存した同じ通話用入力だけを対象にし、既定端末が変わっても新しい端末は触りません。".to_owned(),
         ]);
     }
     ActionPresentation {
@@ -930,7 +930,7 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
             "Windowsが公開している入力設定の機能で、確認画面を開く動作だけを一時停止"
         }
         ActionId::AudioCommsMicMute => {
-            "Core AudioでeCommunicationsの既定入力1台を特定し、EndpointVolumeのmute設定だけを変更"
+            "Windowsが公開している音声設定で、既定の通話用入力1台のミュート設定だけを変更"
         }
         ActionId::SetupStartupInventory => {
             "固定HKCU/HKLM RunキーとKnown Startup Folderの上限付き読み取り"
@@ -1895,6 +1895,32 @@ mod tests {
         assert!(integration.installed);
         assert!(integration.launch_available);
         assert_eq!(integration.version.as_deref(), Some("0.99.1"));
+    }
+
+    #[test]
+    fn communications_microphone_screen_copy_does_not_expose_internal_identifiers() {
+        let metadata = ACTION_REGISTRY
+            .get(ActionId::AudioCommsMicMute)
+            .expect("communications microphone action registered")
+            .metadata();
+        let ui = action_presentation(
+            metadata,
+            CompatibilityCatalog::decision_for_build(26_200),
+            None,
+        );
+        let visible_copy = serde_json::to_string(&ui).expect("serialize screen presentation");
+        for internal_term in [
+            "Core Audio",
+            "eCommunications",
+            "EndpointVolume",
+            "device ID",
+            "software mute",
+        ] {
+            assert!(
+                !visible_copy.contains(internal_term),
+                "画面向け説明に内部用語 {internal_term:?} を出さない"
+            );
+        }
     }
 
     #[test]

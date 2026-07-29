@@ -7,7 +7,10 @@
 //! - **境界をまたいだ時だけ**適用する。利用者が途中で手動変更した場合に張り合わない。
 //! - 設定は data-only JSON。任意コードやコマンドは持たない。
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -172,17 +175,13 @@ impl ThemeScheduleStore {
         Ok(schedule)
     }
 
-    fn persist(path: &PathBuf, schedule: &ThemeSchedule) -> CoreResult<()> {
+    fn persist(path: &Path, schedule: &ThemeSchedule) -> CoreResult<()> {
         let file = ThemeScheduleFile {
             version: THEME_SCHEDULE_FILE_VERSION,
             schedule: *schedule,
         };
         let bytes = serde_json::to_vec_pretty(&file).map_err(|_| CoreError::storage())?;
-        let mut temp = path.clone();
-        temp.set_extension("json.tmp");
-        std::fs::write(&temp, &bytes).map_err(|_| CoreError::storage())?;
-        std::fs::rename(&temp, path).map_err(|_| CoreError::storage())?;
-        Ok(())
+        crate::settings_file::replace(path, &bytes)
     }
 }
 
@@ -322,6 +321,17 @@ mod tests {
         let reopened = ThemeScheduleStore::open(path.clone()).expect("reopen");
         assert_eq!(reopened.get(), updated, "ディスクから復元できる");
 
+        let replaced = store
+            .set(schedule(9 * 60, 21 * 60))
+            .expect("replace existing setting");
+        assert_eq!(
+            ThemeScheduleStore::open(path.clone())
+                .expect("reopen replacement")
+                .get(),
+            replaced,
+            "既存ファイルも置換して保存できる"
+        );
+
         assert!(
             store.set(schedule(9 * 60, 9 * 60)).is_err(),
             "同一時刻は拒否"
@@ -334,7 +344,7 @@ mod tests {
             ThemeScheduleStore::open(path)
                 .expect("reopen after rejects")
                 .get(),
-            updated,
+            replaced,
             "拒否された値は保存されない"
         );
     }

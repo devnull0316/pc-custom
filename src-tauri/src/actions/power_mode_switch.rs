@@ -182,9 +182,14 @@ impl PowerModeSwitchAction {
         stage: ActionStage,
         message_key: &'static str,
     ) -> ActionResult<()> {
-        // AC を先に書く。片方だけ通ったまま返さないよう、失敗したら AC を巻き戻す。
+        // どちらの書き込みも、失敗を返しながら値だけ変えた可能性を捨てない。
+        // 先に両方を保存し、片方でも失敗したら両方を戻して読み直す。
         let before_ac =
             reading_bytes(read_ac_mode().map_err(|error| {
+                map_windows_error(stage, "action.power_mode.read_failed", error)
+            })?);
+        let before_dc =
+            reading_bytes(read_dc_mode().map_err(|error| {
                 map_windows_error(stage, "action.power_mode.read_failed", error)
             })?);
         write_ac_mode_raw(ac).map_err(|error| {
@@ -198,19 +203,19 @@ impl PowerModeSwitchAction {
             // 片方だけ書けた状態で「何も変えていません」とは言えない。
             // 巻き戻しに成功したときだけ、元の失敗として返す。
             // 巻き戻しも失敗したら、それは復旧が要る事態であって、単なる失敗ではない。
-            let compensated = match before_ac {
-                Some(original) => {
-                    write_ac_mode_raw(original).is_ok()
-                        && read_ac_mode()
-                            .ok()
-                            .and_then(|reading| match reading {
-                                PowerModeReading::Known(mode) => Some(mode.bytes()),
-                                PowerModeReading::Unrecognised(raw) => Some(raw),
-                                PowerModeReading::Unavailable => None,
-                            })
-                            .is_some_and(|current| current == original)
+            let compensated = match (before_ac, before_dc) {
+                (Some(original_ac), Some(original_dc)) => {
+                    let _ = write_ac_mode_raw(original_ac);
+                    let _ = write_dc_mode_raw(original_dc);
+                    read_ac_mode()
+                        .ok()
+                        .and_then(reading_bytes)
+                        .zip(read_dc_mode().ok().and_then(reading_bytes))
+                        .is_some_and(|(current_ac, current_dc)| {
+                            current_ac == original_ac && current_dc == original_dc
+                        })
                 }
-                None => false,
+                _ => false,
             };
             if !compensated {
                 return Err(ActionError::recovery_required(
@@ -501,7 +506,7 @@ mod tests {
 
     #[test]
     #[ignore = "実機の電源モードを一時的に変える"]
-    fn applying_and_rolling_back_is_observed_through_windows_each_time() {
+    fn reports_apply_and_rollback_when_both_supply_modes_are_readable() {
         use crate::{backup::BackupEnvelope, compatibility::OsIdentity};
         use uuid::Uuid;
 
@@ -510,14 +515,18 @@ mod tests {
         let (Some(original_ac), Some(original_dc)) =
             (reading_bytes(before_ac), reading_bytes(before_dc))
         else {
-            println!("EVIDENCE: power_mode_action skipped (この環境では読めない)");
+            println!(
+                "EVIDENCE: power_mode_action measured=false reason=この環境では両方の値を読めない"
+            );
             return;
         };
         let _restore = RestorePowerMode {
             ac: original_ac,
             dc: original_dc,
         };
-        println!("EVIDENCE: power_mode_action before ac={before_ac:?} dc={before_dc:?}");
+        println!(
+            "EVIDENCE: power_mode_action measured=true before ac={before_ac:?} dc={before_dc:?}"
+        );
 
         // 今と違い、かつこの PC が受け付ける値を選ぶ。
         // 受け付けない値で試すと、拒否の経路を測ることになって往復が測れない。

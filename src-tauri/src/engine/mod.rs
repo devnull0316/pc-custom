@@ -1028,9 +1028,9 @@ mod real_journal_probe {
 
     #[test]
     #[ignore = "実機の記録が要る"]
-    fn health_report_runs_against_the_real_journal() {
+    fn reports_health_probes_when_a_real_journal_baseline_exists() {
         let Some(local) = std::env::var_os("LOCALAPPDATA") else {
-            println!("EVIDENCE: health_report skipped (LOCALAPPDATA なし)");
+            println!("EVIDENCE: health_report measured=false reason=LOCALAPPDATAなし");
             return;
         };
         let path = PathBuf::from(local)
@@ -1038,7 +1038,7 @@ mod real_journal_probe {
             .join("data")
             .join("pc-custom.db");
         if !path.exists() {
-            println!("EVIDENCE: health_report skipped (記録がまだ無い)");
+            println!("EVIDENCE: health_report measured=false reason=記録がまだ無い");
             return;
         }
         // 実物を開かない。`JournalDatabase::open` は読み書きで開くので、
@@ -1049,13 +1049,16 @@ mod real_journal_probe {
         let journal = JournalDatabase::open(&copy).expect("open journal copy");
         let (applied, unreadable) = journal.applied_backups().expect("applied backups");
         println!(
-            "EVIDENCE: health_report baselines={} unreadable_records={}",
+            "EVIDENCE: health_report measured={} baselines={} unreadable_records={}",
+            !applied.is_empty(),
             applied.len(),
             unreadable
         );
         // 0件は「基準が無い」であって「確認した結果ゼロ」ではない。区別して出す。
         if applied.is_empty() {
-            println!("EVIDENCE: health_report NOTE 基準が1件も無い。照合経路は通っていない");
+            println!(
+                "EVIDENCE: health_report measured=false reason=基準が1件も無く照合経路は未実行"
+            );
         }
         for record in &applied {
             let (probe, reason) = probe_backup(&record.backup.payload);

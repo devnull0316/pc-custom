@@ -361,12 +361,13 @@ mod tests {
 
     #[test]
     #[ignore = "実機の前面ウィンドウを読む"]
-    fn the_foreground_window_reads_as_something() {
+    fn reports_whether_the_foreground_window_can_be_classified() {
         // 何が返るかは実行時の画面次第。値そのものより、
         // 「読めた／読めなかった」を区別して返せていることを見る。
+        let observation = foreground_is_maximized();
         println!(
-            "EVIDENCE: taskbar_autohide foreground_is_maximized={:?}",
-            foreground_is_maximized()
+            "EVIDENCE: taskbar_autohide measured={} foreground_is_maximized={observation:?}",
+            observation.is_some()
         );
     }
 

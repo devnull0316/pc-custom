@@ -13,6 +13,7 @@ import type {
   WindowLayoutStatus,
 } from "../model";
 import { riskLabel } from "../model";
+import { methodSummaryForScreen } from "../publicCopy";
 import { Icon } from "./Icon";
 
 interface SetupEssentialsPanelProps {
@@ -73,7 +74,7 @@ function ActionMetadata({
         <div><dt>どんな人向け</dt><dd>{action?.audience ?? "カタログ接続後に表示します"}</dd></div>
         <div><dt>現在の状態</dt><dd>{currentLabel}</dd></div>
         <div><dt>{action?.kind === "guided" ? "案内後" : "適用後の状態"}</dt><dd>{action?.desiredState ?? "カタログ接続後に表示します"}</dd></div>
-        <div><dt>{action?.kind === "guided" ? "案内方法" : "変更方法"}</dt><dd>{action?.methodSummary ?? "カタログ接続後に表示します"}</dd></div>
+        <div><dt>{action?.kind === "guided" ? "案内方法" : "変更方法"}</dt><dd>{action === undefined ? "カタログ接続後に表示します" : methodSummaryForScreen(action)}</dd></div>
       </dl>
       <ul
         aria-label={`${action?.name ?? "この項目"}の属性`}

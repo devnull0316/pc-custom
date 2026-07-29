@@ -83,6 +83,32 @@ impl PointerFeel {
     }
 }
 
+fn write_transaction(
+    before: PointerFeel,
+    target: PointerFeel,
+    mut read: impl FnMut() -> WindowsResult<PointerFeel>,
+    mut write_triple: impl FnMut(PointerFeel) -> WindowsResult<()>,
+    mut write_speed: impl FnMut(i32) -> WindowsResult<()>,
+) -> WindowsResult<()> {
+    write_triple(target)?;
+    if let Err(error) = write_speed(target.speed) {
+        // 失敗を返した API が値を全く変えていないとは仮定しない。
+        // 4値をすべて戻し、独立した読み直しで一致した場合だけ元の失敗として返す。
+        let _ = write_triple(before);
+        let _ = write_speed(before.speed);
+        let verified = read().is_ok_and(|current| current == before);
+        if !verified {
+            return Err(WindowsError::new(
+                WindowsErrorKind::RecoveryRequired,
+                "pointer settings left half written",
+                None,
+            ));
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 mod imp {
     use super::{PointerFeel, WindowsError, WindowsErrorKind, WindowsResult};
@@ -107,21 +133,6 @@ mod imp {
             )
         }
         .map_err(|error| api_error("write pointer acceleration settings", error))
-    }
-
-    /// 3つ組だけを読む。巻き戻しが効いたかの確認に使う。
-    fn read_triple() -> WindowsResult<[i32; 3]> {
-        let mut triple = [0i32; 3];
-        unsafe {
-            SystemParametersInfoW(
-                SPI_GETMOUSE,
-                0,
-                Some(triple.as_mut_ptr().cast()),
-                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-            )
-        }
-        .map_err(|error| api_error("read pointer acceleration settings", error))?;
-        Ok(triple)
     }
 
     fn api_error(operation: &'static str, error: windows::core::Error) -> WindowsError {
@@ -163,6 +174,18 @@ mod imp {
         })
     }
 
+    fn write_speed(speed: i32) -> WindowsResult<()> {
+        unsafe {
+            SystemParametersInfoW(
+                SPI_SETMOUSESPEED,
+                0,
+                Some(speed as usize as *mut core::ffi::c_void),
+                SPIF_SENDCHANGE,
+            )
+        }
+        .map_err(|error| api_error("write pointer speed", error))
+    }
+
     /// 4つの値をまとめて書く。
     ///
     /// `SPI_SETMOUSESPEED` は値をポインターとしてではなく `pvParam` に直接載せる。
@@ -170,29 +193,7 @@ mod imp {
     pub fn write(target: PointerFeel) -> WindowsResult<()> {
         // 巻き戻し先を先に読む。書いてから読んでも、それはもう変わったあとの値。
         let before = read()?;
-        write_triple(target)?;
-
-        if let Err(error) = unsafe {
-            SystemParametersInfoW(
-                SPI_SETMOUSESPEED,
-                0,
-                Some(target.speed as usize as *mut core::ffi::c_void),
-                SPIF_SENDCHANGE,
-            )
-        } {
-            // 3つ組だけ書けて速さが書けなかった状態で終わらせない。
-            // 巻き戻せなければ、失敗ではなく復旧が要る事態として返す。
-            let restored = read_triple().is_ok_and(|_| write_triple(before).is_ok());
-            if !restored {
-                return Err(WindowsError::new(
-                    WindowsErrorKind::RecoveryRequired,
-                    "pointer settings left half written",
-                    None,
-                ));
-            }
-            return Err(api_error("write pointer speed", error));
-        }
-        Ok(())
+        super::write_transaction(before, target, read, write_triple, write_speed)
     }
 }
 
@@ -231,6 +232,7 @@ pub fn replace_pointer_feel(expected: PointerFeel, target: PointerFeel) -> Windo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, rc::Rc};
 
     fn feel(threshold_one: i32, threshold_two: i32, acceleration: i32, speed: i32) -> PointerFeel {
         PointerFeel {
@@ -241,6 +243,10 @@ mod tests {
         }
     }
 
+    fn failure(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
     #[test]
     fn turning_acceleration_off_leaves_the_thresholds_alone() {
         let original = feel(6, 10, 1, 12);
@@ -248,6 +254,82 @@ mod tests {
         assert_eq!(off, feel(6, 10, 0, 12));
         // 速度も触らない。加速だけの話にする。
         assert_eq!(off.speed, original.speed);
+    }
+
+    #[test]
+    fn second_write_failure_restores_all_four_values_and_reads_them_back() {
+        let before = feel(6, 10, 1, 12);
+        let target = feel(6, 10, 0, 18);
+        let current = Rc::new(RefCell::new(before));
+        let speed_writes = Rc::new(RefCell::new(0_u8));
+
+        let read_state = Rc::clone(&current);
+        let triple_state = Rc::clone(&current);
+        let speed_state = Rc::clone(&current);
+        let speed_calls = Rc::clone(&speed_writes);
+        let error = write_transaction(
+            before,
+            target,
+            move || Ok(*read_state.borrow()),
+            move |value| {
+                let mut state = triple_state.borrow_mut();
+                state.threshold_one = value.threshold_one;
+                state.threshold_two = value.threshold_two;
+                state.acceleration = value.acceleration;
+                Ok(())
+            },
+            move |speed| {
+                let mut calls = speed_calls.borrow_mut();
+                *calls += 1;
+                speed_state.borrow_mut().speed = speed;
+                if *calls == 1 {
+                    Err(failure("simulated second write"))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .expect_err("the original write still failed");
+
+        assert_eq!(error.kind, WindowsErrorKind::ApiFailure);
+        assert_eq!(*current.borrow(), before);
+        assert_eq!(*speed_writes.borrow(), 2, "speed itself was also restored");
+    }
+
+    #[test]
+    fn unverifiable_compensation_is_reported_as_recovery_required() {
+        let before = feel(6, 10, 1, 12);
+        let target = feel(6, 10, 0, 18);
+        let current = Rc::new(RefCell::new(before));
+        let speed_writes = Rc::new(RefCell::new(0_u8));
+
+        let read_state = Rc::clone(&current);
+        let triple_state = Rc::clone(&current);
+        let speed_state = Rc::clone(&current);
+        let speed_calls = Rc::clone(&speed_writes);
+        let error = write_transaction(
+            before,
+            target,
+            move || Ok(*read_state.borrow()),
+            move |value| {
+                let mut state = triple_state.borrow_mut();
+                state.threshold_one = value.threshold_one;
+                state.threshold_two = value.threshold_two;
+                state.acceleration = value.acceleration;
+                Ok(())
+            },
+            move |speed| {
+                let mut calls = speed_calls.borrow_mut();
+                *calls += 1;
+                if *calls == 1 {
+                    speed_state.borrow_mut().speed = speed;
+                }
+                Err(failure("simulated speed write"))
+            },
+        )
+        .expect_err("compensation cannot be proved");
+
+        assert_eq!(error.kind, WindowsErrorKind::RecoveryRequired);
     }
 
     #[test]

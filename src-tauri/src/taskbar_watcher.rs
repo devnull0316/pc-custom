@@ -114,19 +114,21 @@ impl TaskbarAutoHideStore {
 
     /// 隠したことを記録する。戻す先も一緒に持つ。
     pub fn record_hiding(&self, restore_to: bool) -> CoreResult<()> {
-        let mut setting = *self.setting.lock();
-        setting.hiding_restore_to = Some(restore_to);
-        self.persist(setting)?;
-        *self.setting.lock() = setting;
+        let mut current = self.setting.lock();
+        let mut updated = *current;
+        updated.hiding_restore_to = Some(restore_to);
+        self.persist(updated)?;
+        *current = updated;
         Ok(())
     }
 
     /// 戻し終えた。記録を消す。
     pub fn clear_hiding(&self) -> CoreResult<()> {
-        let mut setting = *self.setting.lock();
-        setting.hiding_restore_to = None;
-        self.persist(setting)?;
-        *self.setting.lock() = setting;
+        let mut current = self.setting.lock();
+        let mut updated = *current;
+        updated.hiding_restore_to = None;
+        self.persist(updated)?;
+        *current = updated;
         Ok(())
     }
 
@@ -141,24 +143,13 @@ impl TaskbarAutoHideStore {
             setting,
         };
         let bytes = serde_json::to_vec_pretty(&file).map_err(|_| CoreError::storage())?;
-        let mut temp = self.path.clone();
-        temp.set_extension("json.tmp");
-        std::fs::write(&temp, &bytes).map_err(|_| CoreError::storage())?;
-        std::fs::rename(&temp, &self.path).map_err(|_| CoreError::storage())?;
-        Ok(())
+        crate::settings_file::replace(&self.path, &bytes)
     }
 
     pub fn set(&self, setting: TaskbarAutoHideSetting) -> CoreResult<TaskbarAutoHideSetting> {
-        let file = SettingFile {
-            version: SETTING_FILE_VERSION,
-            setting,
-        };
-        let bytes = serde_json::to_vec_pretty(&file).map_err(|_| CoreError::storage())?;
-        let mut temp = self.path.clone();
-        temp.set_extension("json.tmp");
-        std::fs::write(&temp, &bytes).map_err(|_| CoreError::storage())?;
-        std::fs::rename(&temp, &self.path).map_err(|_| CoreError::storage())?;
-        *self.setting.lock() = setting;
+        let mut current = self.setting.lock();
+        self.persist(setting)?;
+        *current = setting;
         // 入れ直したら、手を引いた記録も出番なしの記録も消す。もう一度やらせるということ。
         *self.released.lock() = false;
         *self.not_applicable.lock() = false;
@@ -440,5 +431,34 @@ mod tests {
         watcher.evaluate(Maximized, false);
         watcher.evaluate(Maximized, false);
         assert!(watcher.owns_hidden(), "終了時に戻す対象だと分かること");
+    }
+
+    #[test]
+    fn crash_recovery_marker_survives_reopen_and_is_only_cleared_explicitly() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let path = temporary.path().join("taskbar-auto-hide.json");
+        let store = TaskbarAutoHideStore::open(path.clone()).expect("open");
+        store
+            .set(TaskbarAutoHideSetting {
+                enabled: true,
+                hiding_restore_to: None,
+            })
+            .expect("persist enabled setting");
+        store.record_hiding(false).expect("persist recovery marker");
+        assert_eq!(
+            TaskbarAutoHideStore::open(path.clone())
+                .expect("reopen with marker")
+                .get()
+                .hiding_restore_to,
+            Some(false)
+        );
+        store.clear_hiding().expect("clear after verified restore");
+        assert_eq!(
+            TaskbarAutoHideStore::open(path)
+                .expect("reopen without marker")
+                .get()
+                .hiding_restore_to,
+            None
+        );
     }
 }

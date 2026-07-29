@@ -255,12 +255,12 @@ impl Action for CommsMicMuteAction {
         Ok(ChangeExplanation {
             action_id: METADATA.id,
             result: "現在の既定の通話用入力デバイス1台を、Windowsの設定値としてミュートにします。別の入力デバイスを使うアプリや排他モードでの無音は保証しません。".to_owned(),
-            method: "Windows公開Core Audio APIのEndpointVolume".to_owned(),
-            resources: vec!["既定の通話用入力デバイス1台のsoftware mute設定".to_owned()],
+            method: "Windowsが公開している音声設定".to_owned(),
+            resources: vec!["既定の通話用入力デバイス1台のミュート設定".to_owned()],
             requires_admin: false,
             requires_restart: false,
             windows_update_impact: METADATA.windows_update_impact.to_owned(),
-            rollback_scope: "適用前に保存したdevice IDの端末だけを、第三者の変更がない場合に限って元のmute値へ戻します。既定端末が変わっても新しい端末は触りません。".to_owned(),
+            rollback_scope: "適用前に保存した同じ通話用入力だけを、第三者の変更がない場合に限って元のミュート設定へ戻します。既定端末が変わっても新しい端末は触りません。".to_owned(),
         })
     }
 
@@ -342,6 +342,21 @@ mod tests {
         assert!(METADATA.description.contains("無音は保証しません"));
         assert!(!METADATA.description.contains("すべてのマイク"));
         assert!(!explanation.result.contains("確実に無音"));
+        let visible_copy = format!(
+            "{}\n{}\n{}",
+            explanation.method, explanation.result, explanation.rollback_scope
+        );
+        for internal_term in [
+            "Core Audio",
+            "eCommunications",
+            "EndpointVolume",
+            "device ID",
+        ] {
+            assert!(
+                !visible_copy.contains(internal_term),
+                "画面向け説明に内部用語 {internal_term:?} を出さない"
+            );
+        }
     }
 
     #[cfg(windows)]
@@ -370,16 +385,15 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    #[ignore = "実機の既定通話マイクを一時的にミュートし、同じdevice IDだけを元へ戻す"]
+    #[ignore = "実機の既定通話マイクを一時的にミュートし、同じ入力だけを元へ戻す"]
     fn real_machine_comms_mic_mute_round_trip() {
         use crate::{compatibility::OsIdentity, windows::acquire_core_mutation_lock};
 
         let _mutation_lock = acquire_core_mutation_lock().expect("exclusive core mutation lock");
         let before = read_default_comms_mic_mute().expect("read default communications microphone");
-        let device_id =
-            serde_json::to_string(&String::from_utf16_lossy(&before.device_id)).expect("quote ID");
+        let endpoint_id_units = before.device_id.len();
         println!(
-            "EVIDENCE: comms_mic_mute before device_id={device_id} muted={}",
+            "EVIDENCE: comms_mic_mute measured=true before endpoint_id_units={endpoint_id_units} muted={}",
             before.muted
         );
         let mut cleanup = RestoreMicOnDrop {
@@ -389,7 +403,7 @@ mod tests {
 
         if before.muted {
             println!(
-                "EVIDENCE: comms_mic_mute measured=false reason=already_muted device_id={device_id}"
+                "EVIDENCE: comms_mic_mute measured=false reason=already_muted endpoint_id_units={endpoint_id_units}"
             );
             cleanup.armed = false;
             return;
@@ -434,7 +448,8 @@ mod tests {
         let after = read_comms_mic_mute_by_id(&before.device_id)
             .expect("re-read the same device ID after apply");
         println!(
-            "EVIDENCE: comms_mic_mute applied device_id={device_id} muted={}",
+            "EVIDENCE: comms_mic_mute applied same_saved_endpoint={} muted={}",
+            after.device_id == before.device_id,
             after.muted
         );
         assert_eq!(after.device_id, before.device_id);
@@ -452,7 +467,8 @@ mod tests {
         let restored = read_comms_mic_mute_by_id(&before.device_id)
             .expect("re-read the same device ID after rollback");
         println!(
-            "EVIDENCE: comms_mic_mute restored device_id={device_id} muted={}",
+            "EVIDENCE: comms_mic_mute restored same_saved_endpoint={} muted={}",
+            restored.device_id == before.device_id,
             restored.muted
         );
         assert_eq!(restored, before);

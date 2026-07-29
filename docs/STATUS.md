@@ -1463,3 +1463,148 @@ Microsoft が現在色の取得を文書化するか、触る前の状態へ確�
 出荷4件、見送り3件。**見送りのほうが多い回もあってよい。**
 3件とも「効かない」とは書いていない。「この観測では区別できない」「この API では戻せない」まで。
 
+## 自己監査: 直近出荷分を壊しに行った結果（2026-07-29）
+
+`BRIEF.md`、このファイル全体、`tasks/TASK_SELF_AUDIT.md` を先に読み、
+直近の mic mute、mode ribbon、hot corner、appearance scenes、power mode、
+pointer feel、taskbar auto-hide、health report と、手動同期表を監査した。
+Action は増やしていない。**71件のまま。**
+
+### 修正前に確定した欠陥一覧
+
+1. `ActionId::PowerModeSwitch` と `ActionId::InputPointerFeel` だけ Serde の明示名が無く、
+   durable backup では `power_mode_switch` / `input_pointer_feel` と保存される一方、
+   画面・parser・`as_str()` は dotted ID を使っていた。
+2. `hot_corner_get` / `hot_corner_set` は command と `invoke_handler` にあるのに
+   `application-commands.toml` から抜け、画面からの呼び出しが ACL で拒否される状態だった。
+3. ~~hot corner、taskbar auto-hide、theme schedule の小さな設定 JSON は、
+   Windows で既存ファイルを置換できない `std::fs::rename` を使っていた。
+   2回目の保存と taskbar の crash-recovery marker 更新が失敗する。~~
+
+   **この指摘は誤り。監査側の検証で否認した。** `std::fs::rename` は Windows でも
+   既存ファイルを置換できる（Rust std が `MoveFileExW` に `MOVEFILE_REPLACE_EXISTING` を渡す）。
+   実際に測った:
+
+   ```
+   EVIDENCE: rename_over_existing ok content="second"
+   ```
+
+   時刻設定が何度も保存できていた事実とも一致する。
+   **置換できないという前提そのものが間違っていた。**
+
+   ただし置き換えたコード自体は残す。理由が違う。`MOVEFILE_WRITE_THROUGH` は
+   戻る前にディスクへ流し込む。強制終了に備える marker にはその durability が要る。
+   **「置換できないから」ではなく「落ちる前に確実に書きたいから」。**
+   直した理由を、実際に効いている理由へ書き換える。
+4. taskbar auto-hide は、実際に隠した**あと**で recovery marker を保存し、
+   その保存失敗も無視していた。書き込みと記録の間で強制終了されると戻せない。
+5. taskbar の起動時／`Drop` 復旧は、観測・復元・readback が失敗しても marker を消していた。
+   さらに UI の設定変更と監視側の marker 更新を、永続化中は lock せず競合できた。
+6. pointer feel は2段目の速度書き込み失敗時、3値側の書き戻し API が成功したかしか見ず、
+   速度を戻さず、補償後の4値 readback もしていなかった。
+7. power mode は DC 書き込み失敗時に AC だけを戻し、DC が失敗を返しながら変わった可能性と、
+   AC/DC 両方の補償後 readback を見ていなかった。
+8. mode ribbon、taskbar foreground、power mode、health report の実機テストに、
+   前提不成立の早期 return と実測済みに読める名前／出力が残っていた。
+   appearance scenes の journal test も、通常 preview を呼んでいないのに
+   「request が prepare する」と名乗っていた。
+9. hot corner の CPU 計測は `GetProcessTimes` 失敗を数値 `0` に変換し、
+   正常に 0 tick だった場合と計測失敗を区別できなかった。
+10. mic mute の画面説明と実機証跡が API 名・endpoint identifier を露出していた。
+    さらに Action 詳細、preview、timeline、mode draft は method の生文言、
+    レジストリ情報、transaction/diagnostic GUID、内部 ID をそのまま描画していた。
+11. 必須の frontend build は成功扱いだったが、PowerToys 部分に selector の無い
+    CSS 宣言が2組残り、minifier が構文エラー警告を出して捨てていた。
+
+### 直したこと
+
+- 2 Action ID に canonical dotted Serde 名を付け、すでに書かれた underscore 名は
+  `alias` で読み続ける。全71 IDについて `as_str == serialized tag` と round-trip を固定した。
+- hot corner 2 command を ACL へ追加した。
+- `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH` を使う小さな共通設定ファイル置換へ
+  hot corner、taskbar、theme schedule を揃え、既存ファイルを再保存するテストを足した。
+- taskbar は **marker の durable 保存 → Windows 書き込み → readback** の順にした。
+  復元を readback できた時だけ marker を消し、失敗時は marker と画面向け error を残す。
+  store の persist と memory 更新は同じ mutex の内側へ入れた。
+- pointer は2段目が失敗したら4値全部を補償し、独立 readback が元の4値と一致した時だけ
+  元の失敗として返す。一致を証明できなければ `RecoveryRequired`。
+  power mode も AC/DC 両方を補償し、両方の raw value の readback で判断する。
+- 条件付き実機 test は名前を条件付きにし、未計測を必ず `measured=false reason=...` と出す。
+  CPU 時間取得失敗は test failure にし、数値 0 に丸めない。
+- mic の画面文言を利用者向けにし、実機証跡は endpoint ID 本体を出さず、
+  保存した同一 endpoint かだけを示す。画面は method/resource の生文字列と
+  GUID／内部 ID を描画せず、利用者向け説明へ変換する。
+- appearance scenes の test 名を、実際に証明する
+  「parsed 3 actions を distinct journal items として記録できる」に直した。
+- selector の無い孤立 CSS 宣言だけを除去した。
+
+### 実機と同期表の証拠
+
+実機設定を変える test は、既存の `Drop` guard を確認してから個別に実行した。
+mic、pointer、power、taskbar は適用後と復元後を Windows から読み直している。
+
+```text
+EVIDENCE: comms_mic_mute measured=true before endpoint_id_units=55 muted=false
+EVIDENCE: comms_mic_mute applied same_saved_endpoint=true muted=true
+EVIDENCE: comms_mic_mute restored same_saved_endpoint=true muted=false
+
+EVIDENCE: pointer_feel_action before=PointerFeel { threshold_one: 0, threshold_two: 0, acceleration: 0, speed: 10 }
+EVIDENCE: pointer_feel_action acceleration=true after=PointerFeel { threshold_one: 6, threshold_two: 10, acceleration: 1, speed: 10 }
+EVIDENCE: pointer_feel_action restored=PointerFeel { threshold_one: 0, threshold_two: 0, acceleration: 0, speed: 10 }
+
+EVIDENCE: power_mode_action measured=true before ac=Known(BestPerformance) dc=Known(Balanced)
+EVIDENCE: power_mode_action applied=Balanced ac=Known(Balanced) dc=Known(Balanced)
+EVIDENCE: power_mode_action restored ac=Known(BestPerformance) dc=Known(Balanced)
+
+EVIDENCE: taskbar_autohide work_area_full before=false after=true
+EVIDENCE: taskbar_autohide conflict outcome=Err(WindowsError { kind: ExternalConflict, operation: "taskbar auto-hide changed by something else", os_code: None })
+
+EVIDENCE: ribbon_transparency measured=true ex_style=0x080800A8 ws_ex_transparent=true nchittest=-1 htransparent=true
+EVIDENCE: ribbon_probe measured=false opaque_hwnd=0x160736 WindowFromPoint=0x8F07D4 probe_sees_it=false
+EVIDENCE: mode_ribbon measured=false skipped=cannot_measure reason=画面いっぱいの窓が手前にあり、透過の有無を区別できない
+
+EVIDENCE: hot_corner measured=true polls=25 wall_ms=5004 cpu_us=0
+EVIDENCE: health_report measured=false baselines=0 unreadable_records=0
+EVIDENCE: health_report measured=false reason=基準が1件も無く照合経路は未実行
+
+EVIDENCE: action_tables action_id=71 parameters=71 catalog=71 parametersForAction=71 missing_or_extra=0,0,0,0,0,0
+EVIDENCE: command_tables invoke=40 acl=40 missing_acl=0 extra_acl=0
+EVIDENCE: screen_copy raw_internal_bindings=0 internal_id_labels=0 sanitizer_present=true
+EVIDENCE: published_counts readme71=1 changelog71=1
+```
+
+mode ribbon の opaque probe と端から端の geometry test は、前面の全画面窓に覆われて
+この実行では測れなかった。これは合格へ混ぜていない。一方、Z順に依存しない
+`WS_EX_TRANSPARENT` と `HTTRANSPARENT` は `measured=true` で両方を確認した。
+health report は実 journal に baseline が0件だったため、実 backup との照合は未計測。
+0件を healthy として報告していない。
+
+### 欠陥を見つけなかった部分
+
+- mic mute の exact saved endpoint rollback、missing endpoint で current default へ
+  fallback しない契約には、機能欠陥を見つけなかった。
+- mode ribbon の製品側 geometry、選択優先、destroy、Windows設定非変更には
+  機能欠陥を見つけなかった。直したのは test の主張と計測表示。
+- hot corner の dwell、cooldown、外周角、fullscreen/maximized 抑止の状態機械には
+  機能欠陥を見つけなかった。欠陥は ACL と設定ファイル置換。
+- appearance scenes の3 Action限定、通常 parameter shape、禁止コピー、
+  1 Action 1 journal item には機能欠陥を見つけなかった。
+- health report の baselineなし、unknown、第三値、部分復元を healthy に混ぜない分類には
+  機能欠陥を見つけなかった。実 journal 照合は上記のとおり未計測。
+
+### 完了コマンド
+
+```text
+cargo test --lib
+test result: ok. 328 passed; 0 failed; 61 ignored; 0 measured; 0 filtered out
+
+cargo clippy --all-targets -- -D warnings
+Finished dev profile
+
+cargo fmt --check
+exit code 0
+
+npm run build
+✓ 61 modules transformed
+✓ built（CSS構文警告も0件）
+```

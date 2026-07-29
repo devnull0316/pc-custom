@@ -14,7 +14,9 @@ pub enum ActionId {
     PowerActiveSchemeCheck,
     #[serde(rename = "power.active_scheme_switch")]
     PowerActiveSchemeSwitch,
+    #[serde(rename = "power.mode_switch", alias = "power_mode_switch")]
     PowerModeSwitch,
+    #[serde(rename = "input.pointer_feel", alias = "input_pointer_feel")]
     InputPointerFeel,
     #[serde(rename = "audio.comms_mic_mute")]
     AudioCommsMicMute,
@@ -406,6 +408,26 @@ mod tests {
     fn every_identifier_round_trips() {
         for id in ActionId::ALL {
             assert_eq!(id.as_str().parse::<ActionId>(), Ok(id));
+            let serialized = serde_json::to_value(id).expect("serialize action ID");
+            assert_eq!(serialized, id.as_str());
+            assert_eq!(
+                serde_json::from_value::<ActionId>(serialized).expect("deserialize action ID"),
+                id
+            );
         }
+    }
+
+    #[test]
+    fn shipped_underscore_names_remain_readable_for_existing_backups() {
+        assert_eq!(
+            serde_json::from_str::<ActionId>(r#""power_mode_switch""#)
+                .expect("read legacy power mode ID"),
+            ActionId::PowerModeSwitch
+        );
+        assert_eq!(
+            serde_json::from_str::<ActionId>(r#""input_pointer_feel""#)
+                .expect("read legacy pointer feel ID"),
+            ActionId::InputPointerFeel
+        );
     }
 }
