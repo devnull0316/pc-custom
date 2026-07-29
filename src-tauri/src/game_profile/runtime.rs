@@ -236,6 +236,10 @@ impl<S: ProfileActionSink> ProfileRuntime<S> {
         self.supervisor.is_active(profile)
     }
 
+    pub fn is_applied_active(&self, profile: GameProfileId) -> bool {
+        self.supervisor.is_applied_active(profile)
+    }
+
     /// 検知対象(有効かつ変換成功)のプロファイルが 1 件でもあるか。
     /// false の間は監視ループが重いプロセススナップショットを省ける。
     pub fn has_targets(&self) -> bool {
@@ -304,6 +308,7 @@ mod tests {
                 action_id: "theme.color_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "dark" }),
             }],
+            ribbon_color: None,
             active_run: None,
         }
     }

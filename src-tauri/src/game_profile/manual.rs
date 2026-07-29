@@ -179,6 +179,7 @@ mod tests {
                 name: "集中".to_owned(),
                 executable_path: None,
                 conflict_policy: None,
+                ribbon_color: None,
                 actions: vec![StoredProfileAction {
                     action_id: "session.prevent_sleep".to_owned(),
                     parameters: serde_json::json!({"keepDisplayOn": false}),

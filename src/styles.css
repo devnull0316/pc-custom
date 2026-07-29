@@ -457,6 +457,29 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .profile-state--off { color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .profile-card__actions-count { display: flex; align-items: center; gap: .4rem; font-size: var(--fs-base);
   color: color-mix(in srgb, var(--text) 62%, transparent); }
+.profile-card__ribbon { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .55rem;
+  padding-top: .65rem; border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent); }
+.profile-card__ribbon > span { display: flex; flex-direction: column; gap: .1rem; }
+.profile-card__ribbon small { color: color-mix(in srgb, var(--text) 58%, transparent); font-size: var(--fs-sm); }
+.ribbon-color-picker { display: flex; flex-wrap: wrap; gap: .4rem; }
+.ribbon-color-option { position: relative; display: grid; place-items: center; width: 30px; height: 30px;
+  border-radius: 8px; cursor: pointer; }
+.ribbon-color-option:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.ribbon-color-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.ribbon-color-option span { display: block; width: 20px; height: 20px; border-radius: 6px;
+  background: var(--ribbon-swatch); border: 1px solid color-mix(in srgb, var(--text) 25%, transparent); }
+.ribbon-color-option input:checked + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ribbon-color-option input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 3px; }
+.ribbon-color-option:has(input:disabled) { cursor: default; opacity: .55; }
+.ribbon-color-option--off { --ribbon-swatch: color-mix(in srgb, var(--text) 5%, transparent); }
+.ribbon-color-option--off span { position: relative; }
+.ribbon-color-option--off span::after { content: ""; position: absolute; left: 2px; right: 2px; top: 9px; height: 2px;
+  background: color-mix(in srgb, var(--text) 65%, transparent); transform: rotate(-45deg); }
+.ribbon-color-option--sky { --ribbon-swatch: #4da3ff; }
+.ribbon-color-option--violet { --ribbon-swatch: #9b7bff; }
+.ribbon-color-option--mint { --ribbon-swatch: #38cfa0; }
+.ribbon-color-option--amber { --ribbon-swatch: #f0b43c; }
+.ribbon-color-option--rose { --ribbon-swatch: #f06a8a; }
 .profile-card__controls { display: flex; align-items: center; gap: .5rem; }
 .profile-card__controls .secondary-button { flex: 1; }
 

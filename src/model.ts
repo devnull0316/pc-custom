@@ -243,6 +243,8 @@ export interface ManualRunRecord {
   reversibleItemIds: readonly string[];
 }
 
+export type ModeRibbonColor = "sky" | "violet" | "mint" | "amber" | "rose";
+
 export interface StoredProfile {
   id: string;
   name: string;
@@ -252,6 +254,7 @@ export interface StoredProfile {
   conflictPolicy: string;
   automationEnabled: boolean;
   actions: readonly StoredProfileAction[];
+  ribbonColor?: ModeRibbonColor;
   activeRun?: ManualRunRecord;
 }
 
@@ -260,6 +263,7 @@ export interface CreateProfileRequest {
   executablePath?: string;
   conflictPolicy?: string;
   actions: readonly StoredProfileAction[];
+  ribbonColor?: ModeRibbonColor;
 }
 
 export interface ManualProfileResult {

@@ -14,6 +14,7 @@ import type {
   ImportResult,
   InstallOutcome,
   ManualProfileResult,
+  ModeRibbonColor,
   OffscreenWindowScan,
   OffscreenWindowUndo,
   SetupAppDto,
@@ -165,6 +166,10 @@ export function createProfile(request: CreateProfileRequest): Promise<StoredProf
 
 export function setProfileEnabled(id: string, enabled: boolean): Promise<void> {
   return call<void>("profile_set_enabled", { id, enabled });
+}
+
+export function setProfileRibbonColor(id: string, color?: ModeRibbonColor): Promise<void> {
+  return call<void>("profile_set_ribbon_color", { id, color: color ?? null });
 }
 
 export function runProfileNow(id: string): Promise<ManualProfileResult> {

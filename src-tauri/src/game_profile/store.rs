@@ -28,6 +28,34 @@ const MAX_PROFILES: usize = 200;
 const MAX_ACTIONS_PER_PROFILE: usize = 32;
 const MAX_EXECUTABLE_PATH_CHARS: usize = 32_767;
 
+/// モードリボンで選べる色。任意の色コードは IPC に受け付けない。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModeRibbonColor {
+    Sky,
+    Violet,
+    Mint,
+    Amber,
+    Rose,
+}
+
+impl ModeRibbonColor {
+    /// Win32 COLORREF (0x00BBGGRR)。
+    pub const fn colorref(self) -> u32 {
+        match self {
+            Self::Sky => rgb(77, 163, 255),
+            Self::Violet => rgb(155, 123, 255),
+            Self::Mint => rgb(56, 207, 160),
+            Self::Amber => rgb(240, 180, 60),
+            Self::Rose => rgb(240, 106, 138),
+        }
+    }
+}
+
+const fn rgb(red: u32, green: u32, blue: u32) -> u32 {
+    red | (green << 8) | (blue << 16)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StoredProfileAction {
@@ -52,6 +80,9 @@ pub struct StoredProfile {
     pub conflict_policy: String,
     pub automation_enabled: bool,
     pub actions: Vec<StoredProfileAction>,
+    /// None は「リボンを表示しない」。既定色は押し付けない。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ribbon_color: Option<ModeRibbonColor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run: Option<ManualRunRecord>,
 }
@@ -88,6 +119,8 @@ pub struct CreateProfileRequest {
     pub conflict_policy: Option<String>,
     #[serde(default)]
     pub actions: Vec<StoredProfileAction>,
+    #[serde(default)]
+    pub ribbon_color: Option<ModeRibbonColor>,
 }
 
 /// インポート前プレビュー: この機で実行ファイルが解決できるか等を提示する。
@@ -254,6 +287,7 @@ impl ProfileStore {
             conflict_policy,
             automation_enabled: false,
             actions: request.actions,
+            ribbon_color: request.ribbon_color,
             active_run: None,
         };
 
@@ -291,6 +325,19 @@ impl ProfileStore {
         // in-memory状態を置き換える。write/rename失敗時は旧状態を維持する。
         let mut next = guard.clone();
         next[index].automation_enabled = enabled;
+        Self::persist(&self.path, &next)?;
+        *guard = next;
+        Ok(())
+    }
+
+    pub fn set_ribbon_color(&self, id: &str, color: Option<ModeRibbonColor>) -> CoreResult<()> {
+        let mut guard = self.profiles.lock();
+        let index = guard
+            .iter()
+            .position(|profile| profile.id == id)
+            .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))?;
+        let mut next = guard.clone();
+        next[index].ribbon_color = color;
         Self::persist(&self.path, &next)?;
         *guard = next;
         Ok(())
@@ -366,6 +413,7 @@ impl ProfileStore {
                 executable_path: profile.executable_path.clone(),
                 conflict_policy: Some(profile.conflict_policy.clone()),
                 actions: profile.actions.clone(),
+                ribbon_color: profile.ribbon_color,
             }) {
                 Ok(created) => imported.push(created.name),
                 Err(error) => skipped.push(ImportSkip {
@@ -703,6 +751,7 @@ mod tests {
             name: name.to_owned(),
             executable_path: Some(notepad()),
             conflict_policy: None,
+            ribbon_color: None,
             actions: vec![StoredProfileAction {
                 action_id: "theme.color_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "dark" }),
@@ -723,6 +772,7 @@ mod tests {
                 action_id: "theme.color_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "dark" }),
             }],
+            ribbon_color: None,
             active_run: None,
         }
     }
@@ -735,6 +785,7 @@ mod tests {
                 name: "  テストゲーム  ".to_owned(),
                 executable_path: Some(notepad()),
                 conflict_policy: None,
+                ribbon_color: None,
                 actions: vec![StoredProfileAction {
                     action_id: "theme.color_mode".to_owned(),
                     parameters: serde_json::json!({ "mode": "dark" }),
@@ -821,6 +872,7 @@ mod tests {
             name: "x".to_owned(),
             executable_path: Some(notepad()),
             conflict_policy: None,
+            ribbon_color: None,
             actions: vec![StoredProfileAction {
                 action_id: "totally.unknown".to_owned(),
                 parameters: serde_json::Value::Null,
@@ -836,6 +888,7 @@ mod tests {
             name: "x".to_owned(),
             executable_path: Some(notepad()),
             conflict_policy: None,
+            ribbon_color: None,
             actions: vec![StoredProfileAction {
                 action_id: "taskbar.search_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "hidden" }),
@@ -854,6 +907,7 @@ mod tests {
             name: "x".to_owned(),
             executable_path: Some(notepad()),
             conflict_policy: None,
+            ribbon_color: None,
             actions: vec![StoredProfileAction {
                 action_id: "power.active_scheme_check".to_owned(),
                 parameters: serde_json::json!({}),
@@ -872,6 +926,7 @@ mod tests {
             name: "x".to_owned(),
             executable_path: Some(notepad()),
             conflict_policy: None,
+            ribbon_color: None,
             actions: vec![StoredProfileAction {
                 action_id: "theme.color_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "neon", "extra": true }),
@@ -890,6 +945,7 @@ mod tests {
                 name: "x".to_owned(),
                 executable_path: Some(notepad()),
                 conflict_policy: None,
+                ribbon_color: None,
                 actions: vec![StoredProfileAction {
                     action_id: "theme.color_mode".to_owned(),
                     parameters: serde_json::json!({ "mode": "dark" }),
@@ -918,6 +974,7 @@ mod tests {
             name: "x".to_owned(),
             executable_path: Some(r"C:\definitely\not\here\ghost.exe".to_owned()),
             conflict_policy: None,
+            ribbon_color: None,
             actions: vec![],
         });
         assert!(result.is_err());
@@ -931,6 +988,7 @@ mod tests {
                 name: "ゲームA".to_owned(),
                 executable_path: Some(notepad()),
                 conflict_policy: None,
+                ribbon_color: None,
                 actions: vec![],
             })
             .expect("create source profile");
@@ -1149,6 +1207,7 @@ mod tests {
                 name: "empty".to_owned(),
                 executable_path: None,
                 conflict_policy: None,
+                ribbon_color: None,
                 actions: Vec::new(),
             })
             .expect_err("manual mode must contain an Action");
@@ -1163,6 +1222,7 @@ mod tests {
                 name: "勉強".to_owned(),
                 executable_path: None,
                 conflict_policy: None,
+                ribbon_color: None,
                 actions: vec![StoredProfileAction {
                     action_id: "setup.launch_apps".to_owned(),
                     parameters: serde_json::json!({"bundle": "study"}),
@@ -1191,6 +1251,7 @@ mod tests {
                 name: "ゲーム".to_owned(),
                 executable_path: Some(notepad()),
                 conflict_policy: None,
+                ribbon_color: None,
                 actions: vec![StoredProfileAction {
                     action_id: "setup.launch_apps".to_owned(),
                     parameters: serde_json::json!({"bundle": "study"}),
@@ -1198,5 +1259,22 @@ mod tests {
             })
             .expect_err("one-way app launch must not enter automatic profile");
         assert_eq!(error.code, "INVALID_REQUEST");
+    }
+
+    #[test]
+    fn ribbon_color_is_a_fixed_choice_and_round_trips_on_disk() {
+        assert!(
+            serde_json::from_str::<ModeRibbonColor>(r##""#12abef""##).is_err(),
+            "任意の色コードは型境界で拒否する"
+        );
+        let (store, _dir) = temp_store();
+        let profile = store.create(eligible_request("色つき")).expect("create");
+        assert_eq!(profile.ribbon_color, None, "既定色は押し付けない");
+
+        store
+            .set_ribbon_color(&profile.id, Some(ModeRibbonColor::Rose))
+            .expect("save fixed color");
+        let reopened = ProfileStore::open(store.path.clone()).expect("reopen");
+        assert_eq!(reopened.list()[0].ribbon_color, Some(ModeRibbonColor::Rose));
     }
 }

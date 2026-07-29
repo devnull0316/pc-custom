@@ -16,6 +16,7 @@ import {
   rollbackItem,
   runProfileNow,
   setProfileEnabled,
+  setProfileRibbonColor,
 } from "./backend";
 import { STATIC_ACTIONS } from "./catalog";
 import { ActionBrowser } from "./components/ActionBrowser";
@@ -34,6 +35,7 @@ import type {
   CreateProfileRequest,
   DataMode,
   JsonValue,
+  ModeRibbonColor,
   PreviewResponse,
   ProfileDraftItem,
   StoredProfile,
@@ -463,6 +465,20 @@ export function App() {
     }
   }
 
+  async function handleSetProfileRibbonColor(id: string, color?: ModeRibbonColor) {
+    setProfileBusy(true);
+    setUiError(null);
+    try {
+      await setProfileRibbonColor(id, color);
+      setNotice(color === undefined ? "このモードのリボンを非表示にしました。" : "このモードのリボン色を保存しました。");
+      await refreshProfiles();
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
   async function handleRunProfile(id: string) {
     setProfileBusy(true);
     setUiError(null);
@@ -537,7 +553,7 @@ export function App() {
           ) : view === "actions" ? (
             <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onError={handleUiError} onPreview={(action) => void requestPreview(action)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
           ) : view === "profiles" ? (
-            <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} profiles={profiles} />
+            <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} onSetRibbonColor={(id, color) => void handleSetProfileRibbonColor(id, color)} profiles={profiles} />
           ) : view === "setup" ? (
             <SetupView
               actions={actions}

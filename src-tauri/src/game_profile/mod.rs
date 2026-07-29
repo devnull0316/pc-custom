@@ -23,7 +23,7 @@ pub use observer::{ObservedProcess, ProcessMatcher};
 pub mod store;
 pub use store::{
     CreateProfileRequest, ImportPreviewItem, ImportResult, ImportSkip, ManualRunRecord,
-    ProfileStore, StoredProfile, StoredProfileAction,
+    ModeRibbonColor, ProfileStore, StoredProfile, StoredProfileAction,
 };
 
 pub mod runtime;
@@ -202,6 +202,8 @@ struct ActiveSession {
     #[allow(dead_code)]
     profile: GameProfileId,
     owned_resources: BTreeSet<String>,
+    /// 競合停止ではなく、適用経路を最後まで完了したセッションか。
+    applied_successfully: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +260,14 @@ impl<S: ProfileActionSink> ProfileSupervisor<S> {
         self.active_instances
             .get(&profile)
             .is_some_and(|set| !set.is_empty())
+    }
+
+    pub fn is_applied_active(&self, profile: GameProfileId) -> bool {
+        self.session_of_profile
+            .get(&profile)
+            .and_then(|session| self.sessions.get(session))
+            .is_some_and(|session| session.applied_successfully)
+            && self.is_active(profile)
     }
 
     /// テスト/監視層から観測イベントを 1 件処理する。
@@ -331,6 +341,7 @@ impl<S: ProfileActionSink> ProfileSupervisor<S> {
                 ActiveSession {
                     profile: profile_id,
                     owned_resources: BTreeSet::new(),
+                    applied_successfully: false,
                 },
             );
             return Ok(LaunchOutcome::ConflictStopped { conflicts });
@@ -404,6 +415,7 @@ impl<S: ProfileActionSink> ProfileSupervisor<S> {
             ActiveSession {
                 profile: profile_id,
                 owned_resources: owned,
+                applied_successfully: true,
             },
         );
 

@@ -7,6 +7,7 @@ import type {
   DataMode,
   ImportPreviewItem,
   JsonValue,
+  ModeRibbonColor,
   StoredProfile,
 } from "../model";
 import { GameReadinessPanel } from "./GameReadinessPanel";
@@ -22,6 +23,7 @@ interface ProfilesViewProps {
   onRun: (id: string) => void;
   onRestore: (id: string) => void;
   onSetEnabled: (id: string, enabled: boolean) => void;
+  onSetRibbonColor: (id: string, color?: ModeRibbonColor) => void;
   onDelete: (id: string) => void;
   onOpenActions: () => void;
   onChanged?: () => void;
@@ -37,6 +39,7 @@ export function ProfilesView({
   onRun,
   onRestore,
   onSetEnabled,
+  onSetRibbonColor,
   onDelete,
   onOpenActions,
   onChanged,
@@ -52,6 +55,7 @@ export function ProfilesView({
   const [ioBusy, setIoBusy] = useState(false);
   const [ioMessage, setIoMessage] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [ribbonColor, setRibbonColor] = useState<ModeRibbonColor | undefined>();
 
   /// 実行ファイルは手で打たせない。打ち間違えれば別のファイルが登録される。
   async function chooseExecutable() {
@@ -146,12 +150,14 @@ export function ProfilesView({
           ? { bundle: launchBundle }
           : onParametersForAction(actionId),
       })),
+      ...(ribbonColor === undefined ? {} : { ribbonColor }),
     };
     if (mode === "game") request.executablePath = exePath.trim();
     onCreate(request);
     setName("");
     setExePath("");
     setSelected(new Set());
+    setRibbonColor(undefined);
   }
 
   return (
@@ -220,6 +226,19 @@ export function ProfilesView({
               value={name}
             />
           </label>
+          <fieldset className="field">
+            <legend>モードリボン（任意）</legend>
+            <p className="muted small">
+              このモードの実行中だけ、プライマリタスクバーのすぐ上へ4pxの帯を出します。
+              全画面・自動的に隠す設定・上下左右のうち下以外では表示しません。
+            </p>
+            <RibbonColorPicker
+              disabled={!live || busy}
+              name="new-profile-ribbon-color"
+              onChange={setRibbonColor}
+              value={ribbonColor}
+            />
+          </fieldset>
           {mode === "game" ? (
             <label className="field">
               <span>ゲームの実行ファイル</span>
@@ -323,6 +342,18 @@ export function ProfilesView({
                   <div className="profile-card__actions-count">
                     <Icon name="action" size={15} />
                     <span>{profile.actions.length}件の準備</span>
+                  </div>
+                  <div className="profile-card__ribbon">
+                    <span>
+                      <strong>モードリボン</strong>
+                      <small>実行中だけ表示。クリックは下へ通ります。</small>
+                    </span>
+                    <RibbonColorPicker
+                      disabled={!live || busy}
+                      name={`profile-ribbon-${profile.id}`}
+                      onChange={(color) => onSetRibbonColor(profile.id, color)}
+                      value={profile.ribbonColor}
+                    />
                   </div>
                   <div className="profile-card__controls">
                     {profile.executablePath === undefined ? (
@@ -431,4 +462,49 @@ export function ProfilesView({
 function fileName(path: string): string {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] ?? path;
+}
+
+interface RibbonColorChoice {
+  value?: ModeRibbonColor;
+  label: string;
+}
+
+const RIBBON_COLOR_CHOICES: readonly RibbonColorChoice[] = [
+  { label: "表示しない" },
+  { value: "sky", label: "空色" },
+  { value: "violet", label: "紫" },
+  { value: "mint", label: "ミント" },
+  { value: "amber", label: "琥珀" },
+  { value: "rose", label: "ローズ" },
+];
+
+interface RibbonColorPickerProps {
+  disabled: boolean;
+  name: string;
+  value: ModeRibbonColor | undefined;
+  onChange: (color?: ModeRibbonColor) => void;
+}
+
+function RibbonColorPicker({ disabled, name, value, onChange }: RibbonColorPickerProps) {
+  return (
+    <div className="ribbon-color-picker">
+      {RIBBON_COLOR_CHOICES.map((choice) => (
+        <label
+          className={`ribbon-color-option ribbon-color-option--${choice.value ?? "off"}`}
+          key={choice.value ?? "off"}
+          title={choice.label}
+        >
+          <input
+            aria-label={choice.label}
+            checked={value === choice.value}
+            disabled={disabled}
+            name={name}
+            onChange={() => onChange(choice.value)}
+            type="radio"
+          />
+          <span aria-hidden="true" />
+        </label>
+      ))}
+    </div>
+  );
 }

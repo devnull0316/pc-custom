@@ -20,6 +20,7 @@ commands.allow = [
   "profiles_list",
   "profile_create",
   "profile_set_enabled",
+  "profile_set_ribbon_color",
   "profile_run_now",
   "profile_restore_now",
   "profile_delete",
@@ -40,4 +41,3 @@ commands.allow = [
   "rescue_offscreen_window",
   "rollback_offscreen_window"
 ]
-

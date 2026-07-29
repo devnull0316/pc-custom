@@ -19,6 +19,7 @@ pub struct ApplicationState {
     profile_store: Option<Arc<crate::game_profile::ProfileStore>>,
     theme_schedule_store: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     taskbar_store: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
+    mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
     initialization_error: Option<CoreError>,
     _instance_guard: Option<crate::windows::AppInstanceGuard>,
     profile_watcher: Option<crate::game_profile::ProfileWatcher>,
@@ -29,6 +30,17 @@ impl ApplicationState {
         match initialize_engine() {
             Ok((engine, instance_guard, profile_store, theme_schedule_store, taskbar_store)) => {
                 let engine = Arc::new(engine);
+                let mode_ribbon = match crate::windows::ModeRibbonController::spawn() {
+                    Ok(controller) => {
+                        let controller = Arc::new(controller);
+                        sync_manual_mode_ribbons(&controller, &profile_store);
+                        Some(controller)
+                    }
+                    Err(error) => {
+                        eprintln!("mode ribbon initialization failed: {error}");
+                        None
+                    }
+                };
                 // 有効プロファイルのゲーム起動を検知して準備を適用/復元する背景監視。
                 // 既定ではどのプロファイルも自動適用オフのため、実質待機で始まる。
                 match crate::game_profile::ProfileWatcher::spawn(
@@ -36,12 +48,14 @@ impl ApplicationState {
                     profile_store.clone(),
                     Some(theme_schedule_store.clone()),
                     Some(taskbar_store.clone()),
+                    mode_ribbon.clone(),
                 ) {
                     Ok(watcher) => Self {
                         engine: Some(engine),
                         profile_store: Some(profile_store),
                         theme_schedule_store: Some(theme_schedule_store),
                         taskbar_store: Some(taskbar_store),
+                        mode_ribbon,
                         initialization_error: None,
                         _instance_guard: Some(instance_guard),
                         profile_watcher: Some(watcher),
@@ -53,6 +67,7 @@ impl ApplicationState {
                         profile_store: Some(profile_store),
                         theme_schedule_store: Some(theme_schedule_store),
                         taskbar_store: Some(taskbar_store),
+                        mode_ribbon,
                         initialization_error: Some(error),
                         _instance_guard: Some(instance_guard),
                         profile_watcher: None,
@@ -64,6 +79,7 @@ impl ApplicationState {
                 profile_store: None,
                 theme_schedule_store: None,
                 taskbar_store: None,
+                mode_ribbon: None,
                 initialization_error: Some(error),
                 _instance_guard: None,
                 profile_watcher: None,
@@ -77,6 +93,24 @@ impl ApplicationState {
                 "タスクバー設定の保存領域を初期化できなかったため、操作を停止しました。",
             )
         })
+    }
+
+    pub fn mode_ribbon(&self) -> CoreResult<Arc<crate::windows::ModeRibbonController>> {
+        self.mode_ribbon.clone().ok_or_else(|| {
+            CoreError::new(
+                "MODE_RIBBON_UNAVAILABLE",
+                "MODE_RIBBON",
+                true,
+                "モードリボンを開始できませんでした。アプリを開き直して再試行してください。",
+            )
+        })
+    }
+
+    pub fn sync_manual_mode_ribbons(&self) -> CoreResult<()> {
+        let controller = self.mode_ribbon()?;
+        let store = self.profile_store()?;
+        sync_manual_mode_ribbons(&controller, &store);
+        Ok(())
     }
 
     pub fn engine(&self) -> CoreResult<Arc<PcCustomEngine>> {
@@ -142,6 +176,22 @@ impl ApplicationState {
             ),
         }
     }
+}
+
+fn sync_manual_mode_ribbons(
+    controller: &crate::windows::ModeRibbonController,
+    store: &crate::game_profile::ProfileStore,
+) {
+    let active = store
+        .list()
+        .into_iter()
+        .filter(|profile| profile.is_manual() && profile.active_run.is_some())
+        .map(|profile| crate::windows::ActiveModeRibbon {
+            profile_id: profile.id,
+            color: profile.ribbon_color,
+        })
+        .collect();
+    controller.sync_manual_profiles(active);
 }
 
 impl Drop for ApplicationState {

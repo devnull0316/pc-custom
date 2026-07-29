@@ -64,6 +64,7 @@ pub fn run() {
             commands::profiles_list,
             commands::profile_create,
             commands::profile_set_enabled,
+            commands::profile_set_ribbon_color,
             commands::profile_run_now,
             commands::profile_restore_now,
             commands::profile_delete,

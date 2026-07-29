@@ -217,11 +217,26 @@ pub fn profile_set_enabled(
 }
 
 #[tauri::command]
+pub fn profile_set_ribbon_color(
+    state: State<'_, ApplicationState>,
+    id: String,
+    color: Option<crate::game_profile::ModeRibbonColor>,
+) -> CoreResult<()> {
+    let controller = state.mode_ribbon()?;
+    state.profile_store()?.set_ribbon_color(&id, color)?;
+    controller.update_profile_color(&id, color);
+    state.sync_manual_mode_ribbons()
+}
+
+#[tauri::command]
 pub fn profile_run_now(
     state: State<'_, ApplicationState>,
     id: String,
 ) -> CoreResult<crate::game_profile::ManualProfileResult> {
-    crate::game_profile::run_manual_profile(state.engine()?, state.profile_store()?, &id)
+    let result =
+        crate::game_profile::run_manual_profile(state.engine()?, state.profile_store()?, &id)?;
+    state.sync_manual_mode_ribbons()?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -229,7 +244,10 @@ pub fn profile_restore_now(
     state: State<'_, ApplicationState>,
     id: String,
 ) -> CoreResult<crate::game_profile::ManualProfileResult> {
-    crate::game_profile::restore_manual_profile(state.engine()?, state.profile_store()?, &id)
+    let result =
+        crate::game_profile::restore_manual_profile(state.engine()?, state.profile_store()?, &id)?;
+    state.sync_manual_mode_ribbons()?;
+    Ok(result)
 }
 #[tauri::command]
 pub fn profile_delete(state: State<'_, ApplicationState>, id: String) -> CoreResult<()> {

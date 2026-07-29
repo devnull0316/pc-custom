@@ -358,6 +358,7 @@ fn recovery_parameters_union_current_registered_game_identity() {
             name: "recovery game".to_owned(),
             executable_path: Some(notepad()),
             conflict_policy: None,
+            ribbon_color: None,
             actions: vec![StoredProfileAction {
                 action_id: "theme.color_mode".to_owned(),
                 parameters: serde_json::json!({ "mode": "dark" }),

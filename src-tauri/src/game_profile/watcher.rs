@@ -93,6 +93,7 @@ impl ProfileWatcher {
         store: Arc<ProfileStore>,
         theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
         taskbar: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
+        mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
     ) -> CoreResult<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let health = WatcherHealth::new();
@@ -107,6 +108,7 @@ impl ProfileWatcher {
                         store,
                         theme_schedule,
                         taskbar,
+                        mode_ribbon,
                         stop_thread,
                         &health_thread,
                     )
@@ -174,6 +176,7 @@ fn run_loop(
     store: Arc<ProfileStore>,
     theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     taskbar: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
+    mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
     stop: Arc<AtomicBool>,
     health: &WatcherHealth,
 ) -> CoreResult<()> {
@@ -192,6 +195,7 @@ fn run_loop(
 
     while !stop.load(Ordering::SeqCst) {
         run_cycle(&mut runtime, &store, health);
+        sync_game_mode_ribbons(&runtime, &store, mode_ribbon.as_deref());
         if let Some(theme_store) = theme_schedule.as_ref() {
             apply_theme_schedule_if_due(&theme_engine, theme_store, &mut theme_tracker);
         }
@@ -210,11 +214,38 @@ fn run_loop(
 
     // 終了境界: active instance を終了扱いにして、適用済み resource を先に復元する。
     let failures = runtime.sync(&[]);
+    if let Some(controller) = mode_ribbon.as_deref() {
+        controller.sync_game_profiles(Vec::new());
+    }
     if let Some((error, _)) = sync_failures_error(&failures) {
         health.record(error.clone(), true);
         return Err(error);
     }
     Ok(())
+}
+
+fn sync_game_mode_ribbons(
+    runtime: &ProfileRuntime<EngineProfileSink>,
+    store: &ProfileStore,
+    controller: Option<&crate::windows::ModeRibbonController>,
+) {
+    let Some(controller) = controller else {
+        return;
+    };
+    let active = store
+        .list()
+        .into_iter()
+        .filter_map(|profile| {
+            let id = uuid::Uuid::parse_str(&profile.id).ok()?;
+            runtime
+                .is_applied_active(super::GameProfileId(id))
+                .then_some(crate::windows::ActiveModeRibbon {
+                    profile_id: profile.id,
+                    color: profile.ribbon_color,
+                })
+        })
+        .collect();
+    controller.sync_game_profiles(active);
 }
 
 /// 自分が隠していたなら、**最初に観測した利用者の状態へ**戻す。
@@ -649,7 +680,8 @@ mod tests {
             PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200)))
                 .expect("engine"),
         );
-        let mut watcher = ProfileWatcher::spawn(engine, store, None, None).expect("spawn watcher");
+        let mut watcher =
+            ProfileWatcher::spawn(engine, store, None, None, None).expect("spawn watcher");
         watcher.shutdown().expect("graceful shutdown");
         assert!(watcher.health_error().is_none());
     }

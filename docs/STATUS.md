@@ -1256,3 +1256,34 @@ before   bit=false work_area=(0,0,1920,1032) taskbar_rect=(0,1032,1920,1080)
 
 直した結果は 1920x1080 / 239.999Hz で、同じ日にタスクバーの測定で読んだ画面の大きさと一致する。
 
+## クリック透過の合格は、覆われているだけだった（2026-07-29）
+
+モードリボンの実機テストは `WindowFromPoint` がリボンを返さないことを合格としていた。
+緑だった。**何も証明していなかった。**
+
+透過しない窓をわざと同じ位置に置いて計器を確かめたら、そちらも返らなかった。
+
+```
+ribbon_probe visible=true rect=(0,1028,1920,1032) wanted=(0,1028,1920,1032)
+ribbon_probe hit_rect=(0,0,1920,1080) hit_visible=true
+ribbon_probe opaque_hwnd=0x28028A WindowFromPoint=0x8F07D4 probe_sees_it=false
+```
+
+原因は画面いっぱいの窓が手前にあること。この機の常態がそれ。
+その状態では、**透過していてもいなくても `WindowFromPoint` の答えは同じ**になる。
+
+Z順に依存しない測り方へ替えた。窓自身の性質だけを見る。
+
+```
+ribbon_transparency ex_style=0x080800A8 ws_ex_transparent=true nchittest=-1 htransparent=true
+```
+
+`WS_EX_TRANSPARENT` が立っていること、`WM_NCHITTEST` が `HTTRANSPARENT`(-1) を返すこと。
+どちらもほかの窓の位置に左右されない。
+
+`WindowFromPoint` の側は残したが、覆われているときは見送りにして、
+**どのテストが透過の証拠を持っているかを見送りの文言に書いた。**
+見送りを合格として読ませない。
+
+教訓は前と同じ形。**「見えない」は「透過している」ではない。目を閉じても見えない。**
+
