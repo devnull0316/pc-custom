@@ -1417,3 +1417,49 @@ EVIDENCE: info_tip original=true restored=true off_readback=false off_cursor_mov
 **UIA のサンプリング自体を開始できなかった**ことを表す。オフ／オンの外部差は数値で証明できていない。
 機能が現行 Windows で効かないとは断定せず、安全にホバーを起こして元位置へ戻せる環境で
 外部差が得られるまで Action の変更経路は実装しない。
+
+## 対応RGBは「戻せない」がAPIの形で確定している（2026-07-29 確認）
+
+`docs/RESEARCH_FEATURES_ROUND2.md` の候補7は「不採用、コード化しない」と結論している。
+その前提が本当かを、windows-rs 0.58 のメタデータで直接確かめた。
+
+`Windows.Devices.Lights.LampArray` が公開しているもの:
+
+```
+SetColor / SetColorForIndex / SetSingleColorForIndices /
+SetColorsForIndices / SetColorsForKey / SetColorsForKeys
+BrightnessLevel / SetBrightnessLevel
+GetLampInfo / GetIndicesForPurposes / LampCount / LampArrayKind
+```
+
+**色の setter は6つある。getter は1つも無い。**
+`GetLampInfo` が返すのは lamp の静的な情報で、いま光っている色ではない。
+
+（単体の `Lamp` クラスには `Color()` の getter がある。だがそれはカメラのプライバシーランプ等で、
+RGB のキーボードやマウスが出すのは `LampArray` のほう。混同しないこと。）
+
+つまり**触る前の色を読む手段が公開されていない。**
+BRIEF の「変更前の状態へ正確に戻す」が API の形として満たせない。
+明るさが読み書きできても、色が読めない以上は埋まらない。
+
+**結論: 実装しない。** 制御を手放せば機器は自律モードへ戻るが、
+それは「直前の色へ戻した」ではない。戻したふりをしない。
+
+Microsoft が現在色の取得を文書化するか、触る前の状態へ確実に戻せる別の公開手段が
+確認できたときに、この判断をやり直す。
+
+## 2回目の調査、7候補の決着（2026-07-29）
+
+| | 候補 | 結果 |
+|---|---|---|
+| 1 | 既定の通話マイクをミュート | 出荷。同一 device ID にだけ戻す。存在しない ID は `ERROR_NOT_FOUND` で止まる |
+| 2 | タスクバー上のモードリボン | 出荷。Windows を1バイトも変えない |
+| 3 | 別プロセスで開く の昇格 | **昇格しない。** 外部差を証明できず |
+| 4 | 安全なホットコーナー | 出荷。既定は全部「何もしない」 |
+| 5 | 配色シーン | 出荷。新しい書き込み API はゼロ |
+| 6 | 情報ツールチップ の昇格 | **昇格しない。** ホバーを開始できず測れなかった |
+| 7 | 対応 RGB をモード色に | **実装しない。** 色の getter が公開されていない |
+
+出荷4件、見送り3件。**見送りのほうが多い回もあってよい。**
+3件とも「効かない」とは書いていない。「この観測では区別できない」「この API では戻せない」まで。
+
