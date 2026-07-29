@@ -1382,3 +1382,38 @@ polls=25 wall_ms=5005 cpu_us=15625
 
 角の判定は既定で全部「何もしない」。入れていない人には何も起きない。
 
+## 「ファイルの説明ポップアップ」は外部差を測れなかった（2026-07-29 実測）
+
+`explorer.info_tips` の昇格ゲートとして、次を実装して実機で走らせた。
+
+- 文書化された `SHGetSetSettings` に `SSF_SHOWINFOTIP` を渡し、`fShowInfoTip` を
+  オフ／オンにした直後に同じ API で読み直した。レジストリは直接書いていない。
+- 一意な検査フォルダーと 12 KiB の一意な検査ファイルを各状態で作り、既存 HWND の集合に無かった
+  新規 `CabinetWClass` かつ一意なタイトルの窓だけを自己所有窓として開いた。
+- 自己所有ファイルの UIA 矩形中央へポインターを置き、UIA の ToolTip 型を 200 ms 間隔で
+  40回読む計器を用意した。自己所有 Explorer の PID と、対象項目から 800 px 以内の件数を別々に数える。
+- 設定は `Drop` guard で元の `true` へ戻す。ポインターも、実際に移動できた場合だけ
+  `Drop` guard で元位置へ戻す。自己所有窓は `Drop` で閉じ、一時フォルダーとファイルは
+  `TempDir` で削除する。利用者の窓とファイルには触れていない。
+
+実行:
+
+```text
+cargo test --lib info_tip_setting_changes_owned_explorer_tooltip_visibility -- --ignored --nocapture --test-threads=1
+```
+
+実測値:
+
+```text
+EVIDENCE: info_tip original=true restored=true off_readback=false off_cursor_moved=false off_samples=0 off_samples_with_tooltip=0 off_max_visible=0 off_max_owned=0 off_max_near=0 off_names=[] off_unavailable=Some("SetCursorPos failed") on_readback=true on_cursor_moved=false on_samples=0 on_samples_with_tooltip=0 on_max_visible=0 on_max_owned=0 on_max_near=0 on_names=[] on_unavailable=Some("SetCursorPos failed") outward_difference=false
+```
+
+**結論: 現時点では効果がまだ分からないため、`explorer.info_tips` を昇格してはいけない。
+表示専用のままにする。**
+
+公開 API の readback はオフで `false`、オンで `true` となり、最後に元の `true` へ復元できた。
+しかし、この実行環境では `SetCursorPos` が両状態で拒否され、ホバーを開始できなかった。
+したがって `samples=0` と各 tooltip 件数の `0` は「ポップアップが無かった」という観測値ではなく、
+**UIA のサンプリング自体を開始できなかった**ことを表す。オフ／オンの外部差は数値で証明できていない。
+機能が現行 Windows で効かないとは断定せず、安全にホバーを起こして元位置へ戻せる環境で
+外部差が得られるまで Action の変更経路は実装しない。

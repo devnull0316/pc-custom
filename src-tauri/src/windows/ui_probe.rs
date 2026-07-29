@@ -240,6 +240,63 @@ pub fn set_shell_state_show_hidden(_show: bool) -> WindowsResult<()> {
     Err(WindowsError::unsupported("set shell state"))
 }
 
+/// ファイル／フォルダーの説明ポップアップ設定を、文書化された
+/// `SHGetSetSettings` / `SSF_SHOWINFOTIP` 経由で読み取る。
+#[cfg(windows)]
+pub fn shell_state_show_info_tip() -> WindowsResult<bool> {
+    use windows::Win32::Foundation::FALSE;
+    use windows::Win32::UI::Shell::{SHGetSetSettings, SHELLSTATEA, SSF_SHOWINFOTIP};
+
+    const SHOW_INFO_TIP_BIT: i32 = 1 << 11;
+
+    let mut state = SHELLSTATEA::default();
+    unsafe {
+        SHGetSetSettings(Some(&mut state), SSF_SHOWINFOTIP, FALSE);
+    }
+    Ok(state._bitfield1 & SHOW_INFO_TIP_BIT != 0)
+}
+
+/// ファイル／フォルダーの説明ポップアップ設定を書き、同じ公開 API で必ず読み直す。
+///
+/// `SHGetSetSettings` の戻り値は `void` なので、呼び出せたことを成功とは扱わない。
+#[cfg(windows)]
+pub fn set_shell_state_show_info_tip(show: bool) -> WindowsResult<()> {
+    use windows::Win32::Foundation::{FALSE, TRUE};
+    use windows::Win32::UI::Shell::{SHGetSetSettings, SHELLSTATEA, SSF_SHOWINFOTIP};
+
+    const SHOW_INFO_TIP_BIT: i32 = 1 << 11;
+
+    let mut state = SHELLSTATEA::default();
+    unsafe {
+        SHGetSetSettings(Some(&mut state), SSF_SHOWINFOTIP, FALSE);
+        if show {
+            state._bitfield1 |= SHOW_INFO_TIP_BIT;
+        } else {
+            state._bitfield1 &= !SHOW_INFO_TIP_BIT;
+        }
+        SHGetSetSettings(Some(&mut state), SSF_SHOWINFOTIP, TRUE);
+    }
+
+    if shell_state_show_info_tip()? != show {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "SHGetSetSettings info-tip readback",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn shell_state_show_info_tip() -> WindowsResult<bool> {
+    Err(WindowsError::unsupported("read shell info-tip state"))
+}
+
+#[cfg(not(windows))]
+pub fn set_shell_state_show_info_tip(_show: bool) -> WindowsResult<()> {
+    Err(WindowsError::unsupported("set shell info-tip state"))
+}
+
 /// フォルダーウィンドウを別プロセスで開く設定を、文書化された
 /// `SHGetSetSettings` / `SSF_SEPPROCESS` 経由で読み取る。
 #[cfg(windows)]
@@ -1172,6 +1229,333 @@ mod tests {
                 eprintln!("emergency separate-process restoration failed: {error}");
             }
         }
+    }
+
+    struct InfoTipRestoreGuard {
+        original: bool,
+        restored: bool,
+    }
+
+    impl InfoTipRestoreGuard {
+        fn new() -> WindowsResult<Self> {
+            Ok(Self {
+                original: shell_state_show_info_tip()?,
+                restored: false,
+            })
+        }
+
+        fn restore_and_assert(&mut self) {
+            set_shell_state_show_info_tip(self.original)
+                .expect("restore info-tip setting through documented API");
+            assert_eq!(
+                shell_state_show_info_tip().expect("read restored info-tip setting"),
+                self.original,
+                "info-tip setting must be restored exactly"
+            );
+            self.restored = true;
+        }
+    }
+
+    impl Drop for InfoTipRestoreGuard {
+        fn drop(&mut self) {
+            if self.restored {
+                return;
+            }
+            if let Err(error) = set_shell_state_show_info_tip(self.original) {
+                eprintln!("emergency info-tip restoration failed: {error}");
+            }
+        }
+    }
+
+    struct CursorRestoreGuard {
+        original: windows::Win32::Foundation::POINT,
+        moved: bool,
+    }
+
+    impl CursorRestoreGuard {
+        fn new() -> WindowsResult<Self> {
+            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+            let mut original = windows::Win32::Foundation::POINT::default();
+            unsafe { GetCursorPos(&mut original) }.map_err(|_| {
+                WindowsError::new(WindowsErrorKind::ApiFailure, "GetCursorPos", None)
+            })?;
+            Ok(Self {
+                original,
+                moved: false,
+            })
+        }
+
+        fn move_to(&mut self, x: i32, y: i32) -> WindowsResult<()> {
+            use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+
+            unsafe { SetCursorPos(x, y) }.map_err(|_| {
+                WindowsError::new(WindowsErrorKind::ApiFailure, "SetCursorPos", None)
+            })?;
+            self.moved = true;
+            Ok(())
+        }
+    }
+
+    impl Drop for CursorRestoreGuard {
+        fn drop(&mut self) {
+            use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+
+            if !self.moved {
+                return;
+            }
+            if unsafe { SetCursorPos(self.original.x, self.original.y) }.is_err() {
+                eprintln!("emergency cursor restoration failed");
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct InfoTipUiObservation {
+        readback: bool,
+        samples: usize,
+        samples_with_owned_or_near_tooltip: usize,
+        maximum_visible_tooltips: i32,
+        maximum_owned_process_tooltips: i32,
+        maximum_near_item_tooltips: i32,
+        names: Vec<String>,
+        cursor_moved: bool,
+        unavailable_reason: Option<String>,
+    }
+
+    fn rects_are_near(left: RECT, right: RECT) -> bool {
+        let left_center_x = i64::from(left.left) + i64::from(left.right - left.left) / 2;
+        let left_center_y = i64::from(left.top) + i64::from(left.bottom - left.top) / 2;
+        let right_center_x = i64::from(right.left) + i64::from(right.right - right.left) / 2;
+        let right_center_y = i64::from(right.top) + i64::from(right.bottom - right.top) / 2;
+        let delta_x = left_center_x - right_center_x;
+        let delta_y = left_center_y - right_center_y;
+        delta_x * delta_x + delta_y * delta_y <= 800 * 800
+    }
+
+    fn visible_tooltip_counts(
+        owned_process_id: u32,
+        item_bounds: RECT,
+    ) -> WindowsResult<(i32, i32, i32, Vec<String>)> {
+        use windows::Win32::UI::Accessibility::{
+            UIA_ControlTypePropertyId, UIA_ToolTipControlTypeId,
+        };
+
+        fn fail(operation: &'static str) -> WindowsError {
+            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+        }
+
+        unsafe {
+            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let owns_com = init.is_ok();
+            let result = (|| -> WindowsResult<(i32, i32, i32, Vec<String>)> {
+                let automation: IUIAutomation =
+                    CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                        .map_err(|_| fail("CoCreateInstance tooltip probe"))?;
+                let root = automation
+                    .GetRootElement()
+                    .map_err(|_| fail("GetRootElement tooltip probe"))?;
+                let condition = automation
+                    .CreatePropertyCondition(
+                        UIA_ControlTypePropertyId,
+                        &windows::core::VARIANT::from(UIA_ToolTipControlTypeId.0),
+                    )
+                    .map_err(|_| fail("CreatePropertyCondition tooltip probe"))?;
+                let tooltips = root
+                    .FindAll(TreeScope_Descendants, &condition)
+                    .map_err(|_| fail("FindAll tooltip probe"))?;
+                let count = tooltips
+                    .Length()
+                    .map_err(|_| fail("Length tooltip probe"))?;
+                let mut visible = 0;
+                let mut owned = 0;
+                let mut near = 0;
+                let mut names = Vec::new();
+                for index in 0..count {
+                    let Ok(element) = tooltips.GetElement(index) else {
+                        continue;
+                    };
+                    if element
+                        .CurrentIsOffscreen()
+                        .map(|value| value.as_bool())
+                        .unwrap_or(true)
+                    {
+                        continue;
+                    }
+                    let Ok(bounds) = element.CurrentBoundingRectangle() else {
+                        continue;
+                    };
+                    if bounds.right <= bounds.left || bounds.bottom <= bounds.top {
+                        continue;
+                    }
+                    visible += 1;
+                    if element.CurrentProcessId().ok() == Some(owned_process_id as i32) {
+                        owned += 1;
+                    }
+                    if rects_are_near(bounds, item_bounds) {
+                        near += 1;
+                    }
+                    if let Ok(name) = element.CurrentName() {
+                        let name = name.to_string();
+                        if !name.trim().is_empty() && !names.contains(&name) {
+                            names.push(name);
+                        }
+                    }
+                }
+                Ok((visible, owned, near, names))
+            })();
+            if owns_com {
+                CoUninitialize();
+            }
+            result
+        }
+    }
+
+    fn observe_owned_explorer_info_tip(
+        show: bool,
+        cursor_guard: &mut CursorRestoreGuard,
+    ) -> WindowsResult<InfoTipUiObservation> {
+        const ITEM_NAME: &str = "infotip-target-6b8e.txt";
+
+        set_shell_state_show_info_tip(show)?;
+        let readback = shell_state_show_info_tip()?;
+        if readback != show {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "info-tip setting changed after readback",
+                None,
+            ));
+        }
+
+        let dir = probe_folder("pcc-infotip-probe-", &[ITEM_NAME]);
+        std::fs::write(dir.path().join(ITEM_NAME), vec![b'x'; 12 * 1024])
+            .map_err(|error| WindowsError::io("write info-tip probe file", &error))?;
+        let title = probe_title(&dir);
+        let window = OwnedExplorerWindow::open(dir.path(), &title)?;
+        let item = explorer_item_observation(window.handle(), ITEM_NAME)?;
+        let owned_process_id = window.process_id()?;
+        let center_x = item.bounds.left + (item.bounds.right - item.bounds.left) / 2;
+        let center_y = item.bounds.top + (item.bounds.bottom - item.bounds.top) / 2;
+
+        let mut observation = InfoTipUiObservation {
+            readback,
+            samples: 0,
+            samples_with_owned_or_near_tooltip: 0,
+            maximum_visible_tooltips: 0,
+            maximum_owned_process_tooltips: 0,
+            maximum_near_item_tooltips: 0,
+            names: Vec::new(),
+            cursor_moved: false,
+            unavailable_reason: None,
+        };
+        if let Err(error) = cursor_guard.move_to(center_x, center_y) {
+            observation.unavailable_reason = Some(error.to_string());
+            window.close_and_assert();
+            return Ok(observation);
+        }
+        observation.cursor_moved = true;
+
+        for _ in 0..40 {
+            sleep(Duration::from_millis(200));
+            let (visible, owned, near, names) =
+                visible_tooltip_counts(owned_process_id, item.bounds)?;
+            observation.samples += 1;
+            observation.maximum_visible_tooltips =
+                observation.maximum_visible_tooltips.max(visible);
+            observation.maximum_owned_process_tooltips =
+                observation.maximum_owned_process_tooltips.max(owned);
+            observation.maximum_near_item_tooltips =
+                observation.maximum_near_item_tooltips.max(near);
+            if owned > 0 || near > 0 {
+                observation.samples_with_owned_or_near_tooltip += 1;
+            }
+            for name in names {
+                if !observation.names.contains(&name) {
+                    observation.names.push(name);
+                }
+            }
+        }
+
+        window.close_and_assert();
+        Ok(observation)
+    }
+
+    #[test]
+    #[ignore = "文書化APIで設定を一時変更し、自己所有Explorerの説明ポップアップをUIAで測る"]
+    fn info_tip_setting_changes_owned_explorer_tooltip_visibility() {
+        let mut setting_guard = match InfoTipRestoreGuard::new() {
+            Ok(guard) => guard,
+            Err(error) => {
+                println!("EVIDENCE: info_tip measurement unavailable before mutation: {error:?}");
+                return;
+            }
+        };
+        let mut cursor_guard = match CursorRestoreGuard::new() {
+            Ok(guard) => guard,
+            Err(error) => {
+                println!("EVIDENCE: info_tip measurement unavailable before cursor move: original={} error={error:?}", setting_guard.original);
+                return;
+            }
+        };
+        let original = setting_guard.original;
+
+        let off = match observe_owned_explorer_info_tip(false, &mut cursor_guard) {
+            Ok(observation) => observation,
+            Err(error) => {
+                setting_guard.restore_and_assert();
+                println!(
+                    "EVIDENCE: info_tip measurement unavailable for off state: \
+                     original={original} restored=true error={error:?}"
+                );
+                return;
+            }
+        };
+        let on = match observe_owned_explorer_info_tip(true, &mut cursor_guard) {
+            Ok(observation) => observation,
+            Err(error) => {
+                setting_guard.restore_and_assert();
+                println!(
+                    "EVIDENCE: info_tip measurement unavailable for on state: \
+                     original={original} restored=true off={off:?} error={error:?}"
+                );
+                return;
+            }
+        };
+
+        setting_guard.restore_and_assert();
+        let off_detected = off.cursor_moved
+            && (off.maximum_owned_process_tooltips > 0 || off.maximum_near_item_tooltips > 0);
+        let on_detected = on.cursor_moved
+            && (on.maximum_owned_process_tooltips > 0 || on.maximum_near_item_tooltips > 0);
+        let outward_difference = off.samples > 0 && on.samples > 0 && !off_detected && on_detected;
+        println!(
+            "EVIDENCE: info_tip original={original} restored=true \
+             off_readback={} off_cursor_moved={} off_samples={} off_samples_with_tooltip={} \
+             off_max_visible={} off_max_owned={} off_max_near={} off_names={:?} \
+             off_unavailable={:?} \
+             on_readback={} on_cursor_moved={} on_samples={} on_samples_with_tooltip={} \
+             on_max_visible={} on_max_owned={} on_max_near={} on_names={:?} \
+             on_unavailable={:?} \
+             outward_difference={outward_difference}",
+            off.readback,
+            off.cursor_moved,
+            off.samples,
+            off.samples_with_owned_or_near_tooltip,
+            off.maximum_visible_tooltips,
+            off.maximum_owned_process_tooltips,
+            off.maximum_near_item_tooltips,
+            off.names,
+            off.unavailable_reason,
+            on.readback,
+            on.cursor_moved,
+            on.samples,
+            on.samples_with_owned_or_near_tooltip,
+            on.maximum_visible_tooltips,
+            on.maximum_owned_process_tooltips,
+            on.maximum_near_item_tooltips,
+            on.names,
+            on.unavailable_reason,
+        );
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
