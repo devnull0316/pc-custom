@@ -1287,3 +1287,36 @@ ribbon_transparency ex_style=0x080800A8 ws_ex_transparent=true nchittest=-1 htra
 
 教訓は前と同じ形。**「見えない」は「透過している」ではない。目を閉じても見えない。**
 
+## 「フォルダーを別プロセスで開く」は外部PID差を証明できなかった（2026-07-29 実測）
+
+`explorer.separate_process` の昇格ゲートとして、Windows 25H2 build 26200.8875 で次を測った。
+
+- 文書化された `SHGetSetSettings` に `SSF_SEPPROCESS` を渡し、設定をオフ／オンにした直後に
+  同じ API で読み直した。戻り値が `void` であることを踏まえ、呼び出し完了自体は証拠にしていない。
+- 各状態で一意な検査フォルダーを2つ作り、既存 HWND の集合に無かった新規
+  `CabinetWClass` かつ一意なタイトルを含む窓だけを自己所有窓として採用した。
+  利用者の Explorer 窓は数えず、閉じていない。
+- 各自己所有窓の PID を `GetWindowThreadProcessId` で外から取得し、
+  `GetShellWindow` の PID と比較した。自己所有窓は `Drop` で閉じ、設定も別の `Drop` guard で
+  元の `false` へ戻した。検査用フォルダーの残骸も無い。
+
+実行:
+
+```text
+cargo test --lib separate_process_setting_changes_owned_explorer_window_process_pattern -- --ignored --nocapture --test-threads=1
+```
+
+実測値:
+
+```text
+EVIDENCE: separate_process original=false restored=true off_readback=false off_shell_pid=18772 off_window_pids=[27780, 29484] off_matches_shell=[false, false] on_readback=true on_shell_pid=18772 on_window_pids=[29644, 15164] on_matches_shell=[false, false] expected_pattern=false
+```
+
+**結論: `explorer.separate_process` を昇格してはいけない。表示専用のままにする。**
+
+設定値の readback はオフ／オンで変わったが、外部観測の形は両方とも
+「2窓がそれぞれシェルと異なる PID」で同じだった。新しく開いたプロセスの生 PID が
+異なること自体は設定効果の証拠ではない。したがって、この経路では
+「設定オンによってフォルダー窓のプロセス分離が変わった」と証明できない。
+機能自体が現行 Windows で効かないとは断定せず、外部差を証明できる別の観測が得られるまで
+Action の変更経路は実装しない。

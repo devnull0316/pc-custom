@@ -240,6 +240,63 @@ pub fn set_shell_state_show_hidden(_show: bool) -> WindowsResult<()> {
     Err(WindowsError::unsupported("set shell state"))
 }
 
+/// フォルダーウィンドウを別プロセスで開く設定を、文書化された
+/// `SHGetSetSettings` / `SSF_SEPPROCESS` 経由で読み取る。
+#[cfg(windows)]
+pub fn shell_state_separate_process() -> WindowsResult<bool> {
+    use windows::Win32::Foundation::FALSE;
+    use windows::Win32::UI::Shell::{SHGetSetSettings, SHELLSTATEA, SSF_SEPPROCESS};
+
+    let mut state = SHELLSTATEA::default();
+    unsafe {
+        SHGetSetSettings(Some(&mut state), SSF_SEPPROCESS, FALSE);
+    }
+    Ok(state._bitfield2 & 1 != 0)
+}
+
+/// フォルダーウィンドウを別プロセスで開く設定を書き、同じ公開 API で必ず読み直す。
+///
+/// `SHGetSetSettings` の戻り値は `void` なので、呼び出せたことを成功とは扱わない。
+#[cfg(windows)]
+pub fn set_shell_state_separate_process(enabled: bool) -> WindowsResult<()> {
+    use windows::Win32::Foundation::{FALSE, TRUE};
+    use windows::Win32::UI::Shell::{SHGetSetSettings, SHELLSTATEA, SSF_SEPPROCESS};
+
+    let mut state = SHELLSTATEA::default();
+    unsafe {
+        SHGetSetSettings(Some(&mut state), SSF_SEPPROCESS, FALSE);
+        if enabled {
+            state._bitfield2 |= 1;
+        } else {
+            state._bitfield2 &= !1;
+        }
+        SHGetSetSettings(Some(&mut state), SSF_SEPPROCESS, TRUE);
+    }
+
+    if shell_state_separate_process()? != enabled {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "SHGetSetSettings separate process readback",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn shell_state_separate_process() -> WindowsResult<bool> {
+    Err(WindowsError::unsupported(
+        "read shell separate process state",
+    ))
+}
+
+#[cfg(not(windows))]
+pub fn set_shell_state_separate_process(_enabled: bool) -> WindowsResult<()> {
+    Err(WindowsError::unsupported(
+        "set shell separate process state",
+    ))
+}
+
 /// タイトルに `needle` を含む Explorer ウィンドウを1つ探す。
 ///
 /// `FindWindowW` は最初に見つかったウィンドウを返すため、利用者が既に開いている
@@ -523,8 +580,9 @@ mod tests {
         UIA_ListItemControlTypeId,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, FindWindowW, GetClassNameW, GetWindowRect, GetWindowTextW, IsWindow,
-        IsWindowVisible, PostMessageW, SetForegroundWindow, ShowWindow, SW_SHOWMAXIMIZED, WM_CLOSE,
+        EnumWindows, FindWindowW, GetClassNameW, GetShellWindow, GetWindowRect, GetWindowTextW,
+        GetWindowThreadProcessId, IsWindow, IsWindowVisible, PostMessageW, SetForegroundWindow,
+        ShowWindow, SW_SHOWMAXIMIZED, WM_CLOSE,
     };
 
     const REG_DWORD: u32 = 4;
@@ -699,6 +757,24 @@ mod tests {
 
         fn handle(&self) -> isize {
             self.handle.expect("owned Explorer window is open")
+        }
+
+        fn process_id(&self) -> WindowsResult<u32> {
+            let mut process_id = 0;
+            unsafe {
+                GetWindowThreadProcessId(
+                    HWND(self.handle() as *mut core::ffi::c_void),
+                    Some(&mut process_id),
+                );
+            }
+            if process_id == 0 {
+                return Err(WindowsError::new(
+                    WindowsErrorKind::ApiFailure,
+                    "GetWindowThreadProcessId owned Explorer",
+                    None,
+                ));
+            }
+            Ok(process_id)
         }
 
         fn close_and_assert(mut self) {
@@ -1060,6 +1136,166 @@ mod tests {
             .expect("probe directory name")
             .to_string_lossy()
             .into_owned()
+    }
+
+    struct SeparateProcessRestoreGuard {
+        original: bool,
+        restored: bool,
+    }
+
+    impl SeparateProcessRestoreGuard {
+        fn new() -> WindowsResult<Self> {
+            Ok(Self {
+                original: shell_state_separate_process()?,
+                restored: false,
+            })
+        }
+
+        fn restore_and_assert(&mut self) {
+            set_shell_state_separate_process(self.original)
+                .expect("restore separate-process setting through documented API");
+            assert_eq!(
+                shell_state_separate_process().expect("read restored separate-process setting"),
+                self.original,
+                "separate-process setting must be restored exactly"
+            );
+            self.restored = true;
+        }
+    }
+
+    impl Drop for SeparateProcessRestoreGuard {
+        fn drop(&mut self) {
+            if self.restored {
+                return;
+            }
+            if let Err(error) = set_shell_state_separate_process(self.original) {
+                eprintln!("emergency separate-process restoration failed: {error}");
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct SeparateProcessPidObservation {
+        readback: bool,
+        shell_pid: u32,
+        window_pids: [u32; 2],
+        window_matches_shell: [bool; 2],
+    }
+
+    fn shell_process_id() -> WindowsResult<u32> {
+        let shell_window = unsafe { GetShellWindow() };
+        if shell_window.0.is_null() {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "GetShellWindow",
+                None,
+            ));
+        }
+        let mut process_id = 0;
+        unsafe {
+            GetWindowThreadProcessId(shell_window, Some(&mut process_id));
+        }
+        if process_id == 0 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ApiFailure,
+                "GetWindowThreadProcessId shell",
+                None,
+            ));
+        }
+        Ok(process_id)
+    }
+
+    fn observe_owned_explorer_processes(
+        enabled: bool,
+    ) -> WindowsResult<SeparateProcessPidObservation> {
+        set_shell_state_separate_process(enabled)?;
+        let readback = shell_state_separate_process()?;
+        if readback != enabled {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "separate-process setting changed after readback",
+                None,
+            ));
+        }
+
+        let first_dir = probe_folder("pcc-separate-a-", &["owned-a.txt"]);
+        let second_dir = probe_folder("pcc-separate-b-", &["owned-b.txt"]);
+        let first_title = probe_title(&first_dir);
+        let second_title = probe_title(&second_dir);
+        let first = OwnedExplorerWindow::open(first_dir.path(), &first_title)?;
+        let second = OwnedExplorerWindow::open(second_dir.path(), &second_title)?;
+
+        let shell_pid = shell_process_id()?;
+        let window_pids = [first.process_id()?, second.process_id()?];
+        let window_matches_shell = [window_pids[0] == shell_pid, window_pids[1] == shell_pid];
+
+        second.close_and_assert();
+        first.close_and_assert();
+        Ok(SeparateProcessPidObservation {
+            readback,
+            shell_pid,
+            window_pids,
+            window_matches_shell,
+        })
+    }
+
+    #[test]
+    #[ignore = "文書化APIで設定を一時変更し、自己所有のExplorer窓だけを開閉してPIDを測る"]
+    fn separate_process_setting_changes_owned_explorer_window_process_pattern() {
+        let mut guard = match SeparateProcessRestoreGuard::new() {
+            Ok(guard) => guard,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: separate_process measurement unavailable before mutation: {error:?}"
+                );
+                return;
+            }
+        };
+        let original = guard.original;
+
+        let off = match observe_owned_explorer_processes(false) {
+            Ok(observation) => observation,
+            Err(error) => {
+                guard.restore_and_assert();
+                println!(
+                    "EVIDENCE: separate_process measurement unavailable for off state: \
+                     original={original} restored=true error={error:?}"
+                );
+                return;
+            }
+        };
+        let on = match observe_owned_explorer_processes(true) {
+            Ok(observation) => observation,
+            Err(error) => {
+                guard.restore_and_assert();
+                println!(
+                    "EVIDENCE: separate_process measurement unavailable for on state: \
+                     original={original} restored=true \
+                     off_readback={} off_shell_pid={} off_window_pids={:?} \
+                     off_matches_shell={:?} error={error:?}",
+                    off.readback, off.shell_pid, off.window_pids, off.window_matches_shell
+                );
+                return;
+            }
+        };
+
+        guard.restore_and_assert();
+        let expected_pattern =
+            off.window_matches_shell == [true, true] && on.window_matches_shell == [false, false];
+        println!(
+            "EVIDENCE: separate_process original={original} restored=true \
+             off_readback={} off_shell_pid={} off_window_pids={:?} off_matches_shell={:?} \
+             on_readback={} on_shell_pid={} on_window_pids={:?} on_matches_shell={:?} \
+             expected_pattern={expected_pattern}",
+            off.readback,
+            off.shell_pid,
+            off.window_pids,
+            off.window_matches_shell,
+            on.readback,
+            on.shell_pid,
+            on.window_pids,
+            on.window_matches_shell
+        );
     }
 
     /// **この観測は判定に使えない**（記録として残す）。
