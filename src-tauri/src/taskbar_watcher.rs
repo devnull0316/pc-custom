@@ -27,6 +27,13 @@ const MAX_SETTING_FILE_BYTES: u64 = 4 * 1024;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskbarAutoHideSetting {
     pub enabled: bool,
+    /// いま自分が隠している最中で、戻す先はこの値。
+    ///
+    /// **プロセスが強制終了されると `Drop` は走らない。**
+    /// 隠したままにして消えないよう、隠した時点でここへ書いておき、
+    /// 次に起動したときに戻す。戻したら消す。
+    #[serde(default)]
+    pub hiding_restore_to: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,6 +50,8 @@ pub struct TaskbarAutoHideState {
     pub enabled: bool,
     /// 誰かが手で変えたので、この機能が手を引いた状態。
     pub released: bool,
+    /// 元から常に隠す設定なので、この機能の出番が無い。
+    pub not_applicable: bool,
     pub last_error: Option<String>,
 }
 
@@ -51,6 +60,7 @@ pub struct TaskbarAutoHideStore {
     path: PathBuf,
     setting: Mutex<TaskbarAutoHideSetting>,
     released: Mutex<bool>,
+    not_applicable: Mutex<bool>,
     last_error: Mutex<Option<String>>,
 }
 
@@ -76,6 +86,7 @@ impl TaskbarAutoHideStore {
             path,
             setting: Mutex::new(setting),
             released: Mutex::new(false),
+            not_applicable: Mutex::new(false),
             last_error: Mutex::new(None),
         })
     }
@@ -88,6 +99,7 @@ impl TaskbarAutoHideStore {
         TaskbarAutoHideState {
             enabled: self.setting.lock().enabled,
             released: *self.released.lock(),
+            not_applicable: *self.not_applicable.lock(),
             last_error: self.last_error.lock().clone(),
         }
     }
@@ -98,6 +110,42 @@ impl TaskbarAutoHideStore {
 
     pub fn record_error(&self, error: Option<String>) {
         *self.last_error.lock() = error;
+    }
+
+    /// 隠したことを記録する。戻す先も一緒に持つ。
+    pub fn record_hiding(&self, restore_to: bool) -> CoreResult<()> {
+        let mut setting = *self.setting.lock();
+        setting.hiding_restore_to = Some(restore_to);
+        self.persist(setting)?;
+        *self.setting.lock() = setting;
+        Ok(())
+    }
+
+    /// 戻し終えた。記録を消す。
+    pub fn clear_hiding(&self) -> CoreResult<()> {
+        let mut setting = *self.setting.lock();
+        setting.hiding_restore_to = None;
+        self.persist(setting)?;
+        *self.setting.lock() = setting;
+        Ok(())
+    }
+
+    /// この環境では出番が無いと分かった。
+    pub fn record_not_applicable(&self) {
+        *self.not_applicable.lock() = true;
+    }
+
+    fn persist(&self, setting: TaskbarAutoHideSetting) -> CoreResult<()> {
+        let file = SettingFile {
+            version: SETTING_FILE_VERSION,
+            setting,
+        };
+        let bytes = serde_json::to_vec_pretty(&file).map_err(|_| CoreError::storage())?;
+        let mut temp = self.path.clone();
+        temp.set_extension("json.tmp");
+        std::fs::write(&temp, &bytes).map_err(|_| CoreError::storage())?;
+        std::fs::rename(&temp, &self.path).map_err(|_| CoreError::storage())?;
+        Ok(())
     }
 
     pub fn set(&self, setting: TaskbarAutoHideSetting) -> CoreResult<TaskbarAutoHideSetting> {
@@ -111,8 +159,9 @@ impl TaskbarAutoHideStore {
         std::fs::write(&temp, &bytes).map_err(|_| CoreError::storage())?;
         std::fs::rename(&temp, &self.path).map_err(|_| CoreError::storage())?;
         *self.setting.lock() = setting;
-        // 入れ直したら、手を引いた記録も消す。もう一度やらせるということ。
+        // 入れ直したら、手を引いた記録も出番なしの記録も消す。もう一度やらせるということ。
         *self.released.lock() = false;
+        *self.not_applicable.lock() = false;
         *self.last_error.lock() = None;
         Ok(setting)
     }
@@ -134,6 +183,8 @@ pub enum ForegroundObservation {
 pub enum WatcherDecision {
     /// 何もしない。
     Idle,
+    /// この環境ではこの機能に出番が無い。**一度も書かずに終わる。**
+    NotApplicable,
     /// タスクバーを自動的に隠す設定にする。
     Hide,
     /// 自動的に隠す設定を解く。
@@ -161,6 +212,13 @@ pub struct TaskbarWatcher {
     owned: Option<Owned>,
     /// 手を引いたあとは二度と書かない。
     released: bool,
+    /// **利用者が元々どうしていたか。** 最初の観測で1回だけ覚える。
+    ///
+    /// これが無いまま「戻す」を書くと、戻した先が既定値になる。
+    /// 変更前の状態へ戻すのであって、既定値を入れるのではない。
+    baseline: Option<bool>,
+    /// 元から常に隠す設定だった。この機能の出番が無い。
+    not_applicable: bool,
 }
 
 impl TaskbarWatcher {
@@ -175,6 +233,22 @@ impl TaskbarWatcher {
     ) -> WatcherDecision {
         if self.released {
             return WatcherDecision::Idle;
+        }
+        if self.not_applicable {
+            return WatcherDecision::NotApplicable;
+        }
+
+        // 利用者が元々どうしていたかを、最初の1回だけ覚える。
+        let baseline = *self.baseline.get_or_insert(auto_hide_now);
+        if baseline {
+            // 元から常に隠す設定だった。
+            //
+            // この機能が約束しているのは「最大化のときだけ隠す」。
+            // 元が常に隠すなら、最大化していないときに**出す**ことになり、
+            // それは利用者の設定を変えることになる。約束の外なので何もしない。
+            // ここで `Show` を書くと、利用者が選んでいた設定を黙って解除する。
+            self.not_applicable = true;
+            return WatcherDecision::NotApplicable;
         }
 
         // 自分が書いた値と違っていたら、そこで手を引く。
@@ -210,6 +284,11 @@ impl TaskbarWatcher {
         if self.owned == Some(wanted) {
             return WatcherDecision::Idle;
         }
+        // まだ一度も隠していないのに「出す」を書かない。
+        // 書く理由が無い。書けば、触っていない設定を触ったことになる。
+        if wanted == Owned::Shown && self.owned.is_none() {
+            return WatcherDecision::Idle;
+        }
         self.owned = Some(wanted);
         match wanted {
             Owned::Hidden => WatcherDecision::Hide,
@@ -226,13 +305,24 @@ impl TaskbarWatcher {
     pub const fn owns_hidden(&self) -> bool {
         matches!(self.owned, Some(Owned::Hidden))
     }
+
+    /// この環境では出番が無いと分かったか。画面にそう出すために使う。
+    pub const fn is_not_applicable(&self) -> bool {
+        self.not_applicable
+    }
+
+    /// 戻す先。**既定値ではなく、最初に観測した利用者の状態。**
+    /// 一度も観測していなければ `None`（戻す対象が無い）。
+    pub const fn baseline(&self) -> Option<bool> {
+        self.baseline
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ForegroundObservation::{Maximized, NotMaximized, Unknown};
-    use WatcherDecision::{Hide, Idle, ReleaseOwnership, Show};
+    use WatcherDecision::{Hide, Idle, NotApplicable, ReleaseOwnership, Show};
 
     #[test]
     fn one_sighting_is_not_enough_to_move_the_taskbar() {
@@ -307,12 +397,40 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_owned_before_the_first_write() {
-        // まだ何も書いていない間は、外の値がどうであろうと手を引かない。
+    fn a_user_who_already_hides_the_taskbar_is_left_alone() {
+        // ここが以前は壊れていた。元から常に隠す設定の人に対して、
+        // この機能が `Show` を書いて設定を勝手に解除し、二度と戻さなかった。
+        // 以前のテストはその壊れた挙動のほうを固定していた。
         let mut watcher = TaskbarWatcher::default();
-        assert_eq!(watcher.evaluate(NotMaximized, true), Idle);
+        for _ in 0..10 {
+            assert_eq!(watcher.evaluate(NotMaximized, true), NotApplicable);
+            assert_eq!(watcher.evaluate(Maximized, true), NotApplicable);
+        }
+        assert!(watcher.is_not_applicable());
+        assert!(!watcher.owns_hidden(), "何も所有していない");
+    }
+
+    #[test]
+    fn nothing_is_written_before_anything_has_been_hidden() {
+        // 隠していないのに「出す」を書く理由が無い。
+        // 触っていない設定を触ったことにしない。
+        let mut watcher = TaskbarWatcher::default();
+        for _ in 0..6 {
+            assert_eq!(watcher.evaluate(NotMaximized, false), Idle);
+        }
         assert!(!watcher.has_released());
-        assert_eq!(watcher.evaluate(NotMaximized, true), Show);
+        assert_eq!(watcher.baseline(), Some(false));
+    }
+
+    #[test]
+    fn the_baseline_is_taken_once_and_not_re_taken() {
+        let mut watcher = TaskbarWatcher::default();
+        watcher.evaluate(NotMaximized, false);
+        assert_eq!(watcher.baseline(), Some(false));
+        // 途中で外の値が変わっても、戻す先は最初に見た値のまま。
+        watcher.evaluate(Maximized, false);
+        assert_eq!(watcher.evaluate(Maximized, false), Hide);
+        assert_eq!(watcher.baseline(), Some(false));
     }
 
     #[test]

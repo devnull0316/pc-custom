@@ -445,5 +445,7 @@ export interface TaskbarAutoHideState {
   enabled: boolean;
   /** 誰かが手で変えたので、この機能が手を引いた。 */
   released: boolean;
+  /** 元から常に隠す設定なので、この機能の出番が無い。 */
+  notApplicable: boolean;
   lastError: string | null;
 }

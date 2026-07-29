@@ -181,7 +181,14 @@ fn run_loop(
     let sink = EngineProfileSink::new(engine);
     let mut runtime = ProfileRuntime::new(sink);
     let mut theme_tracker = crate::theme_schedule::ThemeScheduleTracker::default();
-    let mut taskbar_watcher = crate::taskbar_watcher::TaskbarWatcher::default();
+    let mut taskbar_guard = TaskbarWatcherGuard {
+        watcher: crate::taskbar_watcher::TaskbarWatcher::default(),
+        store: taskbar.clone(),
+    };
+    // 前回、隠したまま終わっていたら先に戻す。
+    if let Some(taskbar_store) = taskbar.as_ref() {
+        recover_taskbar_from_previous_run(taskbar_store);
+    }
 
     while !stop.load(Ordering::SeqCst) {
         run_cycle(&mut runtime, &store, health);
@@ -189,7 +196,7 @@ fn run_loop(
             apply_theme_schedule_if_due(&theme_engine, theme_store, &mut theme_tracker);
         }
         if let Some(taskbar_store) = taskbar.as_ref() {
-            follow_taskbar_auto_hide(taskbar_store, &mut taskbar_watcher);
+            follow_taskbar_auto_hide(taskbar_store, &mut taskbar_guard.watcher);
         }
 
         let ticks = (POLL_INTERVAL.as_millis() / STOP_CHECK.as_millis()).max(1);
@@ -201,15 +208,6 @@ fn run_loop(
         }
     }
 
-    // 自分が隠していたなら、終了前に戻す。隠したまま消えない。
-    if taskbar.is_some() && taskbar_watcher.owns_hidden() && !taskbar_watcher.has_released() {
-        if let Ok(observation) = crate::windows::observe_taskbar_auto_hide() {
-            if observation.auto_hide_bit {
-                let _ = crate::windows::replace_taskbar_auto_hide(true, false);
-            }
-        }
-    }
-
     // 終了境界: active instance を終了扱いにして、適用済み resource を先に復元する。
     let failures = runtime.sync(&[]);
     if let Some((error, _)) = sync_failures_error(&failures) {
@@ -217,6 +215,57 @@ fn run_loop(
         return Err(error);
     }
     Ok(())
+}
+
+/// 自分が隠していたなら、**最初に観測した利用者の状態へ**戻す。
+///
+/// 戻す先を `false` と決め打ちにしない。それは既定値であって、変更前の状態ではない。
+fn restore_taskbar_if_we_hid_it(
+    store: &crate::taskbar_watcher::TaskbarAutoHideStore,
+    watcher: &crate::taskbar_watcher::TaskbarWatcher,
+) {
+    if !watcher.owns_hidden() || watcher.has_released() {
+        return;
+    }
+    let Some(baseline) = watcher.baseline() else {
+        return;
+    };
+    restore_taskbar_to(store, baseline);
+}
+
+/// 記録してある戻し先へ戻す。起動直後の復旧にも使う。
+fn restore_taskbar_to(store: &crate::taskbar_watcher::TaskbarAutoHideStore, baseline: bool) {
+    let Ok(observation) = crate::windows::observe_taskbar_auto_hide() else {
+        return;
+    };
+    if observation.auto_hide_bit != baseline {
+        // 第三者が既に触っていれば拒否される。取り返さない。
+        let _ = crate::windows::replace_taskbar_auto_hide(observation.auto_hide_bit, baseline);
+    }
+    let _ = store.clear_hiding();
+}
+
+/// 前回、隠したまま終わっていたら戻す。
+///
+/// **`Drop` はプロセスを強制終了されると走らない。** そのとき戻すのはここ。
+fn recover_taskbar_from_previous_run(store: &crate::taskbar_watcher::TaskbarAutoHideStore) {
+    if let Some(baseline) = store.get().hiding_restore_to {
+        restore_taskbar_to(store, baseline);
+    }
+}
+
+/// 巡回の途中で panic しても、隠したままにしない。
+struct TaskbarWatcherGuard {
+    watcher: crate::taskbar_watcher::TaskbarWatcher,
+    store: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
+}
+
+impl Drop for TaskbarWatcherGuard {
+    fn drop(&mut self) {
+        if let Some(store) = self.store.as_ref() {
+            restore_taskbar_if_we_hid_it(store, &self.watcher);
+        }
+    }
 }
 
 /// 最大化しているときだけタスクバーを隠す。
@@ -232,14 +281,11 @@ fn follow_taskbar_auto_hide(
     if !store.get().enabled {
         // 切られた。自分が隠していたなら戻す。
         // **「オンにしてオフにしても戻らない」を作らない。** 同じ形の不具合を前に出している。
-        if watcher.owns_hidden() && !watcher.has_released() {
-            if let Ok(observation) = crate::windows::observe_taskbar_auto_hide() {
-                if observation.auto_hide_bit {
-                    let _ = crate::windows::replace_taskbar_auto_hide(true, false);
-                }
-            }
-            *watcher = crate::taskbar_watcher::TaskbarWatcher::default();
-        }
+        restore_taskbar_if_we_hid_it(store, watcher);
+        // 手を引いた記録も含めて必ず作り直す。
+        // ここで作り直さないと、切って入れ直しても手を引いたままになり、
+        // 画面だけが「動いています」と言う状態になる。
+        *watcher = crate::taskbar_watcher::TaskbarWatcher::default();
         return;
     }
     let Ok(observation) = crate::windows::observe_taskbar_auto_hide() else {
@@ -255,6 +301,12 @@ fn follow_taskbar_auto_hide(
     let decision = watcher.evaluate(foreground, observation.auto_hide_bit);
     let target = match decision {
         WatcherDecision::Idle => return,
+        WatcherDecision::NotApplicable => {
+            // 元から常に隠す設定だった。この機能の出番が無い。
+            // **何も書かない。** 画面にはそう出す。
+            store.record_not_applicable();
+            return;
+        }
         WatcherDecision::ReleaseOwnership => {
             // 誰かが手で変えた。取り返さず、画面にそう出す。
             store.record_released();
@@ -265,7 +317,19 @@ fn follow_taskbar_auto_hide(
     };
 
     match crate::windows::replace_taskbar_auto_hide(observation.auto_hide_bit, target) {
-        Ok(after) if after.auto_hide_bit == target => store.record_error(None),
+        Ok(after) if after.auto_hide_bit == target => {
+            store.record_error(None);
+            // 隠したことを先に残す。強制終了されてもここから戻せる。
+            match (target, watcher.baseline()) {
+                (true, Some(baseline)) => {
+                    let _ = store.record_hiding(baseline);
+                }
+                (false, _) => {
+                    let _ = store.clear_hiding();
+                }
+                _ => {}
+            }
+        }
         Ok(_) => store.record_error(Some(
             "タスクバーの設定を書きましたが、反映を確認できませんでした。".to_owned(),
         )),

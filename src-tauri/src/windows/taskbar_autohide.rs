@@ -330,6 +330,18 @@ mod tests {
             settled.work_area_covers_screen()
         );
         assert_eq!(settled.auto_hide_bit, target, "ビットが動くこと");
+        // 名前のとおり、作業領域も見る。
+        // ビットだけ見ていると「書いたが何も起きていない」を通してしまう。
+        // `ABM_SETSTATE` は常に TRUE を返すので、見た目の変化が唯一の証拠になる。
+        assert_eq!(
+            settled.work_area_covers_screen(),
+            target,
+            "自動的に隠す設定のとき、作業領域は画面いっぱいになる"
+        );
+        assert_ne!(
+            settled.work_area, before.work_area,
+            "作業領域が動いていないなら反映されていない"
+        );
 
         let restored = replace_taskbar_auto_hide(target, before.auto_hide_bit)
             .expect("restore taskbar auto-hide");
@@ -340,6 +352,10 @@ mod tests {
         assert_eq!(
             settled_back.work_area, before.work_area,
             "作業領域も元へ戻ること"
+        );
+        assert_eq!(
+            settled_back.work_area_covers_screen(),
+            before.work_area_covers_screen()
         );
     }
 

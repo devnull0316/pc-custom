@@ -585,7 +585,7 @@ impl JournalDatabase {
     /// 「効いているはず」は、項目が APPLIED のまま、取引が SUCCEEDED のもの。
     /// 戻した分（ROLLED_BACK）は基準にならないので外す。
     /// 同じ Action を何度も適用していたら、**最後の1回だけ**を基準にする。
-    pub fn applied_backups(&self) -> CoreResult<Vec<AppliedBackup>> {
+    pub fn applied_backups(&self) -> CoreResult<(Vec<AppliedBackup>, usize)> {
         self.with_connection(|database| {
             let mut statement = database.prepare(
                 "SELECT i.action_id, b.payload,
@@ -608,9 +608,13 @@ impl JournalDatabase {
 
             // 古い順に読んで同じ Action を上書きしていくので、残るのは最後の適用。
             let mut latest: BTreeMap<String, AppliedBackup> = BTreeMap::new();
+            let mut unreadable = 0usize;
             for (action_id, payload, applied_at_unix_ms) in rows {
                 let Ok(backup) = serde_json::from_slice::<BackupEnvelope>(&payload) else {
-                    // 読めない記録を「基準どおり」に数えるわけにはいかない。黙って落とす。
+                    // 読めない記録を「基準どおり」に数えるわけにはいかない。
+                    // かといって黙って落とすと、件数のどこにも現れず、
+                    // **確認できなかったことすら見えなくなる。** 数だけ残す。
+                    unreadable += 1;
                     continue;
                 };
                 latest.insert(
@@ -622,7 +626,7 @@ impl JournalDatabase {
                     },
                 );
             }
-            Ok(latest.into_values().collect())
+            Ok((latest.into_values().collect(), unreadable))
         })
     }
 

@@ -166,7 +166,12 @@ pub fn set_taskbar_auto_hide(
     enabled: bool,
 ) -> CoreResult<TaskbarAutoHideState> {
     let store = state.taskbar_store()?;
-    store.set(crate::taskbar_watcher::TaskbarAutoHideSetting { enabled })?;
+    // 隠している最中の記録は引き継ぐ。切り替えただけで戻す先を忘れない。
+    let current = store.get();
+    store.set(crate::taskbar_watcher::TaskbarAutoHideSetting {
+        enabled,
+        hiding_restore_to: current.hiding_restore_to,
+    })?;
     Ok(store.state())
 }
 

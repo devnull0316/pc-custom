@@ -91,6 +91,39 @@ mod imp {
         SPI_SETMOUSESPEED, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
     };
 
+    /// 3つ組だけを書く。速さは別の呼び出し。
+    fn write_triple(target: PointerFeel) -> WindowsResult<()> {
+        let triple = [
+            target.threshold_one,
+            target.threshold_two,
+            target.acceleration,
+        ];
+        unsafe {
+            SystemParametersInfoW(
+                SPI_SETMOUSE,
+                0,
+                Some(triple.as_ptr() as *mut core::ffi::c_void),
+                SPIF_SENDCHANGE,
+            )
+        }
+        .map_err(|error| api_error("write pointer acceleration settings", error))
+    }
+
+    /// 3つ組だけを読む。巻き戻しが効いたかの確認に使う。
+    fn read_triple() -> WindowsResult<[i32; 3]> {
+        let mut triple = [0i32; 3];
+        unsafe {
+            SystemParametersInfoW(
+                SPI_GETMOUSE,
+                0,
+                Some(triple.as_mut_ptr().cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+        }
+        .map_err(|error| api_error("read pointer acceleration settings", error))?;
+        Ok(triple)
+    }
+
     fn api_error(operation: &'static str, error: windows::core::Error) -> WindowsError {
         WindowsError::new(
             WindowsErrorKind::ApiFailure,
@@ -135,30 +168,30 @@ mod imp {
     /// `SPI_SETMOUSESPEED` は値をポインターとしてではなく `pvParam` に直接載せる。
     /// 3つ組のほうは配列のアドレスを渡す。同じ関数でも渡し方が違うので分けて書く。
     pub fn write(target: PointerFeel) -> WindowsResult<()> {
-        let triple = [
-            target.threshold_one,
-            target.threshold_two,
-            target.acceleration,
-        ];
-        unsafe {
-            SystemParametersInfoW(
-                SPI_SETMOUSE,
-                0,
-                Some(triple.as_ptr() as *mut core::ffi::c_void),
-                SPIF_SENDCHANGE,
-            )
-        }
-        .map_err(|error| api_error("write pointer acceleration settings", error))?;
+        // 巻き戻し先を先に読む。書いてから読んでも、それはもう変わったあとの値。
+        let before = read()?;
+        write_triple(target)?;
 
-        unsafe {
+        if let Err(error) = unsafe {
             SystemParametersInfoW(
                 SPI_SETMOUSESPEED,
                 0,
                 Some(target.speed as usize as *mut core::ffi::c_void),
                 SPIF_SENDCHANGE,
             )
+        } {
+            // 3つ組だけ書けて速さが書けなかった状態で終わらせない。
+            // 巻き戻せなければ、失敗ではなく復旧が要る事態として返す。
+            let restored = read_triple().is_ok_and(|_| write_triple(before).is_ok());
+            if !restored {
+                return Err(WindowsError::new(
+                    WindowsErrorKind::RecoveryRequired,
+                    "pointer settings left half written",
+                    None,
+                ));
+            }
+            return Err(api_error("write pointer speed", error));
         }
-        .map_err(|error| api_error("write pointer speed", error))?;
         Ok(())
     }
 }

@@ -430,8 +430,8 @@ impl PcCustomEngine {
     /// 基準は「このアプリで適用して、まだ戻していないもの」。
     /// 推測で「本来こうあるべき」を作らない。基準が無ければ無いと言う。
     pub fn build_health_report(&self) -> CoreResult<HealthReport> {
-        let applied = self.journal.applied_backups()?;
-        let inputs = applied
+        let (applied, unreadable_backups) = self.journal.applied_backups()?;
+        let mut inputs: Vec<HealthInput> = applied
             .into_iter()
             .map(|record| {
                 let name = record
@@ -451,6 +451,20 @@ impl PcCustomEngine {
                 }
             })
             .collect();
+
+        // 記録そのものが読めなかったものを、件数から消さない。
+        // 消すと「全部確認できた」ように見える。
+        for index in 0..unreadable_backups {
+            inputs.push(HealthInput {
+                action_id: format!("__unreadable_{index}"),
+                name: "記録を読めなかった変更".to_owned(),
+                applied_at: "不明".to_owned(),
+                probe: HealthProbe::Uncomparable,
+                uncomparable_reason: Some(
+                    "この変更の控えを読み取れませんでした。今の状態と見比べられません。".to_owned(),
+                ),
+            });
+        }
 
         // 更新の確認日時は参考として添えるだけ。取れなければ何も出さない。
         // 取れないことを「更新していない」と読み替えない。
@@ -859,7 +873,11 @@ fn probe_backup(payload: &BackupPayload) -> (HealthProbe, Option<String>) {
     let entries = match payload {
         BackupPayload::Registry(backup) => vec![backup],
         BackupPayload::Composite(composite) => composite.registry_entries.iter().collect(),
-        // レジストリ以外（セッション設定やウィンドウ配置）は、
+        // 電源モードとポインター設定は、控えに元の値と適用値の両方が入っていて、
+        // 現在値も公開 API で読み直せる。レジストリではないが照合できる。
+        BackupPayload::PowerMode(backup) => return probe_power_mode(backup),
+        BackupPayload::PointerFeel(backup) => return probe_pointer_feel(backup),
+        // それ以外（セッション設定やウィンドウ配置）は、
         // 「適用したときの値」を今の環境から読み直す手段がない。無いものを在るとは言わない。
         _ => Vec::new(),
     };
@@ -887,6 +905,69 @@ fn probe_backup(payload: &BackupPayload) -> (HealthProbe, Option<String>) {
         }
     }
     (combine_probe(counts), None)
+}
+
+/// 電源モードを照合する。控えの生バイト列と、いまの値を突き合わせる。
+fn probe_power_mode(backup: &crate::backup::PowerModeBackup) -> (HealthProbe, Option<String>) {
+    let (Ok(ac), Ok(dc)) = (
+        crate::windows::read_ac_mode(),
+        crate::windows::read_dc_mode(),
+    ) else {
+        return (
+            HealthProbe::Uncomparable,
+            Some("いまの状態を読み取れませんでした。".to_owned()),
+        );
+    };
+    let bytes = |reading: crate::windows::PowerModeReading| match reading {
+        crate::windows::PowerModeReading::Known(mode) => Some(mode.bytes()),
+        crate::windows::PowerModeReading::Unrecognised(raw) => Some(raw),
+        crate::windows::PowerModeReading::Unavailable => None,
+    };
+    let (Some(current_ac), Some(current_dc)) = (bytes(ac), bytes(dc)) else {
+        return (
+            HealthProbe::Uncomparable,
+            Some("この環境ではこの項目を確認できません。".to_owned()),
+        );
+    };
+    let intended = match backup.intended {
+        crate::action::PowerModeChoice::BestEfficiency => crate::windows::PowerMode::BestEfficiency,
+        crate::action::PowerModeChoice::Balanced => crate::windows::PowerMode::Balanced,
+        crate::action::PowerModeChoice::BestPerformance => {
+            crate::windows::PowerMode::BestPerformance
+        }
+    }
+    .bytes();
+    let mut counts = ProbeCounts::default();
+    for (current, original) in [
+        (current_ac, backup.original_ac),
+        (current_dc, backup.original_dc),
+    ] {
+        if current == intended {
+            counts.holds += 1;
+        } else if current == original {
+            counts.previous += 1;
+        } else {
+            counts.neither += 1;
+        }
+    }
+    (combine_probe(counts), None)
+}
+
+/// ポインター設定を照合する。
+fn probe_pointer_feel(backup: &crate::backup::PointerFeelBackup) -> (HealthProbe, Option<String>) {
+    let Ok(current) = crate::windows::read_pointer_feel() else {
+        return (
+            HealthProbe::Uncomparable,
+            Some("いまの状態を読み取れませんでした。".to_owned()),
+        );
+    };
+    if current == backup.intended {
+        (HealthProbe::HoldsApplied, None)
+    } else if current == backup.original {
+        (HealthProbe::BackToPrevious, None)
+    } else {
+        (HealthProbe::Neither, None)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -941,8 +1022,16 @@ mod real_journal_probe {
         let _ = std::fs::remove_file(&copy);
         std::fs::copy(&path, &copy).expect("copy journal");
         let journal = JournalDatabase::open(&copy).expect("open journal copy");
-        let applied = journal.applied_backups().expect("applied backups");
-        println!("EVIDENCE: health_report baselines={}", applied.len());
+        let (applied, unreadable) = journal.applied_backups().expect("applied backups");
+        println!(
+            "EVIDENCE: health_report baselines={} unreadable_records={}",
+            applied.len(),
+            unreadable
+        );
+        // 0件は「基準が無い」であって「確認した結果ゼロ」ではない。区別して出す。
+        if applied.is_empty() {
+            println!("EVIDENCE: health_report NOTE 基準が1件も無い。照合経路は通っていない");
+        }
         for record in &applied {
             let (probe, reason) = probe_backup(&record.backup.payload);
             println!(

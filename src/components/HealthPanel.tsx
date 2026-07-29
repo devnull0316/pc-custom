@@ -84,11 +84,14 @@ export function HealthPanel({ dataMode }: HealthPanelProps) {
     );
   }
 
-  const tone = report.changed.length > 0 ? "alert" : "calm";
+  // 1件も照合できていない報告に「問題なし」の顔をさせない。
+  // 変わったものが0件でも、確認できたものが0件なら、それは何も分かっていない。
+  const nothingConfirmed = report.holding.length === 0 && report.changed.length === 0;
+  const tone = report.changed.length > 0 || nothingConfirmed ? "alert" : "calm";
   return (
     <section aria-label="適用した設定の照合" className={`health-panel health-panel--${tone}`}>
       <header className="health-panel__head">
-        <Icon name={report.changed.length > 0 ? "warning" : "check"} size={18} />
+        <Icon name={tone === "alert" ? "warning" : "check"} size={18} />
         <div>
           <strong>{report.summary}</strong>
           {report.updateReference === null ? null : <p className="health-panel__reference">{report.updateReference}</p>}

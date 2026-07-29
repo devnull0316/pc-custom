@@ -527,5 +527,20 @@ mod tests {
             compare_profiles(&profile, &again),
             ProfileComparison::Identical
         );
+
+        // 「2回読んで同じ」だけだと、全経路が 0x0 / 分母0 で返っても緑になる。
+        // 実際に一度そうなった。読めた値そのものが成立しているかを見る。
+        assert!(!profile.paths.is_empty(), "画面が1つも読めていない");
+        for path in &profile.paths {
+            assert!(
+                path.width > 0 && path.height > 0,
+                "解像度が 0 のまま返っている。添字の読み方が違う"
+            );
+            let hz = refresh_hz(path).expect("更新頻度の分母が 0");
+            assert!(
+                (20.0..=1000.0).contains(&hz),
+                "更新頻度が現実的な範囲にない: {hz}"
+            );
+        }
     }
 }

@@ -195,8 +195,28 @@ impl PowerModeSwitchAction {
             }
         })?;
         if let Err(error) = write_dc_mode_raw(dc) {
-            if let Some(original) = before_ac {
-                let _ = write_ac_mode_raw(original);
+            // 片方だけ書けた状態で「何も変えていません」とは言えない。
+            // 巻き戻しに成功したときだけ、元の失敗として返す。
+            // 巻き戻しも失敗したら、それは復旧が要る事態であって、単なる失敗ではない。
+            let compensated = match before_ac {
+                Some(original) => {
+                    write_ac_mode_raw(original).is_ok()
+                        && read_ac_mode()
+                            .ok()
+                            .and_then(|reading| match reading {
+                                PowerModeReading::Known(mode) => Some(mode.bytes()),
+                                PowerModeReading::Unrecognised(raw) => Some(raw),
+                                PowerModeReading::Unavailable => None,
+                            })
+                            .is_some_and(|current| current == original)
+                }
+                None => false,
+            };
+            if !compensated {
+                return Err(ActionError::recovery_required(
+                    stage,
+                    "action.power_mode.partial_write_not_compensated",
+                ));
             }
             return Err(if error.os_code == Some(87) {
                 Self::rejected(stage)

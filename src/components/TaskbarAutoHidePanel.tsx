@@ -76,12 +76,19 @@ export function TaskbarAutoHidePanel({ dataMode }: TaskbarAutoHidePanelProps) {
       <ul className="taskbar-autohide-panel__notes">
         <li>全画面のゲームや、画面いっぱいのウィンドウのときは何もしません。</li>
         <li>Windowsの設定から自動的に隠すを手で変えると、この機能は手を引きます。</li>
-        <li>使うのをやめると、隠していたタスクバーは元に戻ります。</li>
+        <li>使うのをやめると、この機能が隠す前の状態へ戻します。</li>
+        <li>もともと常に隠す設定にしている場合は、何もしません。</li>
       </ul>
+      {state.notApplicable ? (
+        <p className="taskbar-autohide-panel__released">
+          <Icon name="info" size={14} />
+          もともとタスクバーを常に隠す設定になっているため、この機能の出番がありません。設定は変更していません。
+        </p>
+      ) : null}
       {state.released ? (
         <p className="taskbar-autohide-panel__released">
           <Icon name="info" size={14} />
-          自動的に隠す設定が外から変わったため、この機能は手を引いています。もう一度「使う」を押すと再開します。
+          自動的に隠す設定が外から変わったため、この機能は手を引いています。いったん「使うのをやめる」を押してから、もう一度「使う」を押すと再開します。
         </p>
       ) : null}
       {state.lastError === null ? null : (
