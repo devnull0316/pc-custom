@@ -85,7 +85,7 @@ pub use window_effects::{apply_mica_backdrop, system_accent_color, AccentColor};
 #[cfg(all(test, windows))]
 pub(crate) use window_placement::{
     allow_own_window_candidates_for_test, capture_window_entry_for_test,
-    read_window_placement_for_test,
+    capture_window_layout_for_process_for_test, read_window_placement_for_test,
 };
 pub use window_placement::{
     capture_window_layout, capture_window_layout_originals, classify_window_layout_transaction,

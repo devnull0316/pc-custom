@@ -477,7 +477,14 @@ export function App() {
     setUiError(null);
     try {
       const created = await createProfile(request);
-      setNotice(created.executablePath === undefined ? `手動モード「${created.name}」を作成しました。「いま実行」を押すまで適用しません。` : `ゲームモード「${created.name}」を作成しました。自動適用はまだオフです。`);
+      const workspace = created.actions.some((action) => action.actionId === "setup.window_layout");
+      setNotice(
+        created.executablePath !== undefined
+          ? `ゲームモード「${created.name}」を作成しました。自動適用はまだオフです。`
+          : workspace
+            ? `一時ワークスペース「${created.name}」を作成しました。「作業を始める」を押すまで窓も設定も変更しません。`
+            : `手動モード「${created.name}」を作成しました。「いま実行」を押すまで適用しません。`,
+      );
       await refreshProfiles();
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -519,7 +526,7 @@ export function App() {
     setUiError(null);
     try {
       const result = await runProfileNow(id);
-      setNotice(result.message);
+      setNotice([result.message, ...result.details].join(" "));
       await Promise.all([refreshProfiles(), refreshSnapshot(false)]);
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -533,7 +540,7 @@ export function App() {
     setUiError(null);
     try {
       const result = await restoreProfileNow(id);
-      setNotice(result.message);
+      setNotice([result.message, ...result.details].join(" "));
       await Promise.all([refreshProfiles(), refreshSnapshot(false)]);
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });

@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { exportConfig, importApply, importPreview, pickGameExecutable, publicErrorMessage } from "../backend";
+import { exportConfig, getWindowLayoutStatus, importApply, importPreview, pickGameExecutable, publicErrorMessage } from "../backend";
 import type {
   ActionPresentation,
   CreateProfileRequest,
@@ -9,6 +9,7 @@ import type {
   JsonValue,
   ModeRibbonColor,
   StoredProfile,
+  WindowLayoutStatus,
 } from "../model";
 import { GameReadinessPanel } from "./GameReadinessPanel";
 import { HotCornerPanel } from "./HotCornerPanel";
@@ -45,7 +46,7 @@ export function ProfilesView({
   onOpenActions,
   onChanged,
 }: ProfilesViewProps) {
-  const [mode, setMode] = useState<"game" | "manual">("game");
+  const [mode, setMode] = useState<"game" | "manual" | "workspace">("game");
   const [name, setName] = useState("");
   const [exePath, setExePath] = useState("");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -57,6 +58,25 @@ export function ProfilesView({
   const [ioMessage, setIoMessage] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [ribbonColor, setRibbonColor] = useState<ModeRibbonColor | undefined>();
+  const [layoutStatus, setLayoutStatus] = useState<WindowLayoutStatus | null>(null);
+
+  useEffect(() => {
+    if (dataMode !== "live") {
+      setLayoutStatus(null);
+      return;
+    }
+    let cancelled = false;
+    void getWindowLayoutStatus()
+      .then((status) => {
+        if (!cancelled) setLayoutStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setLayoutStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataMode]);
 
   /// 実行ファイルは手で打たせない。打ち間違えれば別のファイルが登録される。
   async function chooseExecutable() {
@@ -124,13 +144,20 @@ export function ProfilesView({
         return action.autoApplyEligible === true
           && (action.kind === "persistent" || action.kind === "session");
       }
+      if (mode === "workspace") {
+        return action.kind === "persistent" || action.kind === "session";
+      }
       return action.kind === "persistent" || action.kind === "session" || action.kind === "one_way";
     }),
     [actions, mode],
   );
 
   const canSubmit = live && !busy && name.trim().length > 0
-    && (mode === "manual" ? selected.size > 0 : exePath.trim().length > 0);
+    && (mode === "game"
+      ? exePath.trim().length > 0
+      : mode === "manual"
+        ? selected.size > 0
+        : layoutStatus?.saved === true);
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -145,12 +172,17 @@ export function ProfilesView({
     if (!canSubmit) return;
     const request: CreateProfileRequest = {
       name: name.trim(),
-      actions: [...selected].map((actionId) => ({
-        actionId,
-        parameters: actionId === "setup.launch_apps"
-          ? { bundle: launchBundle }
-          : onParametersForAction(actionId),
-      })),
+      actions: [
+        ...(mode === "workspace"
+          ? [{ actionId: "setup.window_layout", parameters: {} }]
+          : []),
+        ...[...selected].map((actionId) => ({
+          actionId,
+          parameters: actionId === "setup.launch_apps"
+            ? { bundle: launchBundle }
+            : onParametersForAction(actionId),
+        })),
+      ],
       ...(ribbonColor === undefined ? {} : { ribbonColor }),
     };
     if (mode === "game") request.executablePath = exePath.trim();
@@ -183,6 +215,15 @@ export function ProfilesView({
 
       <HotCornerPanel dataMode={dataMode} />
 
+      <div className="inline-note" role="note">
+        <Icon name="undo" />
+        <span>
+          <strong>一時ワークスペース</strong>は、保存済みの窓配置と選んだ設定をまとめて適用します。
+          「終わる」は窓と設定を戻します。アプリは閉じません。
+          戻すのは、このアプリが動かした分だけです。
+        </span>
+      </div>
+
       <div className={`profiles-layout${profiles.length === 0 ? " profiles-layout--empty" : ""}`}>
         <form
           className="profile-create"
@@ -205,6 +246,10 @@ export function ProfilesView({
                 <input checked={mode === "manual"} disabled={!live || busy} name="profile-mode" onChange={() => { setMode("manual"); setSelected(new Set()); }} type="radio" />
                 <span><strong>勉強・作業など（手動）</strong><small>実行ファイルとは紐付けず、「いま実行」のときだけ適用します。</small></span>
               </label>
+              <label className="action-pick">
+                <input checked={mode === "workspace"} disabled={!live || busy} name="profile-mode" onChange={() => { setMode("workspace"); setSelected(new Set()); }} type="radio" />
+                <span><strong>一時ワークスペース</strong><small>保存済みの窓配置へ切り替え、終わると開始直前の窓と選んだ設定だけを戻します。</small></span>
+              </label>
             </div>
           </fieldset>
           <p className="automation-sentence">
@@ -212,6 +257,11 @@ export function ProfilesView({
               <strong>{name.trim() || "このゲーム"}</strong> が始まったら、
               {selected.size === 0 ? "選んだ準備" : <strong>{selected.size}件の準備</strong>}
               をして、終わったら<strong>変更した分だけ元に戻します</strong>。
+            </> : mode === "workspace" ? <>
+              <strong>{name.trim() || "このワークスペース"}</strong>で「作業を始める」と、
+              保存済みの窓配置
+              {selected.size === 0 ? null : <>と<strong>{selected.size}件の設定</strong></>}
+              を適用します。「終わる」と<strong>このアプリが動かした分だけ</strong>戻します。
             </> : <>
               <strong>{name.trim() || "このモード"}</strong>を「いま実行」したら、
               {selected.size === 0 ? "選んだ準備" : <strong>{selected.size}件の準備</strong>}
@@ -268,7 +318,14 @@ export function ProfilesView({
           ) : null}
 
           <fieldset className="field">
-            <legend>{mode === "game" ? "起動時にまとめる準備" : "いま実行する準備"}</legend>
+            <legend>{mode === "game" ? "起動時にまとめる準備" : mode === "workspace" ? "窓配置と一緒に使う設定（任意）" : "いま実行する準備"}</legend>
+            {mode === "workspace" ? (
+              <p className={layoutStatus?.saved === true ? "muted small" : "inline-error"} role={layoutStatus?.saved === true ? undefined : "alert"}>
+                {layoutStatus?.saved === true
+                  ? `セットアップで保存した${layoutStatus.windowCount}個の窓だけを対象にします。開始後に開いた窓は戻しません。`
+                  : "先にセットアップ画面で現在のウィンドウ配置を保存してください。保存されるまで作成できません。"}
+              </p>
+            ) : null}
             {selectable.length === 0 ? (
               <p className="muted">
                 選べる項目がありません。<button className="link-button" onClick={onOpenActions} type="button">変更できる項目</button>を確認してください。
@@ -306,10 +363,14 @@ export function ProfilesView({
 
           <button className="primary-button" disabled={!canSubmit} type="submit">
             {busy ? <Icon className="spin" name="spinner" /> : <Icon name="plus" />}
-            モードを作成
+            {mode === "workspace" ? "一時ワークスペースを作成" : "モードを作成"}
           </button>
           <p className="muted small">
-            {mode === "game" ? "作成しても自動適用はまだ開始しません。各モードの「自動適用」を有効にしたときだけ働きます。" : "手動モードは自動適用されません。カードの「いま実行」を押したときだけ働きます。"}
+            {mode === "game"
+              ? "作成しても自動適用はまだ開始しません。各モードの「自動適用」を有効にしたときだけ働きます。"
+              : mode === "workspace"
+                ? "作成しただけでは変更しません。「作業を始める」で初めてpreview→commitを通して適用します。"
+                : "手動モードは自動適用されません。カードの「いま実行」を押したときだけ働きます。"}
           </p>
         </form>
 
@@ -323,7 +384,10 @@ export function ProfilesView({
             </div>
           ) : (
             <ul className="profile-list">
-              {profiles.map((profile) => (
+              {profiles.map((profile) => {
+                const workspace = profile.executablePath === undefined
+                  && profile.actions.some((action) => action.actionId === "setup.window_layout");
+                return (
                 <li className="profile-card" key={profile.id}>
                   <div className="profile-card__head">
                     <div>
@@ -338,7 +402,9 @@ export function ProfilesView({
                       }`}
                     >
                       {profile.executablePath === undefined
-                        ? (profile.activeRun === undefined ? "手動・待機中" : "手動・実行中")
+                        ? workspace
+                          ? (profile.activeRun === undefined ? "作業前" : "作業中")
+                          : (profile.activeRun === undefined ? "手動・待機中" : "手動・実行中")
                         : (profile.automationEnabled ? "自動適用オン" : "自動適用オフ")}
                     </span>
                   </div>
@@ -366,7 +432,9 @@ export function ProfilesView({
                         onClick={() => profile.activeRun === undefined ? onRun(profile.id) : onRestore(profile.id)}
                         type="button"
                       >
-                        {profile.activeRun === undefined ? "いま実行" : "実行した分を戻す"}
+                        {workspace
+                          ? (profile.activeRun === undefined ? "作業を始める" : "終わる")
+                          : (profile.activeRun === undefined ? "いま実行" : "実行した分を戻す")}
                       </button>
                     ) : (
                       <button
@@ -389,7 +457,8 @@ export function ProfilesView({
                     </button>
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>

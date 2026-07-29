@@ -271,6 +271,7 @@ export interface ManualProfileResult {
   status: "succeeded" | "rolled_back";
   reversibleItemCount: number;
   message: string;
+  details: readonly string[];
 }
 export interface ImportPreviewItem {
   name: string;

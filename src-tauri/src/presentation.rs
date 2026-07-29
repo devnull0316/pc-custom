@@ -1375,6 +1375,9 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
                     crate::window_layout::WindowLayoutIssueReason::GameExcluded => {
                         "登録ゲームのため操作しません"
                     }
+                    crate::window_layout::WindowLayoutIssueReason::ExternalChange => {
+                        "外部変更を検出したため、その位置を維持します"
+                    }
                     crate::window_layout::WindowLayoutIssueReason::VerificationMismatch => {
                         "復元結果を確認できません"
                     }

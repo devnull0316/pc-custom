@@ -27,6 +27,7 @@ impl PcCustomEngine {
         }
         let context = action_context(&identity, item.transaction_id, item.item_id);
         let parameters = self.recovery_parameters(&item.parameters)?;
+        let mut result_details = Vec::new();
         match classify_action(action, &context, &parameters, &item.backup, item.state) {
             RecoveryClassification::Original
                 if !needs_original_rollback_fence(parameters.action_id(), item.state) =>
@@ -47,7 +48,11 @@ impl PcCustomEngine {
                 )
                 .and_then(|_| action.verify_rolled_back(&context, &parameters, &item.backup));
                 match verification {
-                    Ok(Verification { verified: true, .. }) => {
+                    Ok(Verification {
+                        verified: true,
+                        observed,
+                    }) => {
+                        result_details = window_layout_rollback_details(&observed);
                         self.journal.mark_item_rolled_back(
                             item.transaction_id,
                             item.item_id,
@@ -102,7 +107,7 @@ impl PcCustomEngine {
             transaction_id: item.transaction_id,
             status: "rolled_back".to_owned(),
             message: "この項目を変更直前の状態へ戻し、再確認しました。".to_owned(),
-            details: Vec::new(),
+            details: result_details,
         })
     }
 
@@ -363,4 +368,34 @@ impl PcCustomEngine {
         )?;
         Ok(())
     }
+}
+
+fn window_layout_rollback_details(observed: &DetectedState) -> Vec<String> {
+    let Some(ObservedValue::WindowLayout(observation)) = observed.known_value() else {
+        return Vec::new();
+    };
+    observation
+        .issues
+        .iter()
+        .map(|issue| {
+            let reason = match issue.reason {
+                crate::window_layout::WindowLayoutIssueReason::NotRunning => {
+                    "終了または再生成されているため戻しませんでした"
+                }
+                crate::window_layout::WindowLayoutIssueReason::AmbiguousMatch => {
+                    "同じ候補が複数あるため戻しませんでした"
+                }
+                crate::window_layout::WindowLayoutIssueReason::GameExcluded => {
+                    "登録ゲームになったため戻しませんでした"
+                }
+                crate::window_layout::WindowLayoutIssueReason::ExternalChange => {
+                    "セッション中に外部から移動されたため、その位置を上書きしませんでした"
+                }
+                crate::window_layout::WindowLayoutIssueReason::VerificationMismatch => {
+                    "元の位置へ戻ったことを確認できませんでした"
+                }
+            };
+            format!("{}: {reason}", issue.target)
+        })
+        .collect()
 }

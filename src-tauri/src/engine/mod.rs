@@ -406,6 +406,38 @@ impl PcCustomEngine {
         })
     }
 
+    /// Resolve backend-owned inputs before entering the ordinary preview path.
+    ///
+    /// The UI and persisted manual modes may select the registered window-layout
+    /// Action, but they can never supply titles, HWNDs, executable identities, or
+    /// a replacement snapshot. Those values come only from the private runtime
+    /// stores and the resulting request still follows preview -> commit -> journal.
+    pub fn preview_with_runtime_parameters(
+        &self,
+        mut request: PreviewActionsRequest,
+    ) -> CoreResult<PreviewResponse> {
+        for action in &mut request.actions {
+            if action.action_id != ActionId::SetupWindowLayout.as_str() {
+                continue;
+            }
+            if !action.parameters.is_empty() {
+                return Err(CoreError::invalid_request(
+                    "ウィンドウ配置の復元内容は保存済みデータからだけ作成できます。",
+                ));
+            }
+            let ActionParameters::SetupWindowLayout { invocation } =
+                self.window_layout_parameters()?
+            else {
+                unreachable!("window layout helper returns the matching variant");
+            };
+            action.parameters.insert(
+                "invocation".to_owned(),
+                serde_json::to_value(invocation).map_err(|_| CoreError::storage())?,
+            );
+        }
+        self.preview(request)
+    }
+
     pub fn list_timeline(&self, limit: u32) -> CoreResult<Vec<TimelineItem>> {
         let mut timeline = self.journal.list_timeline(limit)?;
         for item in &mut timeline {
@@ -643,11 +675,13 @@ fn classify_action(
                 {
                     Ok(
                         crate::windows::WindowLayoutTransactionState::Desired
-                        | crate::windows::WindowLayoutTransactionState::MixedOwned,
+                        | crate::windows::WindowLayoutTransactionState::MixedOwned
+                        | crate::windows::WindowLayoutTransactionState::AppliedWithExternal,
                     ) => RecoveryClassification::Applied,
-                    Ok(crate::windows::WindowLayoutTransactionState::Original) => {
-                        RecoveryClassification::Original
-                    }
+                    Ok(
+                        crate::windows::WindowLayoutTransactionState::Original
+                        | crate::windows::WindowLayoutTransactionState::OriginalWithExternal,
+                    ) => RecoveryClassification::Original,
                     Ok(crate::windows::WindowLayoutTransactionState::Third) => {
                         RecoveryClassification::Third
                     }

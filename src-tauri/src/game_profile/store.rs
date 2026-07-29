@@ -652,12 +652,19 @@ fn validate_manual_actions(actions: &[StoredProfileAction]) -> CoreResult<()> {
         ));
     }
     for stored in actions {
-        let parameters = parse_stored_profile_action(stored)?;
-        if parameters.action_id() == crate::action::ActionId::SetupWindowLayout {
-            return Err(CoreError::invalid_request(
-                "ウィンドウ配置の復元は、配置画面で明示保存した内容だけを実行できます。",
-            ));
+        if stored.action_id == crate::action::ActionId::SetupWindowLayout.as_str() {
+            if !stored
+                .parameters
+                .as_object()
+                .is_some_and(serde_json::Map::is_empty)
+            {
+                return Err(CoreError::invalid_request(
+                    "ウィンドウ配置は保存済みデータだけを使い、設定値を指定できません。",
+                ));
+            }
+            continue;
         }
+        let parameters = parse_stored_profile_action(stored)?;
         let action = crate::action::ACTION_REGISTRY
             .get(parameters.action_id())
             .ok_or_else(|| CoreError::invalid_request("登録済みActionを解決できませんでした。"))?;

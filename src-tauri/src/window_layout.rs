@@ -331,6 +331,7 @@ pub enum WindowLayoutIssueReason {
     NotRunning,
     AmbiguousMatch,
     GameExcluded,
+    ExternalChange,
     VerificationMismatch,
 }
 

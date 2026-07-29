@@ -155,6 +155,9 @@ impl PcCustomEngine {
                         crate::window_layout::WindowLayoutIssueReason::GameExcluded => {
                             "登録ゲームのため操作しませんでした"
                         }
+                        crate::window_layout::WindowLayoutIssueReason::ExternalChange => {
+                            "セッション中に外部から移動されたため上書きしませんでした"
+                        }
                         crate::window_layout::WindowLayoutIssueReason::VerificationMismatch => {
                             "復元結果を確認できませんでした"
                         }

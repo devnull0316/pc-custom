@@ -1608,3 +1608,36 @@ npm run build
 ✓ 61 modules transformed
 ✓ built（CSS構文警告も0件）
 ```
+
+## 一時ワークスペース（2026-07-29）
+
+- モード画面に「一時ワークスペース」を追加した。保存済みの窓配置と、利用者が明示選択した
+  `mutable` の既存 `persistent / session` Actionだけを束ねる。登録済みActionは **71件のまま**。
+- 実行は既存の `preview -> commit -> journal` を通し、「終わる」はjournal itemを既存どおり
+  逆順にrollbackする。アプリは閉じず、workspace作成時にも起動しない。
+- 窓は開始時に捕捉できた対象だけを、既存のPID・プロセス生成時刻・opaque HWND markerで
+  再同定する。終了時に元位置でも適用位置でもない窓は外部変更として上書きせず、他の窓だけを戻す。
+  非上書き理由はrollback結果から画面のnoticeへ出す。
+- 別プロセスに標準窓を2枚作る実機ignored testを追加した。窓側から適用後と終了後を読み直し、
+  外部移動した1枚を残したまま、未変更の1枚だけが作業前へ戻ることを確認した。panic時も
+  `Drop` が子プロセスと窓を破棄する。
+
+```text
+EVIDENCE: workspace_windows desired=[(120,140 360x240 show=1),(520,180 360x240 show=1)] before_start=[(460,360 360x240 show=1),(900,390 360x240 show=1)] applied=[(120,140 360x240 show=1),(520,180 360x240 show=1)] externally_changed=[(1180,650 360x240 show=1),(520,180 360x240 show=1)] after_finish=[(1180,650 360x240 show=1),(900,390 360x240 show=1)] details=["pc_custom_core-5d0942c7d3c97d46.exe（2）: セッション中に外部から移動されたため、その位置を上書きしませんでした"]
+
+cargo test --lib
+test result: ok. 328 passed; 0 failed; 63 ignored; 0 measured; 0 filtered out
+
+cargo test --lib count_report -- --nocapture
+総数=71 変更できる(persistent+session)=16 確認のみ=9 表示専用=39 設定案内=6
+
+cargo clippy --all-targets -- -D warnings
+Finished dev profile
+
+cargo fmt --check
+exit code 0
+
+npm run build
+✓ 61 modules transformed
+✓ built（CSS構文警告0件）
+```

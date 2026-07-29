@@ -3,7 +3,7 @@ use std::str::FromStr;
 use tauri::{Manager, State};
 
 use crate::{
-    action::{ActionId, ActionParameters},
+    action::ActionId,
     bootstrap::ApplicationState,
     error::{CoreError, CoreResult},
     game_profile::{CreateProfileRequest, StoredProfile},
@@ -44,28 +44,9 @@ pub fn detect_action(
 #[tauri::command]
 pub fn preview_actions(
     state: State<'_, ApplicationState>,
-    mut request: PreviewActionsRequest,
+    request: PreviewActionsRequest,
 ) -> CoreResult<PreviewResponse> {
-    let engine = state.engine()?;
-    for action in &mut request.actions {
-        if action.action_id == ActionId::SetupWindowLayout.as_str() {
-            if !action.parameters.is_empty() {
-                return Err(CoreError::invalid_request(
-                    "ウィンドウ配置の復元内容は保存済みデータからだけ作成できます。",
-                ));
-            }
-            let ActionParameters::SetupWindowLayout { invocation } =
-                engine.window_layout_parameters()?
-            else {
-                unreachable!("window layout helper returns the matching variant");
-            };
-            action.parameters.insert(
-                "invocation".to_owned(),
-                serde_json::to_value(invocation).map_err(|_| CoreError::storage())?,
-            );
-        }
-    }
-    engine.preview(request)
+    state.engine()?.preview_with_runtime_parameters(request)
 }
 
 #[tauri::command]

@@ -453,7 +453,9 @@ impl Action for WindowLayoutAction {
             // SetWindowPlacement call before its outcome became durable.
             WindowLayoutTransactionState::Original
             | WindowLayoutTransactionState::Desired
-            | WindowLayoutTransactionState::MixedOwned => {}
+            | WindowLayoutTransactionState::MixedOwned
+            | WindowLayoutTransactionState::OriginalWithExternal
+            | WindowLayoutTransactionState::AppliedWithExternal => {}
             WindowLayoutTransactionState::Third => {
                 return Err(Self::external_change(ActionStage::Rollback));
             }
@@ -469,9 +471,7 @@ impl Action for WindowLayoutAction {
                 "action.window_layout.rollback_failed",
             )
         })?;
-        if !outcome.issues.is_empty()
-            || outcome.positioned_window_count != outcome.matched_window_count
-        {
+        if outcome.has_verification_mismatch() {
             return Err(ActionError::recovery_required(
                 ActionStage::Rollback,
                 "action.window_layout.rollback_unverified",
@@ -501,9 +501,15 @@ impl Action for WindowLayoutAction {
             Self::transaction_state(payload, &exclusions, ActionStage::VerifyRolledBack)?;
         let verified = match observed.known_value() {
             Some(ObservedValue::WindowLayout(value)) => {
-                transaction_state == WindowLayoutTransactionState::Original
-                    && value.issues.is_empty()
-                    && value.positioned_window_count == value.saved_window_count
+                matches!(
+                    transaction_state,
+                    WindowLayoutTransactionState::Original
+                        | WindowLayoutTransactionState::OriginalWithExternal
+                ) && !value.has_verification_mismatch()
+                    && value
+                        .positioned_window_count
+                        .saturating_add(u32::try_from(value.issues.len()).unwrap_or(u32::MAX))
+                        == value.saved_window_count
             }
             _ => false,
         };

@@ -409,6 +409,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .inline-note { display: flex; align-items: center; gap: .6rem; padding: .7rem .9rem; border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); font-size: var(--fs-base); }
+.inline-error { margin: 0; color: var(--danger); font-size: var(--fs-base); line-height: 1.5; }
 
 .hot-corner-panel { display: flex; flex-direction: column; gap: 1rem; padding: 1.15rem; border-radius: 12px;
   background: color-mix(in srgb, var(--accent) 6%, transparent);

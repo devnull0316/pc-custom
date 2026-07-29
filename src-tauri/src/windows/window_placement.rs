@@ -97,6 +97,8 @@ pub enum WindowLayoutTransactionState {
     Original,
     Desired,
     MixedOwned,
+    OriginalWithExternal,
+    AppliedWithExternal,
     Third,
 }
 
@@ -1095,21 +1097,26 @@ fn mutate_transaction(
             .find(|entry| entry.entry_id == original.saved.entry_id)
             .ok_or_else(invalid_originals)?;
         if excluded_game_file_identities.contains(&desired_entry.process_file_identity) {
+            if direction == MutationDirection::Rollback {
+                continue;
+            }
             return Err(WindowsError::new(
                 WindowsErrorKind::InvalidData,
                 "registered game became a window placement target",
                 None,
             ));
         }
-        let candidate = resolve_original_candidate(original, &report.candidates)
-            .ok_or_else(|| {
-                WindowsError::new(
-                    WindowsErrorKind::InvalidData,
-                    "resolve exact original window process instance",
-                    None,
-                )
-            })?
-            .clone();
+        let Some(candidate) = resolve_original_candidate(original, &report.candidates).cloned()
+        else {
+            if direction == MutationDirection::Rollback {
+                continue;
+            }
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "resolve exact original window process instance",
+                None,
+            ));
+        };
         let at_original = candidate_matches_saved(&candidate, &original.saved);
         let at_desired = candidate_matches_saved(&candidate, desired_entry);
         match direction {
@@ -1120,13 +1127,11 @@ fn mutate_transaction(
                     None,
                 ));
             }
-            MutationDirection::Rollback if !at_original && !at_desired => {
-                return Err(WindowsError::new(
-                    WindowsErrorKind::InvalidData,
-                    "window placement has an external third state",
-                    None,
-                ));
-            }
+            // The exact backed-up process/window instance still exists, but
+            // somebody moved it after PCカスタム applied the workspace.
+            // Relinquish ownership of this one target and continue restoring
+            // the other independently owned windows.
+            MutationDirection::Rollback if !at_original && !at_desired => continue,
             MutationDirection::Apply if at_desired => continue,
             _ => {
                 let source_state = if at_original {
@@ -1271,7 +1276,11 @@ fn mutate_transaction(
             WindowLayoutTransactionState::Desired | WindowLayoutTransactionState::Original
         ),
         MutationDirection::Rollback => {
-            final_classification == WindowLayoutTransactionState::Original
+            matches!(
+                final_classification,
+                WindowLayoutTransactionState::Original
+                    | WindowLayoutTransactionState::OriginalWithExternal
+            )
         }
     };
     if !final_owned_state {
@@ -2249,7 +2258,7 @@ fn observe_original_entries(
         } else {
             observation
                 .issues
-                .push(issue(entry, WindowLayoutIssueReason::VerificationMismatch));
+                .push(issue(entry, WindowLayoutIssueReason::ExternalChange));
         }
     }
     observation
@@ -2267,6 +2276,7 @@ fn classify_transaction_entries(
     let mut original_count = 0usize;
     let mut desired_count = 0usize;
     let mut neutral_count = 0usize;
+    let mut external_count = 0usize;
     for original in originals {
         let Some(desired_entry) = desired
             .entries
@@ -2276,10 +2286,12 @@ fn classify_transaction_entries(
             return WindowLayoutTransactionState::Third;
         };
         if excluded_game_file_identities.contains(&desired_entry.process_file_identity) {
-            return WindowLayoutTransactionState::Third;
+            external_count += 1;
+            continue;
         }
         let Some(candidate) = resolve_original_candidate(original, candidates) else {
-            return WindowLayoutTransactionState::Third;
+            external_count += 1;
+            continue;
         };
         let at_original = candidate_matches_saved(candidate, &original.saved);
         let at_desired = candidate_matches_saved(candidate, desired_entry);
@@ -2287,8 +2299,15 @@ fn classify_transaction_entries(
             (true, true) => neutral_count += 1,
             (true, false) => original_count += 1,
             (false, true) => desired_count += 1,
-            (false, false) => return WindowLayoutTransactionState::Third,
+            (false, false) => external_count += 1,
         }
+    }
+    if external_count > 0 {
+        return if desired_count == 0 {
+            WindowLayoutTransactionState::OriginalWithExternal
+        } else {
+            WindowLayoutTransactionState::AppliedWithExternal
+        };
     }
     match (original_count, desired_count) {
         (0, 0) if neutral_count > 0 => WindowLayoutTransactionState::Original,
@@ -2488,6 +2507,43 @@ pub(crate) fn capture_window_entry_for_test(
         uuid::Uuid::new_v4(),
         application_label.to_owned(),
     ))
+}
+
+#[cfg(all(test, windows))]
+pub(crate) fn capture_window_layout_for_process_for_test(
+    process_id: u32,
+) -> WindowsResult<WindowLayoutSnapshot> {
+    let report = enumerate_candidates(&[], false)?;
+    let entries = report
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.process_id == process_id)
+        .enumerate()
+        .map(|(index, candidate)| {
+            entry_from_candidate(
+                candidate,
+                uuid::Uuid::new_v4(),
+                numbered_application_label(
+                    &candidate.application_label,
+                    u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1),
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() || entries.len() > MAX_WINDOW_LAYOUT_ENTRIES {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "capture separate-process workspace test windows",
+            None,
+        ));
+    }
+    Ok(WindowLayoutSnapshot {
+        snapshot_id: uuid::Uuid::new_v4(),
+        captured_at_unix_ms: 1,
+        entries,
+        excluded_game_windows: 0,
+        skipped_windows: 0,
+    })
 }
 
 #[cfg(all(test, windows))]
