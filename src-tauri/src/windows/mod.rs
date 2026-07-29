@@ -58,6 +58,10 @@ pub use observations::{
     read_system_drive_space, read_user_temp_inventory, TempCleanupOutcome, TempCleanupPlan,
     TEMP_CLEANUP_MIN_AGE_DAYS,
 };
+pub(crate) use observations::{
+    is_local_disk_path, known_folder_path, path_has_reparse_component, MAX_TEMP_DEPTH,
+    MAX_TEMP_DIRECTORIES, MAX_TEMP_ENTRIES, MAX_TEMP_SCAN_DURATION_MS, MAX_TEMP_TOTAL_BYTES,
+};
 pub use overlay_anchor::{
     foreground_is_fullscreen, read_cursor_desktop_observation, read_primary_monitor_rect,
     read_taskbar_anchor, CursorDesktopObservation, TaskbarAnchor, TaskbarEdge,

@@ -13,6 +13,7 @@ import { detailPointsForScreen, methodSummaryForScreen, screenText } from "../pu
 import { AppearanceScenesPanel } from "./AppearanceScenesPanel";
 import { ExplorerRestartPanel } from "./ExplorerRestartPanel";
 import { Icon } from "./Icon";
+import { StorageHistoryPanel } from "./StorageHistoryPanel";
 import { TempCleanupPanel } from "./TempCleanupPanel";
 import { TaskbarAutoHidePanel } from "./TaskbarAutoHidePanel";
 import { ThemeSchedulePanel } from "./ThemeSchedulePanel";
@@ -115,6 +116,7 @@ export function ActionBrowser({
       ) : null}
       {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
       {selectedCategory === "appearance" ? <TaskbarAutoHidePanel dataMode={dataMode} /> : null}
+      {selectedCategory === "storage" ? <StorageHistoryPanel dataMode={dataMode} /> : null}
       {selectedCategory === "storage" ? <TempCleanupPanel dataMode={dataMode} /> : null}
       {/* カテゴリは横一列にする。以前は左の列の8割をこれが占め、
           肝心のAction一覧が最下部に押し込まれていた。下で選んで上のボタンへ戻る、

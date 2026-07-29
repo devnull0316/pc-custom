@@ -457,6 +457,23 @@ impl PcCustomEngine {
         Ok(timeline)
     }
 
+    pub fn capture_storage_history(
+        &self,
+        categories: Vec<crate::storage_history::StorageCategory>,
+    ) -> CoreResult<crate::storage_history::StorageHistoryPoint> {
+        crate::storage_history::capture(&self.journal, categories, now_ms())
+    }
+
+    pub fn list_storage_history(
+        &self,
+    ) -> CoreResult<Vec<crate::storage_history::StorageHistoryPoint>> {
+        crate::storage_history::list(&self.journal)
+    }
+
+    pub fn clear_storage_history(&self) -> CoreResult<u64> {
+        crate::storage_history::clear(&self.journal)
+    }
+
     /// 適用した設定が今も残っているかを照合する。**read-only。**
     ///
     /// 基準は「このアプリで適用して、まだ戻していないもの」。

@@ -19,6 +19,7 @@ pub mod presentation;
 mod settings_file;
 pub mod settings_link;
 pub mod setup;
+pub mod storage_history;
 pub mod taskbar_watcher;
 pub mod theme_schedule;
 pub mod window_layout;
@@ -86,6 +87,9 @@ pub fn run() {
             commands::theme_schedule_set,
             commands::storage_temp_cleanup_plan,
             commands::storage_temp_cleanup_apply,
+            commands::storage_history_capture,
+            commands::storage_history_list,
+            commands::storage_history_clear,
             commands::open_windows_settings,
             commands::get_window_layout_status,
             commands::save_window_layout,

@@ -343,6 +343,35 @@ export interface TempCleanupOutcome {
   truncated: boolean;
 }
 
+export type StorageCategory =
+  | "documents"
+  | "downloads"
+  | "desktop"
+  | "pictures"
+  | "videos";
+
+export interface StorageCategoryPoint {
+  category: StorageCategory;
+  totalBytes: number;
+  fileCount: number;
+  directoryCount: number;
+  totalBytesDelta: number | null;
+  fileCountDelta: number | null;
+  skippedReparsePoints: number;
+  accessDeniedCount: number;
+  unreadableEntries: number;
+  truncated: boolean;
+}
+
+export interface StorageHistoryPoint {
+  capturedAtUnixMs: number;
+  driveTotalBytes: number;
+  driveTotalFreeBytes: number;
+  driveAvailableBytes: number;
+  driveFreeDeltaBytes: number | null;
+  categories: readonly StorageCategoryPoint[];
+}
+
 export interface SetupAppDto {
   id: string;
   name: string;

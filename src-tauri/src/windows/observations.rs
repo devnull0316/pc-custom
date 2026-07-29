@@ -9,10 +9,11 @@ const MAX_STARTUP_ENTRIES: usize = 256;
 const MAX_STARTUP_VALUE_BYTES: usize = 4 * 1024;
 const MAX_STARTUP_NAME_CHARS: usize = 256;
 const MAX_WARNINGS: usize = 32;
-const MAX_TEMP_ENTRIES: u64 = 5_000;
-const MAX_TEMP_DIRECTORIES: u64 = 512;
-const MAX_TEMP_DEPTH: u8 = 8;
-const MAX_TEMP_TOTAL_BYTES: u64 = 512 * 1024 * 1024 * 1024;
+pub(crate) const MAX_TEMP_ENTRIES: u64 = 5_000;
+pub(crate) const MAX_TEMP_DIRECTORIES: u64 = 512;
+pub(crate) const MAX_TEMP_DEPTH: u8 = 8;
+pub(crate) const MAX_TEMP_SCAN_DURATION_MS: u64 = 300;
+pub(crate) const MAX_TEMP_TOTAL_BYTES: u64 = 512 * 1024 * 1024 * 1024;
 
 fn warning(source: &'static str, code: &'static str) -> ObservationWarning {
     ObservationWarning {
@@ -57,7 +58,7 @@ fn bounded_name(value: &std::ffi::OsStr) -> String {
 }
 
 #[cfg(windows)]
-fn is_local_disk_path(path: &std::path::Path) -> bool {
+pub(crate) fn is_local_disk_path(path: &std::path::Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Component, Prefix};
     use windows::{
@@ -84,7 +85,7 @@ fn is_local_disk_path(path: &std::path::Path) -> bool {
 }
 
 #[cfg(windows)]
-fn path_has_reparse_component(path: &std::path::Path) -> std::io::Result<bool> {
+pub(crate) fn path_has_reparse_component(path: &std::path::Path) -> std::io::Result<bool> {
     use std::os::windows::fs::MetadataExt;
     use std::path::Component;
     use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
@@ -240,7 +241,9 @@ fn enumerate_run_key(
 }
 
 #[cfg(windows)]
-fn known_folder_path(folder_id: windows::core::GUID) -> WindowsResult<std::path::PathBuf> {
+pub(crate) fn known_folder_path(
+    folder_id: windows::core::GUID,
+) -> WindowsResult<std::path::PathBuf> {
     use windows::Win32::{
         Foundation::HANDLE,
         System::Com::CoTaskMemFree,
@@ -553,7 +556,7 @@ pub fn read_user_temp_inventory() -> WindowsResult<TempFilesObservation> {
     use std::time::{Duration, Instant};
     use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
-    const MAX_SCAN_DURATION: Duration = Duration::from_millis(300);
+    const MAX_SCAN_DURATION: Duration = Duration::from_millis(MAX_TEMP_SCAN_DURATION_MS);
 
     let root = user_temp_path()?;
     let mut report = TempFilesObservation {

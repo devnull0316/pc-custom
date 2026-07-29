@@ -22,6 +22,8 @@ import type {
   SetupAppDto,
   TempCleanupOutcome,
   TempCleanupPlan,
+  StorageCategory,
+  StorageHistoryPoint,
   ThemeSchedule,
   ThemeScheduleState,
   PreviewActionsRequest,
@@ -219,6 +221,20 @@ export function tempCleanupPlan(): Promise<TempCleanupPlan> {
 
 export function tempCleanupApply(): Promise<TempCleanupOutcome> {
   return call<TempCleanupOutcome>("storage_temp_cleanup_apply");
+}
+
+export function storageHistoryCapture(
+  categories: readonly StorageCategory[],
+): Promise<StorageHistoryPoint> {
+  return call<StorageHistoryPoint>("storage_history_capture", { categories });
+}
+
+export function storageHistoryList(): Promise<readonly StorageHistoryPoint[]> {
+  return call<readonly StorageHistoryPoint[]>("storage_history_list");
+}
+
+export function storageHistoryClear(): Promise<number> {
+  return call<number>("storage_history_clear");
 }
 
 export function configSnapshotExport(): Promise<string> {

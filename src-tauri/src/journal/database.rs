@@ -8,6 +8,7 @@ use crate::error::{CoreError, CoreResult};
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 /// 追加分。どちらも `IF NOT EXISTS` なので、既に動いている DB へそのまま流せる。
 const TRIALS_SCHEMA: &str = include_str!("../../migrations/0002_trials.sql");
+const STORAGE_HISTORY_SCHEMA: &str = include_str!("../../migrations/0003_storage_history.sql");
 
 pub struct JournalDatabase {
     connection: Mutex<Connection>,
@@ -63,6 +64,9 @@ impl JournalDatabase {
             .map_err(|_| CoreError::storage())?;
         connection
             .execute_batch(TRIALS_SCHEMA)
+            .map_err(|_| CoreError::storage())?;
+        connection
+            .execute_batch(STORAGE_HISTORY_SCHEMA)
             .map_err(|_| CoreError::storage())?;
         let integrity: String = connection
             .query_row("PRAGMA quick_check", [], |row| row.get(0))

@@ -305,6 +305,31 @@ pub fn storage_temp_cleanup_apply(
         .map_err(|_| CoreError::invalid_request("一時ファイルを削除できませんでした。"))
 }
 
+/// 利用者が選んだ固定Known Folderとシステムドライブを集計して履歴へ記録する。
+/// ファイル名・解決後パス・内容はDB境界へ渡さない。
+#[tauri::command]
+pub fn storage_history_capture(
+    state: State<'_, ApplicationState>,
+    categories: Vec<crate::storage_history::StorageCategory>,
+) -> CoreResult<crate::storage_history::StorageHistoryPoint> {
+    state.engine()?.capture_storage_history(categories)
+}
+
+/// Action timelineとは独立した、読み取り専用の容量推移。
+#[tauri::command]
+pub fn storage_history_list(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<Vec<crate::storage_history::StorageHistoryPoint>> {
+    state.engine()?.list_storage_history()
+}
+
+/// 利用者が明示した場合だけ、アプリ自身の集計履歴を削除する。
+/// Windows状態を変更せず、Action timelineにも記録しない。
+#[tauri::command]
+pub fn storage_history_clear(state: State<'_, ApplicationState>) -> CoreResult<u64> {
+    state.engine()?.clear_storage_history()
+}
+
 /// 該当するWindows設定ページを開く。固定表にあるms-settings URIのみ。
 #[tauri::command]
 pub fn open_windows_settings(action_id: String) -> CoreResult<String> {

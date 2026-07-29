@@ -30,7 +30,7 @@ export const CATEGORIES = [
   { id: "appearance", label: "見た目", description: "Windowsとアプリの明暗を揃える", icon: "appearance" },
   { id: "games", label: "ゲーム", description: "起動を見守り、プレイ中の邪魔を減らす", icon: "game" },
   { id: "setup", label: "セットアップ", description: "デバイスと日常の初期設定", icon: "action" },
-  { id: "storage", label: "ストレージ", description: "空き容量と一時ファイルの状態を確認", icon: "info" },
+  { id: "storage", label: "ストレージ", description: "空き容量の変化と一時ファイルの状態を確認", icon: "info" },
   { id: "notifications", label: "通知", description: "必要なWindows通知の表示を選ぶ", icon: "info" },
   { id: "input", label: "入力・マイク", description: "入力候補と既定の通話用マイクの設定", icon: "focus" },
 ] as const satisfies readonly CategoryPresentation[];
@@ -44,7 +44,7 @@ export const RESULT_TILES = [
   { id: "power", title: "電源の設定を見る・選ぶ", description: "いまの電源プランを確認し、電源モードを選べます。", category: "power", icon: "power" },
   { id: "study", title: "勉強・作業に集中する", description: "よく使う準備をまとめて、実行したいときだけ適用します。", category: "modes", icon: "focus" },
   { id: "setup", title: "新しいPCをセットアップする", description: "既定アプリ・音声・ウィンドウ配置と、よく使うアプリの導入をまとめます。", category: "setup-view", icon: "plus" },
-  { id: "storage", title: "容量を空ける", description: "空き容量を確認し、古い一時ファイルだけを消せます。", category: "storage", icon: "info" },
+  { id: "storage", title: "容量の変化を見る", description: "いつ空き容量が減ったかを、少数の場所の集計と比べられます。", category: "storage", icon: "info" },
   { id: "recovery", title: "変更を元へ戻す", description: "適用履歴から、戻したい項目だけを選べます。", category: "recovery", icon: "recovery" },
 ] as const satisfies readonly ResultTile[];
 
