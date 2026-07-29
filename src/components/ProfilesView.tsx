@@ -11,6 +11,7 @@ import type {
   StoredProfile,
 } from "../model";
 import { GameReadinessPanel } from "./GameReadinessPanel";
+import { HotCornerPanel } from "./HotCornerPanel";
 import { Icon } from "./Icon";
 
 interface ProfilesViewProps {
@@ -179,6 +180,8 @@ export function ProfilesView({
           <span>閲覧モードです。安全コアに接続すると、モードの作成と有効化ができます。</span>
         </div>
       )}
+
+      <HotCornerPanel dataMode={dataMode} />
 
       <div className={`profiles-layout${profiles.length === 0 ? " profiles-layout--empty" : ""}`}>
         <form

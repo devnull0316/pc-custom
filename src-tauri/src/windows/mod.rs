@@ -59,7 +59,8 @@ pub use observations::{
     TEMP_CLEANUP_MIN_AGE_DAYS,
 };
 pub use overlay_anchor::{
-    foreground_is_fullscreen, read_taskbar_anchor, TaskbarAnchor, TaskbarEdge,
+    foreground_is_fullscreen, read_cursor_desktop_observation, read_primary_monitor_rect,
+    read_taskbar_anchor, CursorDesktopObservation, TaskbarAnchor, TaskbarEdge,
 };
 pub use power::{active_power_scheme, active_power_scheme_guid, set_active_power_scheme};
 pub use powertoys::read_powertoys_installation;

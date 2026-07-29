@@ -410,6 +410,27 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); font-size: var(--fs-base); }
 
+.hot-corner-panel { display: flex; flex-direction: column; gap: 1rem; padding: 1.15rem; border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+.hot-corner-panel__heading { display: flex; align-items: flex-start; gap: .75rem; }
+.hot-corner-panel__heading h2 { margin: 0 0 .2rem; font-size: var(--fs-md); font-weight: 600; }
+.hot-corner-panel__heading p { margin: 0; color: color-mix(in srgb, var(--text) 66%, transparent); line-height: 1.5; }
+.hot-corner-panel__icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 9px;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.hot-corner-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
+.hot-corner-timing { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: .75rem; }
+.hot-corner-panel__footer { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.hot-corner-panel__footer p, .hot-corner-panel__message { margin: 0; }
+.hot-corner-panel__message { font-size: var(--fs-base); color: var(--text-secondary); }
+@media (max-width: 900px) {
+  .hot-corner-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hot-corner-panel__footer { align-items: stretch; flex-direction: column; }
+}
+@media (max-width: 560px) {
+  .hot-corner-grid, .hot-corner-timing { grid-template-columns: 1fr; }
+}
+
 .profiles-layout { display: grid; grid-template-columns: minmax(0, 420px) 1fr; gap: 1.25rem; align-items: start; }
 /* 登録が0件のときは右が空箱になるだけなので、横に並べない。 */
 .profiles-layout--empty { grid-template-columns: minmax(0, 560px); }

@@ -10,6 +10,8 @@ import type {
   CreateProfileRequest,
   DetectionResponse,
   HealthReport,
+  HotCornerSetting,
+  HotCornerState,
   ImportPreviewItem,
   ImportResult,
   InstallOutcome,
@@ -201,6 +203,14 @@ export function themeScheduleGet(): Promise<ThemeScheduleState> {
 
 export function themeScheduleSet(schedule: ThemeSchedule): Promise<ThemeScheduleState> {
   return call<ThemeScheduleState>("theme_schedule_set", { schedule });
+}
+
+export function hotCornerGet(): Promise<HotCornerState> {
+  return call<HotCornerState>("hot_corner_get");
+}
+
+export function hotCornerSet(setting: HotCornerSetting): Promise<HotCornerState> {
+  return call<HotCornerState>("hot_corner_set", { setting });
 }
 
 export function tempCleanupPlan(): Promise<TempCleanupPlan> {

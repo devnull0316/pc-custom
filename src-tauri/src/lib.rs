@@ -10,6 +10,7 @@ pub mod engine;
 pub mod error;
 pub mod game_profile;
 pub mod health_report;
+pub mod hot_corner;
 pub mod ipc;
 pub mod journal;
 pub mod presentation;
@@ -27,6 +28,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state)
         .setup(|app| {
+            app.state::<bootstrap::ApplicationState>()
+                .register_hot_corner_target(app.handle().clone());
             #[cfg(windows)]
             {
                 let window = app.get_webview_window("main").ok_or_else(|| {
@@ -59,6 +62,8 @@ pub fn run() {
             commands::build_health_report,
             commands::taskbar_auto_hide_state,
             commands::set_taskbar_auto_hide,
+            commands::hot_corner_get,
+            commands::hot_corner_set,
             commands::rollback_item,
             commands::reconcile_now,
             commands::profiles_list,

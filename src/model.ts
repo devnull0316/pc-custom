@@ -301,6 +301,22 @@ export interface ThemeScheduleState {
   lastError: string | null;
 }
 
+export type HotCornerAction = "none" | "open_modes";
+
+export interface HotCornerSetting {
+  topLeft: HotCornerAction;
+  topRight: HotCornerAction;
+  bottomLeft: HotCornerAction;
+  bottomRight: HotCornerAction;
+  dwellMs: number;
+  cooldownMs: number;
+}
+
+export interface HotCornerState {
+  setting: HotCornerSetting;
+  lastError: string | null;
+}
+
 export interface TempCleanupCandidate {
   fileName: string;
   sizeBytes: number;

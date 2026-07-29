@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 
 import {
   commitPreviewAsTrial,
@@ -220,6 +221,23 @@ export function App() {
     void refreshSnapshot(true);
     void refreshProfiles();
   }, [refreshProfiles, refreshSnapshot]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listen("hot-corner-open-modes", () => setView("profiles"))
+      .then((stopListening) => {
+        if (disposed) stopListening();
+        else unlisten = stopListening;
+      })
+      .catch(() => {
+        // ブラウザーの静的カタログではTauri eventが無い。表示はそのまま続ける。
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {

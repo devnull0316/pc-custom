@@ -9,7 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::engine::PcCustomEngine;
 use crate::error::{CoreError, CoreResult};
@@ -87,6 +87,14 @@ pub struct ProfileWatcher {
     health: WatcherHealth,
 }
 
+struct WatcherServices {
+    theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
+    taskbar: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
+    mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
+    hot_corner: Option<Arc<crate::hot_corner::HotCornerStore>>,
+    hot_corner_presenter: Option<Arc<crate::hot_corner::HotCornerPresenter>>,
+}
+
 impl ProfileWatcher {
     pub fn spawn(
         engine: Arc<PcCustomEngine>,
@@ -94,24 +102,25 @@ impl ProfileWatcher {
         theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
         taskbar: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
         mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
+        hot_corner: Option<Arc<crate::hot_corner::HotCornerStore>>,
+        hot_corner_presenter: Option<Arc<crate::hot_corner::HotCornerPresenter>>,
     ) -> CoreResult<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let health = WatcherHealth::new();
         let stop_thread = stop.clone();
         let health_thread = health.clone();
+        let services = WatcherServices {
+            theme_schedule,
+            taskbar,
+            mode_ribbon,
+            hot_corner,
+            hot_corner_presenter,
+        };
         let handle = thread::Builder::new()
             .name("totonoe-profile-watcher".to_owned())
             .spawn(move || {
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    run_loop(
-                        engine,
-                        store,
-                        theme_schedule,
-                        taskbar,
-                        mode_ribbon,
-                        stop_thread,
-                        &health_thread,
-                    )
+                    run_loop(engine, store, services, stop_thread, &health_thread)
                 }))
                 .unwrap_or_else(|_| {
                     Err(CoreError::recovery_required(
@@ -174,12 +183,17 @@ impl Drop for ProfileWatcher {
 fn run_loop(
     engine: Arc<PcCustomEngine>,
     store: Arc<ProfileStore>,
-    theme_schedule: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
-    taskbar: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
-    mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
+    services: WatcherServices,
     stop: Arc<AtomicBool>,
     health: &WatcherHealth,
 ) -> CoreResult<()> {
+    let WatcherServices {
+        theme_schedule,
+        taskbar,
+        mode_ribbon,
+        hot_corner,
+        hot_corner_presenter,
+    } = services;
     let theme_engine = engine.clone();
     let sink = EngineProfileSink::new(engine);
     let mut runtime = ProfileRuntime::new(sink);
@@ -188,6 +202,8 @@ fn run_loop(
         watcher: crate::taskbar_watcher::TaskbarWatcher::default(),
         store: taskbar.clone(),
     };
+    let hot_corner_clock = Instant::now();
+    let mut hot_corner_tracker = crate::hot_corner::HotCornerTracker::default();
     // 前回、隠したまま終わっていたら先に戻す。
     if let Some(taskbar_store) = taskbar.as_ref() {
         recover_taskbar_from_previous_run(taskbar_store);
@@ -208,6 +224,16 @@ fn run_loop(
             if stop.load(Ordering::SeqCst) {
                 break;
             }
+            if let (Some(store), Some(presenter)) =
+                (hot_corner.as_deref(), hot_corner_presenter.as_deref())
+            {
+                follow_hot_corner(
+                    store,
+                    presenter,
+                    &mut hot_corner_tracker,
+                    hot_corner_clock.elapsed(),
+                );
+            }
             thread::sleep(STOP_CHECK);
         }
     }
@@ -222,6 +248,60 @@ fn run_loop(
         return Err(error);
     }
     Ok(())
+}
+
+/// 角の観測は読み取り専用。発火しても自アプリを前へ出すだけで、
+/// Action の preview / commit や Windows 設定の書き込みには入らない。
+fn follow_hot_corner(
+    store: &crate::hot_corner::HotCornerStore,
+    presenter: &crate::hot_corner::HotCornerPresenter,
+    tracker: &mut crate::hot_corner::HotCornerTracker,
+    elapsed: Duration,
+) {
+    use crate::hot_corner::{HotCornerDecision, HotCornerSample};
+
+    let setting = store.get();
+    if setting.is_disabled() {
+        // 既定値では GetCursorPos すら呼ばない。入れていない人には常駐コストも挙動も足さない。
+        *tracker = crate::hot_corner::HotCornerTracker::default();
+        return;
+    }
+    let observation = match crate::windows::read_cursor_desktop_observation() {
+        Ok(observation) => observation,
+        Err(_) => {
+            store.record_error(Some(
+                "マウス位置またはモニター配置を確認できないため、ホットコーナーを停止しています。"
+                    .to_owned(),
+            ));
+            return;
+        }
+    };
+    let corner = crate::hot_corner::external_corner_at(
+        observation.cursor,
+        observation.monitor,
+        &observation.monitors,
+    );
+    let fullscreen = crate::windows::foreground_is_fullscreen().unwrap_or(true);
+    // 最大化中も抑制する。前面ウィンドウを覆う誤発火を避けるほうが、
+    // 角から呼び出せる利便性より重要。判定不能も抑制側へ倒す。
+    let maximized = crate::windows::foreground_is_maximized().unwrap_or(true);
+    let now_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+    if tracker.evaluate(
+        setting,
+        HotCornerSample {
+            now_ms,
+            position: observation.cursor,
+            corner,
+            fullscreen,
+            maximized,
+        },
+    ) == HotCornerDecision::OpenModes
+    {
+        match presenter.open_modes() {
+            Ok(()) => store.record_error(None),
+            Err(error) => store.record_error(Some(error.user_message)),
+        }
+    }
 }
 
 fn sync_game_mode_ribbons(
@@ -680,8 +760,8 @@ mod tests {
             PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200)))
                 .expect("engine"),
         );
-        let mut watcher =
-            ProfileWatcher::spawn(engine, store, None, None, None).expect("spawn watcher");
+        let mut watcher = ProfileWatcher::spawn(engine, store, None, None, None, None, None)
+            .expect("spawn watcher");
         watcher.shutdown().expect("graceful shutdown");
         assert!(watcher.health_error().is_none());
     }

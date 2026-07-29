@@ -1320,3 +1320,65 @@ EVIDENCE: separate_process original=false restored=true off_readback=false off_s
 「設定オンによってフォルダー窓のプロセス分離が変わった」と証明できない。
 機能自体が現行 Windows で効かないとは断定せず、外部差を証明できる別の観測が得られるまで
 Action の変更経路は実装しない。
+
+## 安全なホットコーナーを実装（2026-07-29）
+
+モード画面の中へ、画面4角ごとの「何もしない / モード画面を開く」設定を追加した。
+4角すべての既定値は「何もしない」。既定状態では `GetCursorPos` も呼ばず、監視コストと誤発火を足さない。
+
+有効時は既存の監視スレッドへ相乗りし、200ms間隔（5Hz）で読み取りだけを行う。
+global low-level mouse hook と `SetCursorPos` は使わない。発火時に行うのはPCカスタム自身の窓を
+表示・復元・前面化して、モード画面へ移ることだけ。Action の preview / commit と Windows setter は呼ばない。
+
+誤発火防止として、純関数の状態機械へ次を固定した。
+
+- 既定1.5秒の滞在時間。座標が動いたら数え直す。
+- 既定15秒のクールダウン。発火後は角から離れるまで再発火しない。
+- 全画面は抑制。判定不能も全画面扱いの既存 fail-closed を使う。
+- 最大化中も抑制。利用者の作業を自アプリで覆う害を、呼び出しの便利さより重く見た。
+- `MonitorFromPoint` / `GetMonitorInfoW` / `EnumDisplayMonitors` で、モニター間の内側角を除外する。
+- 設定ファイルが読めない・版違い・範囲外の場合も、全角「何もしない」へ倒す。
+
+単体テストは指定6条件を含む7件。全体結果:
+
+```text
+cargo test --lib -- --test-threads=1
+test result: ok. 317 passed; 0 failed; 60 ignored; 0 measured; 0 filtered out
+
+cargo clippy --all-targets -- -D warnings
+Finished dev profile
+
+cargo fmt --check
+ok
+
+npm run build
+TypeScript typecheck / Vite production build 成功
+```
+
+読み取り専用の実機テスト（利用者のマウスは動かしていない）:
+
+```text
+EVIDENCE: cursor=(1608, 633) primary=(0, 0, 1920, 1080) outer_corners=[(TopLeft, ScreenPoint { x: 0, y: 0 }), (TopRight, ScreenPoint { x: 1919, y: 0 }), (BottomLeft, ScreenPoint { x: 0, y: 1079 }), (BottomRight, ScreenPoint { x: 1919, y: 1079 })] polls=25 wall_ms=5017
+EVIDENCE_CPU: polls=25 interval_ms=200 wall_ms=4972.8 process_cpu_ms=31.25 average_single_core_percent=0.628
+```
+
+CPU値はテストハーネス込みのプロセス全体。5Hz観測25回を約5秒走らせた上限寄りの値であり、
+既定無効時は観測自体をスキップする。
+
+## ホットコーナーの常駐費用は「上限しか言えない」（2026-07-29 実測）
+
+5Hz で `GetCursorPos` とモニター列挙を回したときの CPU 時間。
+
+```
+polls=25 wall_ms=5005 cpu_us=15625
+```
+
+15625us はちょうど 15.625ms、既定のタイマー間隔1ティック分。
+`GetProcessTimes` はこの単位でしか刻まないので、**これは分解能の底**であって
+「15.6ms 使った」という意味ではない。実際の消費は 0 から 15.6ms のどこか。
+
+言えるのは上限だけ。**1コアの約 0.3% を超えない。** それ以上細かいことは、
+この計器では分からない。「影響なし」とは書かない。
+
+角の判定は既定で全部「何もしない」。入れていない人には何も起きない。
+

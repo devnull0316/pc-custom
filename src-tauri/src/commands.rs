@@ -175,6 +175,25 @@ pub fn set_taskbar_auto_hide(
     Ok(store.state())
 }
 
+/// アプリ内のホットコーナー設定。読み取りだけでWindows状態は変更しない。
+#[tauri::command]
+pub fn hot_corner_get(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::hot_corner::HotCornerState> {
+    Ok(state.hot_corner_store()?.state())
+}
+
+/// 角の割り当てを保存するだけ。角への到達やこの保存でActionを適用しない。
+#[tauri::command]
+pub fn hot_corner_set(
+    state: State<'_, ApplicationState>,
+    setting: crate::hot_corner::HotCornerSetting,
+) -> CoreResult<crate::hot_corner::HotCornerState> {
+    let store = state.hot_corner_store()?;
+    store.set(setting)?;
+    Ok(store.state())
+}
+
 /// 適用した設定が今も残っているかを照合する。読むだけで、何も変更しない。
 #[tauri::command]
 pub fn build_health_report(state: State<'_, ApplicationState>) -> CoreResult<HealthReport> {

@@ -12,6 +12,14 @@
 //! `GetMonitorInfoW`、`GetForegroundWindow`、`GetWindowRect` のみ。いずれも公開 API。
 
 use super::{WindowsError, WindowsErrorKind, WindowsResult};
+use crate::hot_corner::{ScreenPoint, ScreenRect};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CursorDesktopObservation {
+    pub cursor: ScreenPoint,
+    pub monitor: ScreenRect,
+    pub monitors: Vec<ScreenRect>,
+}
 
 /// タスクバーの位置と、その画面での置かれ方。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -141,6 +149,184 @@ pub fn foreground_is_fullscreen() -> WindowsResult<bool> {
     ))
 }
 
+/// カーソル座標と、その座標を含むモニター、接続中モニターの矩形を読む。
+///
+/// 読み取り専用。フック、カーソル移動、ウィンドウ操作は行わない。
+#[cfg(windows)]
+pub fn read_cursor_desktop_observation() -> WindowsResult<CursorDesktopObservation> {
+    use windows::Win32::{
+        Foundation::POINT,
+        Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONULL},
+        UI::WindowsAndMessaging::GetCursorPos,
+    };
+
+    let mut cursor = POINT::default();
+    unsafe { GetCursorPos(&mut cursor) }.map_err(|_| {
+        WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "GetCursorPos for hot corner",
+            None,
+        )
+    })?;
+    let monitor = unsafe { MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL) };
+    if monitor == Default::default() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "MonitorFromPoint for hot corner",
+            None,
+        ));
+    }
+    let mut information = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !unsafe { GetMonitorInfoW(monitor, &mut information) }.as_bool() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "GetMonitorInfo for hot corner",
+            None,
+        ));
+    }
+    let monitor = screen_rect(information.rcMonitor)?;
+    let monitors = connected_monitor_rects()?;
+    Ok(CursorDesktopObservation {
+        cursor: ScreenPoint {
+            x: cursor.x,
+            y: cursor.y,
+        },
+        monitor,
+        monitors,
+    })
+}
+
+#[cfg(windows)]
+pub fn read_primary_monitor_rect() -> WindowsResult<ScreenRect> {
+    use windows::Win32::{
+        Foundation::POINT,
+        Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY},
+    };
+
+    let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
+    if monitor == Default::default() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "MonitorFromPoint for primary monitor",
+            None,
+        ));
+    }
+    let mut information = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !unsafe { GetMonitorInfoW(monitor, &mut information) }.as_bool() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "GetMonitorInfo for primary monitor",
+            None,
+        ));
+    }
+    screen_rect(information.rcMonitor)
+}
+
+#[cfg(windows)]
+fn connected_monitor_rects() -> WindowsResult<Vec<ScreenRect>> {
+    use windows::Win32::{
+        Foundation::{BOOL, FALSE, LPARAM, TRUE},
+        Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO},
+    };
+
+    const MAX_MONITORS: usize = 32;
+    struct Enumeration {
+        monitors: Vec<ScreenRect>,
+        failed: bool,
+        overflow: bool,
+    }
+
+    unsafe extern "system" fn callback(
+        monitor: HMONITOR,
+        _device_context: HDC,
+        _monitor_rect: *mut windows::Win32::Foundation::RECT,
+        parameter: LPARAM,
+    ) -> BOOL {
+        let enumeration = &mut *(parameter.0 as *mut Enumeration);
+        if enumeration.monitors.len() == MAX_MONITORS {
+            enumeration.overflow = true;
+            return FALSE;
+        }
+        let mut information = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(monitor, &mut information).as_bool() {
+            enumeration.failed = true;
+            return FALSE;
+        }
+        let rect = ScreenRect {
+            left: information.rcMonitor.left,
+            top: information.rcMonitor.top,
+            right: information.rcMonitor.right,
+            bottom: information.rcMonitor.bottom,
+        };
+        if !rect.is_valid() {
+            enumeration.failed = true;
+            return FALSE;
+        }
+        // ミラー表示は同じ矩形を返す。純関数側で別モニターの継ぎ目と誤認しないよう重複を除く。
+        if !enumeration.monitors.contains(&rect) {
+            enumeration.monitors.push(rect);
+        }
+        TRUE
+    }
+
+    let mut enumeration = Enumeration {
+        monitors: Vec::new(),
+        failed: false,
+        overflow: false,
+    };
+    let completed = unsafe {
+        EnumDisplayMonitors(
+            HDC::default(),
+            None,
+            Some(callback),
+            LPARAM(&mut enumeration as *mut Enumeration as isize),
+        )
+    };
+    if enumeration.overflow {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ResourceLimit,
+            "bound hot corner monitor enumeration",
+            None,
+        ));
+    }
+    if enumeration.failed || !completed.as_bool() || enumeration.monitors.is_empty() {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "enumerate hot corner monitors",
+            None,
+        ));
+    }
+    Ok(enumeration.monitors)
+}
+
+#[cfg(windows)]
+fn screen_rect(rect: windows::Win32::Foundation::RECT) -> WindowsResult<ScreenRect> {
+    let rect = ScreenRect {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    };
+    if rect.is_valid() {
+        Ok(rect)
+    } else {
+        Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "validate hot corner monitor rectangle",
+            None,
+        ))
+    }
+}
+
 #[cfg(not(windows))]
 pub fn read_taskbar_anchor() -> WindowsResult<TaskbarAnchor> {
     Err(WindowsError::new(
@@ -157,6 +343,16 @@ pub fn foreground_is_fullscreen() -> WindowsResult<bool> {
         "foreground fullscreen",
         None,
     ))
+}
+
+#[cfg(not(windows))]
+pub fn read_cursor_desktop_observation() -> WindowsResult<CursorDesktopObservation> {
+    Err(WindowsError::unsupported("read cursor desktop observation"))
+}
+
+#[cfg(not(windows))]
+pub fn read_primary_monitor_rect() -> WindowsResult<ScreenRect> {
+    Err(WindowsError::unsupported("read primary monitor rectangle"))
 }
 
 #[cfg(all(test, windows))]
@@ -218,5 +414,69 @@ mod tests {
             !super::rect_covers_monitor((0, 0, 1920, 1032), monitor),
             "最大化は全画面ではない"
         );
+    }
+
+    /// 読み取り専用の実機証拠。利用者のマウスは動かさない。
+    #[test]
+    #[ignore = "実機のカーソル・モニター配置と5HzポーリングのCPU時間を読む"]
+    fn dump_hot_corner_cursor_primary_outer_corners_and_cpu() {
+        let observation = super::read_cursor_desktop_observation().expect("GetCursorPos");
+        let primary = super::read_primary_monitor_rect().expect("primary monitor");
+        let outer = crate::hot_corner::external_corner_points(primary, &observation.monitors);
+        // 名前のとおり CPU 時間も測る。**常駐するものは、費用を数字で出す。**
+        // 25回のポーリングの前後で、このプロセスが使ったカーネル時間とユーザー時間の差を取る。
+        fn process_cpu_100ns() -> u64 {
+            use windows::Win32::{
+                Foundation::FILETIME,
+                System::Threading::{GetCurrentProcess, GetProcessTimes},
+            };
+            let mut creation = FILETIME::default();
+            let mut exit = FILETIME::default();
+            let mut kernel = FILETIME::default();
+            let mut user = FILETIME::default();
+            let ok = unsafe {
+                GetProcessTimes(
+                    GetCurrentProcess(),
+                    &mut creation,
+                    &mut exit,
+                    &mut kernel,
+                    &mut user,
+                )
+            }
+            .is_ok();
+            if !ok {
+                return 0;
+            }
+            let join = |value: FILETIME| {
+                (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime)
+            };
+            join(kernel) + join(user)
+        }
+
+        let cpu_before = process_cpu_100ns();
+        let wall_before = std::time::Instant::now();
+        for _ in 0..25 {
+            let _ = super::read_cursor_desktop_observation().expect("poll cursor and monitors");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let wall_ms = wall_before.elapsed().as_millis();
+        // 100ns 単位で返るので、マイクロ秒へ直す。
+        //
+        // **この数字は分解能の底に張り付く。** `GetProcessTimes` が刻むのは
+        // 既定のタイマー間隔（15.625ms）単位なので、5秒で 15625us と出たら
+        // それは「1ティック分」であって「15.6ms 使った」ではない。
+        // 実際の消費は 0 から 15.6ms のどこか。**上限しか言えない。**
+        // 上限として、1コアの約 0.3% を超えないことだけが分かる。
+        let cpu_us = process_cpu_100ns().saturating_sub(cpu_before) / 10;
+        println!(
+            "EVIDENCE: cursor=({}, {}) primary=({}, {}, {}, {}) outer_corners={outer:?} polls=25 wall_ms={wall_ms} cpu_us={cpu_us}",
+            observation.cursor.x,
+            observation.cursor.y,
+            primary.left,
+            primary.top,
+            primary.right,
+            primary.bottom,
+        );
+        assert!(!outer.is_empty(), "主モニターに外周角が1つ以上ある");
     }
 }

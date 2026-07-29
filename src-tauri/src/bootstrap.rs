@@ -19,6 +19,8 @@ pub struct ApplicationState {
     profile_store: Option<Arc<crate::game_profile::ProfileStore>>,
     theme_schedule_store: Option<Arc<crate::theme_schedule::ThemeScheduleStore>>,
     taskbar_store: Option<Arc<crate::taskbar_watcher::TaskbarAutoHideStore>>,
+    hot_corner_store: Option<Arc<crate::hot_corner::HotCornerStore>>,
+    hot_corner_presenter: Option<Arc<crate::hot_corner::HotCornerPresenter>>,
     mode_ribbon: Option<Arc<crate::windows::ModeRibbonController>>,
     initialization_error: Option<CoreError>,
     _instance_guard: Option<crate::windows::AppInstanceGuard>,
@@ -28,8 +30,17 @@ pub struct ApplicationState {
 impl ApplicationState {
     pub fn initialize() -> Self {
         match initialize_engine() {
-            Ok((engine, instance_guard, profile_store, theme_schedule_store, taskbar_store)) => {
+            Ok((
+                engine,
+                instance_guard,
+                profile_store,
+                theme_schedule_store,
+                taskbar_store,
+                hot_corner_store,
+            )) => {
                 let engine = Arc::new(engine);
+                let hot_corner_presenter =
+                    Arc::new(crate::hot_corner::HotCornerPresenter::default());
                 let mode_ribbon = match crate::windows::ModeRibbonController::spawn() {
                     Ok(controller) => {
                         let controller = Arc::new(controller);
@@ -49,12 +60,16 @@ impl ApplicationState {
                     Some(theme_schedule_store.clone()),
                     Some(taskbar_store.clone()),
                     mode_ribbon.clone(),
+                    Some(hot_corner_store.clone()),
+                    Some(hot_corner_presenter.clone()),
                 ) {
                     Ok(watcher) => Self {
                         engine: Some(engine),
                         profile_store: Some(profile_store),
                         theme_schedule_store: Some(theme_schedule_store),
                         taskbar_store: Some(taskbar_store),
+                        hot_corner_store: Some(hot_corner_store),
+                        hot_corner_presenter: Some(hot_corner_presenter),
                         mode_ribbon,
                         initialization_error: None,
                         _instance_guard: Some(instance_guard),
@@ -67,6 +82,8 @@ impl ApplicationState {
                         profile_store: Some(profile_store),
                         theme_schedule_store: Some(theme_schedule_store),
                         taskbar_store: Some(taskbar_store),
+                        hot_corner_store: Some(hot_corner_store),
+                        hot_corner_presenter: Some(hot_corner_presenter),
                         mode_ribbon,
                         initialization_error: Some(error),
                         _instance_guard: Some(instance_guard),
@@ -79,6 +96,8 @@ impl ApplicationState {
                 profile_store: None,
                 theme_schedule_store: None,
                 taskbar_store: None,
+                hot_corner_store: None,
+                hot_corner_presenter: None,
                 mode_ribbon: None,
                 initialization_error: Some(error),
                 _instance_guard: None,
@@ -93,6 +112,61 @@ impl ApplicationState {
                 "タスクバー設定の保存領域を初期化できなかったため、操作を停止しました。",
             )
         })
+    }
+
+    pub fn hot_corner_store(&self) -> CoreResult<Arc<crate::hot_corner::HotCornerStore>> {
+        self.hot_corner_store.clone().ok_or_else(|| {
+            CoreError::recovery_required(
+                "ホットコーナー設定の保存領域を初期化できなかったため、操作を停止しました。",
+            )
+        })
+    }
+
+    pub fn register_hot_corner_target(&self, app: tauri::AppHandle) {
+        use tauri::{Emitter, Manager};
+
+        if let Some(presenter) = self.hot_corner_presenter.as_ref() {
+            presenter.register(move || {
+                let window = app.get_webview_window("main").ok_or_else(|| {
+                    CoreError::recovery_required(
+                        "PCカスタムの画面を確認できないため、ホットコーナーを停止しました。",
+                    )
+                })?;
+                window.show().map_err(|_| {
+                    CoreError::new(
+                        "HOT_CORNER_SHOW_FAILED",
+                        "HOT_CORNER",
+                        true,
+                        "PCカスタムの画面を表示できませんでした。",
+                    )
+                })?;
+                window.unminimize().map_err(|_| {
+                    CoreError::new(
+                        "HOT_CORNER_RESTORE_FAILED",
+                        "HOT_CORNER",
+                        true,
+                        "PCカスタムの画面を元の大きさへ戻せませんでした。",
+                    )
+                })?;
+                window.set_focus().map_err(|_| {
+                    CoreError::new(
+                        "HOT_CORNER_FOCUS_FAILED",
+                        "HOT_CORNER",
+                        true,
+                        "PCカスタムの画面を前へ出せませんでした。",
+                    )
+                })?;
+                app.emit(crate::hot_corner::HOT_CORNER_EVENT, ())
+                    .map_err(|_| {
+                        CoreError::new(
+                            "HOT_CORNER_NAVIGATION_FAILED",
+                            "HOT_CORNER",
+                            true,
+                            "モード画面を開けませんでした。",
+                        )
+                    })
+            });
+        }
     }
 
     pub fn mode_ribbon(&self) -> CoreResult<Arc<crate::windows::ModeRibbonController>> {
@@ -211,6 +285,7 @@ type EngineBootstrap = (
     Arc<crate::game_profile::ProfileStore>,
     Arc<crate::theme_schedule::ThemeScheduleStore>,
     Arc<crate::taskbar_watcher::TaskbarAutoHideStore>,
+    Arc<crate::hot_corner::HotCornerStore>,
 );
 
 fn initialize_engine() -> CoreResult<EngineBootstrap> {
@@ -254,12 +329,16 @@ fn initialize_engine() -> CoreResult<EngineBootstrap> {
     let taskbar_store = Arc::new(crate::taskbar_watcher::TaskbarAutoHideStore::open(
         data_directory.join("taskbar-autohide.json"),
     )?);
+    let hot_corner_store = Arc::new(crate::hot_corner::HotCornerStore::open(
+        data_directory.join("hot-corners.json"),
+    )?);
     Ok((
         engine,
         instance_guard,
         profile_store,
         theme_schedule_store,
         taskbar_store,
+        hot_corner_store,
     ))
 }
 
