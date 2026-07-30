@@ -402,9 +402,10 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 /* --- ゲームプロファイル画面 --- */
 .profiles-view { display: flex; flex-direction: column; gap: 1.5rem; }
 .profiles-view .view-header h1 { margin: .15rem 0 .4rem; font-size: var(--fs-xl); font-weight: 600; }
-.profiles-view .view-header p { margin: 0; max-width: 64ch; line-height: 1.6; color: color-mix(in srgb, var(--text) 66%, transparent); }
-.muted { color: color-mix(in srgb, var(--text) 60%, transparent); }
-.small { font-size: var(--fs-base); }
+.profiles-view .view-header p { margin: 0; max-width: 64ch; line-height: 1.6; color: var(--text-secondary); }
+/* 透過で作らない。背景が変わるとコントラストが落ちる。意味のトークンを使う。 */
+.muted { color: var(--text-tertiary); }
+.small { font-size: var(--fs-sm); }
 
 .inline-note { display: flex; align-items: center; gap: .6rem; padding: .7rem .9rem; border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);

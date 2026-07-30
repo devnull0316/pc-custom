@@ -105,19 +105,6 @@ export function ActionBrowser({
           <p>左で結果を選び、右で現在の状態、適用後、戻し方まで確認できます。</p>
         </div>
       </header>
-      {selectedCategory === "appearance" ? (
-        <AppearanceScenesPanel
-          actions={actions}
-          bootstrap={bootstrap}
-          dataMode={dataMode}
-          onPreview={onPreviewScene}
-          previewPendingKey={previewPendingId}
-        />
-      ) : null}
-      {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
-      {selectedCategory === "appearance" ? <TaskbarAutoHidePanel dataMode={dataMode} /> : null}
-      {selectedCategory === "storage" ? <StorageHistoryPanel dataMode={dataMode} /> : null}
-      {selectedCategory === "storage" ? <TempCleanupPanel dataMode={dataMode} /> : null}
       {/* カテゴリは横一列にする。以前は左の列の8割をこれが占め、
           肝心のAction一覧が最下部に押し込まれていた。下で選んで上のボタンへ戻る、
           という往復はこの配置が作っていた。 */}
@@ -214,6 +201,24 @@ export function ActionBrowser({
           )}
         </section>
       </div>
+
+      {/* 追加パネルは項目一覧の「下」に置く。
+          上に積むと、そのカテゴリを開いた人が探しに来た項目が1つも見えない。
+          実測で、見た目カテゴリはパネルだけで画面の 92% を占めていた。 */}
+      {selectedCategory === "appearance" ? (
+        <AppearanceScenesPanel
+          actions={actions}
+          bootstrap={bootstrap}
+          dataMode={dataMode}
+          onPreview={onPreviewScene}
+          previewPendingKey={previewPendingId}
+        />
+      ) : null}
+      {selectedCategory === "appearance" ? <ThemeSchedulePanel dataMode={dataMode} /> : null}
+      {selectedCategory === "appearance" ? <TaskbarAutoHidePanel dataMode={dataMode} /> : null}
+      {selectedCategory === "storage" ? <StorageHistoryPanel dataMode={dataMode} /> : null}
+      {selectedCategory === "storage" ? <TempCleanupPanel dataMode={dataMode} /> : null}
+
     </div>
   );
 }
@@ -401,7 +406,7 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
             文で書く。押せる可能性があるときだけボタンを出す。 */}
         {profileEligible ? (
           <button className="secondary-button" disabled={inDraft} onClick={onAddToDraft} type="button">
-            <Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : "プロファイルへ追加"}
+            <Icon name={inDraft ? "check" : "plus"} />{inDraft ? "下書きに追加済み" : "モードへ追加"}
           </button>
         ) : (
           <span className="detail-note">この項目はモードの自動適用には入れられません</span>

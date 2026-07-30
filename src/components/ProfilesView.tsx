@@ -214,9 +214,6 @@ export function ProfilesView({
         </div>
       )}
 
-      <HotCornerPanel dataMode={dataMode} />
-      <ShareSessionPanel dataMode={dataMode} />
-
       <div className="inline-note" role="note">
         <Icon name="undo" />
         <span>
@@ -465,6 +462,11 @@ export function ProfilesView({
           )}
         </div>
       </div>
+
+      {/* モード画面の主目的はモードの作成と一覧。パネルはその下。
+          上に置いていたとき、作成フォームは 618px の位置から始まっていた（画面は 720px）。 */}
+      <HotCornerPanel dataMode={dataMode} />
+      <ShareSessionPanel dataMode={dataMode} />
 
       <GameReadinessPanel dataMode={dataMode} />
 
