@@ -165,7 +165,12 @@ impl WindowColorAction {
                 )
             })?;
             if current != entry.original {
-                Self::compensate(&entries[..written]);
+                if !Self::compensate(&entries[..written]) {
+                    return Err(ActionError::recovery_required(
+                        ActionStage::Apply,
+                        "action.window_color.partial_write_not_compensated",
+                    ));
+                }
                 return Err(ActionError::new(
                     crate::action::ActionErrorCode::ExternalConflict,
                     ActionStage::Apply,
@@ -176,7 +181,12 @@ impl WindowColorAction {
             if let Err(error) =
                 write_raw_value(&entry.location, entry.intended_type, &entry.intended_raw)
             {
-                Self::compensate(&entries[..written]);
+                if !Self::compensate(&entries[..written]) {
+                    return Err(ActionError::recovery_required(
+                        ActionStage::Apply,
+                        "action.window_color.partial_write_not_compensated",
+                    ));
+                }
                 return Err(map_windows_error(
                     ActionStage::Apply,
                     "action.window_color.apply_failed",
@@ -188,10 +198,27 @@ impl WindowColorAction {
         Ok(())
     }
 
-    fn compensate(applied: &[RegistryBackup]) {
+    /// 途中まで書いた分を巻き戻す。**巻き戻せたかを返す。**
+    ///
+    /// 以前は `let _ =` で結果を捨てていた。巻き戻しに失敗しても
+    /// 呼び出し側には元のエラーだけが返り、**「適用に失敗した」＝「何も変わっていない」**
+    /// と読める。実際には片方のレジストリ値が変わったまま残る。
+    ///
+    /// 書き戻したあと読み直して、元の値に戻っていることまで確かめる。
+    /// 確かめられなければ、それは失敗ではなく復旧が要る事態。
+    fn compensate(applied: &[RegistryBackup]) -> bool {
+        let mut all_restored = true;
         for entry in applied.iter().rev() {
-            let _ = restore_registry_backup(entry);
+            if restore_registry_backup(entry).is_err() {
+                all_restored = false;
+                continue;
+            }
+            match verify_registry_backup_restored(entry) {
+                Ok(true) => {}
+                _ => all_restored = false,
+            }
         }
+        all_restored
     }
 }
 
