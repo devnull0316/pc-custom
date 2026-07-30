@@ -371,6 +371,13 @@ mod tests {
         let current = active_power_scheme().expect("read active scheme");
         let Some(scheme) = scheme_for_guid(current) else {
             // OEM schemes are valid pre-states but cannot be requested by the closed enum.
+            //
+            // **黙って return しない。** これは `#[ignore]` ではない通常のテストで、
+            // 毎回の `cargo test` と CI で走る。何も検証せずに緑になると、
+            // 「340件通った」の一部が空になる。飛ばしたことを出力に残す。
+            println!(
+                "EVIDENCE: power_scheme_round_trip measured=false                  reason=現在の電源プランがOEM製で、閉じた列挙から要求できない"
+            );
             return;
         };
         let os = OsIdentity::from_test_build(26_200);

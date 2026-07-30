@@ -403,7 +403,15 @@ fn recovery_parameters_union_current_registered_game_identity() {
 fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
     let identity = match OsIdentity::load() {
         Ok(identity) => identity,
-        Err(_) => return, // 実機以外では検出できないので何も主張しない
+        Err(error) => {
+            // 実機以外では検出できないので何も主張しない。
+            // **ただし黙って通さない。** 通常のテストなので毎回走る。
+            // 飛ばしたことが出力に出ないと、通ったのか素通りしたのか区別できない。
+            println!(
+                "EVIDENCE: full_user_journey measured=false reason=OS識別を読めない {error:?}"
+            );
+            return;
+        }
     };
     // この環境で変更が許される場合だけ、変更経路を検証する。
     // 許されない場合に互換性ゲートが読み取り専用へ倒すのは**仕様どおり**なので、
