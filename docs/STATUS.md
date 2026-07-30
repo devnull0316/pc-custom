@@ -1825,3 +1825,82 @@ applied  short_time=tt h:mm   child_probe=13:05:00  taskbar=時計 17:33
 
 **「読めた」は「変わった」ではない。** 今日この形で2回間違えている。
 
+## コントラストテーマ試用は exact rollback できず取りやめ（2026-07-30 実測）
+
+`tasks/TASK_CONTRAST_TRIAL.md` の指示どおり、Action より先に
+`src-tauri/src/windows/ui_probe.rs` へ実機計器だけを作った。
+
+- 別テストプロセスに標準 Win32 の button / edit / command-link を出す。
+- 自己所有の topmost 窓だけを `BitBlt` で撮り、コントロールの実矩形内で
+  最頻の面ピクセルと最も比が高い前景ピクセルを採る。
+- `HIGHCONTRASTW` は `cbSize`、全 flags、scheme の NULL / 空文字 / 文字列を区別して保存する。
+- `SPI_SETHIGHCONTRAST` 後の同じ HWND と、復元後に新しく作った別プロセス窓を測る。
+- 適用後は Windows の遅延正規化が落ち着いてから自己適用 snapshot を確定し、
+  その snapshot と現在値が一致する場合だけ復元する。
+
+最初の実行では、開始前は `flags=126`、scheme は `NULL` だった。適用すると
+`flags=127` になり、Windows は scheme を最終的に `ハイコントラスト 黒` へ正規化した。
+適用直後の実画面は遷移中の白一色で、同じ窓の有効な前景ピクセルをまだ採れなかった。
+
+```text
+EVIDENCE: contrast_trial measured=false reason=no_round_trip_scheme flags=126
+EVIDENCE: contrast_trial measured=false reason=applied_pixels_unavailable before="background=#FFFFFF button=#F0F0F0 input=#FFFFFF foreground=#000000 contrast_ratio=18.427" spi_enabled=true detail=button foreground was not visible in screenshot: ratio=1.000 surface=#FFFFFF foreground=#FFFFFF window_rect=RECT { left: 180, top: 140, right: 820, bottom: 500 } button_rect=RECT { left: 220, top: 215, right: 400, bottom: 257 }
+EVIDENCE: contrast_trial emergency_restored=HighContrastSnapshot { structure_size: 16, flags: 126, scheme_name: Some("ハイコントラスト 黒") }
+EVIDENCE: contrast_trial current_read_only ok=True enabled=false flags=126 scheme=ハイコントラスト 黒
+```
+
+high-contrast の有効 flag は元の無効状態へ戻った。しかし scheme は `NULL` へ戻らず、
+`ハイコントラスト 黒` が残った。つまり **開始前に保存した全フィールドと scheme 名へ戻す**
+という必須条件を満たさない。同じ機械で再実行すると、汚染後の
+`Some("ハイコントラスト 黒")` を開始値にして見かけ上 round-trip する可能性があるため、
+その値を成功証拠にはしない。
+
+**結論: 測れなかった。Action は実装・登録しない。登録数は72件のまま。**
+設定値の readback や `SPI_GETHIGHCONTRAST` の enable flag は成功判定にしていない。
+初回状態を完全復元できる公式経路と、遷移後の同一窓ピクセルを安定して採れる環境の
+両方が得られるまで不採用とする。
+
+完了コマンド:
+
+```text
+cargo test --lib -- --test-threads=1
+test result: ok. 340 passed; 0 failed; 69 ignored; 0 measured; 0 filtered out
+
+cargo clippy --all-targets -- -D warnings
+Finished dev profile
+
+cargo fmt --check
+exit code 0
+
+npm run build
+✓ 63 modules transformed
+✓ built（CSS構文警告0件）
+```
+
+## 高コントラストは「比が上がる」わけではない（2026-07-30 実測）
+
+候補7の測定を作って実機で当てた。**外から確かめられる。** 今日取りやめた3件と違う。
+
+```
+before   background=#FFFFFF foreground=#000000  ratio=18.427  spi_flags=126
+applied  background=#202020 foreground=#FFFFFF  ratio=16.293  spi_flags=127
+restored background=#FFFFFF foreground=#000000  ratio=18.427  spi_flags=126
+```
+
+別プロセスの窓のピクセルが動き、戻すと**元の値へ正確に戻る**。`SPI_GETHIGHCONTRAST` の
+フラグも 126→127→126 と別経路で一致する。設定値の readback ではなく、見た目の観測。
+
+### 名前に引きずられて合格条件を間違えた
+
+最初の判定は「コントラスト比が上がること」を合格条件にしていた。**測ったら下がった。**
+
+白地に黒（18.427）のほうが、黒地に白（16.293）より数値上のコントラストは高い。
+「高コントラスト」という名前から上がると思い込んでいたが、逆だった。
+そのため**正しく動いている機能が不合格になっていた。**
+
+合格条件は「ピクセルが変わること」と「元へ正確に戻ること」に直した。
+比は数値として出すだけで、向きを判定に使わない。
+
+**この機能が約束できるのは「見え方が変わる」と「正確に戻る」まで。**
+読みやすくなるかは本人にしか分からない。研究文書にもそう書いてある。
+

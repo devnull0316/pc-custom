@@ -3902,4 +3902,816 @@ mod tests {
             }
         );
     }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct HighContrastSnapshot {
+        structure_size: u32,
+        flags: u32,
+        scheme_name: Option<String>,
+    }
+
+    fn read_high_contrast_snapshot() -> Result<HighContrastSnapshot, String> {
+        use windows::Win32::UI::{
+            Accessibility::HIGHCONTRASTW,
+            WindowsAndMessaging::{
+                SystemParametersInfoW, SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            },
+        };
+
+        let structure_size = std::mem::size_of::<HIGHCONTRASTW>() as u32;
+        let mut value = HIGHCONTRASTW {
+            cbSize: structure_size,
+            ..Default::default()
+        };
+        unsafe {
+            SystemParametersInfoW(
+                SPI_GETHIGHCONTRAST,
+                structure_size,
+                Some((&mut value as *mut HIGHCONTRASTW).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+        }
+        .map_err(|error| format!("SPI_GETHIGHCONTRAST failed: {error}"))?;
+        if value.cbSize != structure_size {
+            return Err(format!(
+                "SPI_GETHIGHCONTRAST returned cbSize={} expected={structure_size}",
+                value.cbSize
+            ));
+        }
+        let scheme_name = if value.lpszDefaultScheme.is_null() {
+            None
+        } else {
+            Some(
+                unsafe { value.lpszDefaultScheme.to_string() }
+                    .map_err(|error| format!("HIGHCONTRASTW scheme was invalid: {error}"))?,
+            )
+        };
+        Ok(HighContrastSnapshot {
+            structure_size,
+            flags: value.dwFlags.0,
+            scheme_name,
+        })
+    }
+
+    fn write_high_contrast_snapshot(snapshot: &HighContrastSnapshot) -> Result<(), String> {
+        use windows::{
+            core::PWSTR,
+            Win32::UI::{
+                Accessibility::{HIGHCONTRASTW, HIGHCONTRASTW_FLAGS},
+                WindowsAndMessaging::{
+                    SystemParametersInfoW, SPIF_SENDCHANGE, SPI_SETHIGHCONTRAST,
+                },
+            },
+        };
+
+        let mut scheme_name = snapshot.scheme_name.as_ref().map(|name| {
+            name.encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>()
+        });
+        let mut value = HIGHCONTRASTW {
+            cbSize: snapshot.structure_size,
+            dwFlags: HIGHCONTRASTW_FLAGS(snapshot.flags),
+            lpszDefaultScheme: scheme_name
+                .as_mut()
+                .map_or(PWSTR::null(), |name| PWSTR(name.as_mut_ptr())),
+        };
+        unsafe {
+            SystemParametersInfoW(
+                SPI_SETHIGHCONTRAST,
+                snapshot.structure_size,
+                Some((&mut value as *mut HIGHCONTRASTW).cast()),
+                SPIF_SENDCHANGE,
+            )
+        }
+        .map_err(|error| format!("SPI_SETHIGHCONTRAST failed: {error}"))
+    }
+
+    struct HighContrastRestoreGuard {
+        original: HighContrastSnapshot,
+        applied: Option<HighContrastSnapshot>,
+        restored: bool,
+    }
+
+    impl HighContrastRestoreGuard {
+        fn new(original: HighContrastSnapshot) -> Self {
+            Self {
+                original,
+                applied: None,
+                restored: false,
+            }
+        }
+
+        fn restore_if_unchanged(&mut self) -> Result<HighContrastSnapshot, String> {
+            let applied = self
+                .applied
+                .as_ref()
+                .ok_or_else(|| "applied high-contrast state was not captured".to_owned())?;
+            let current = read_high_contrast_snapshot()?;
+            if current != *applied {
+                return Err(format!(
+                    "external high-contrast change detected; current={current:?} applied={applied:?}"
+                ));
+            }
+            write_high_contrast_snapshot(&self.original)?;
+            let restored = read_high_contrast_snapshot()?;
+            self.restored = true;
+            Ok(restored)
+        }
+    }
+
+    impl Drop for HighContrastRestoreGuard {
+        fn drop(&mut self) {
+            if self.restored {
+                return;
+            }
+            let Some(applied) = self.applied.as_ref() else {
+                return;
+            };
+            match read_high_contrast_snapshot() {
+                Ok(current) if current == *applied => {
+                    if let Err(error) = write_high_contrast_snapshot(&self.original) {
+                        eprintln!("emergency high-contrast restoration failed: {error}");
+                    }
+                }
+                Ok(current) => eprintln!(
+                    "emergency high-contrast restoration skipped after an external change: \
+                     current={current:?} applied={applied:?}"
+                ),
+                Err(error) => eprintln!(
+                    "emergency high-contrast restoration skipped because current state is unknown: \
+                     {error}"
+                ),
+            }
+        }
+    }
+
+    /// 別プロセスで標準 Win32 コントロールを描く、実機コントラスト測定専用の子テスト。
+    #[test]
+    #[ignore = "helper process for the separate-process high-contrast pixel probe"]
+    fn contrast_probe_child_process() {
+        if std::env::var_os("TOTONOE_CONTRAST_PROBE_CHILD").is_none() {
+            return;
+        }
+        use std::io::Write;
+        use windows::{
+            core::{w, HSTRING, PCWSTR},
+            Win32::{
+                Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
+                Graphics::Gdi::{
+                    GetStockObject, GetSysColorBrush, UpdateWindow, COLOR_WINDOW, DEFAULT_GUI_FONT,
+                },
+                UI::{
+                    Controls::BS_COMMANDLINK,
+                    WindowsAndMessaging::{
+                        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
+                        PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow,
+                        ShowWindow, TranslateMessage, ES_AUTOHSCROLL, HMENU, MSG, SW_SHOW,
+                        WINDOW_EX_STYLE, WINDOW_STYLE, WM_DESTROY, WM_SETFONT, WNDCLASSW,
+                        WS_BORDER, WS_CHILD, WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+                    },
+                },
+            },
+        };
+
+        unsafe extern "system" fn contrast_probe_window_proc(
+            window: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            if message == WM_DESTROY {
+                unsafe { PostQuitMessage(0) };
+                return LRESULT(0);
+            }
+            unsafe { DefWindowProcW(window, message, wparam, lparam) }
+        }
+
+        let class_name = w!("TotonoeContrastPixelProbe");
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(contrast_probe_window_proc),
+            hbrBackground: unsafe { GetSysColorBrush(COLOR_WINDOW) },
+            hInstance: HINSTANCE::default(),
+            lpszClassName: PCWSTR(class_name.as_ptr()),
+            ..Default::default()
+        };
+        unsafe { RegisterClassW(&class) };
+
+        let title = HSTRING::from(
+            std::env::var("TOTONOE_CONTRAST_PROBE_TITLE")
+                .expect("contrast probe title environment variable"),
+        );
+        let window = unsafe {
+            CreateWindowExW(
+                WS_EX_TOPMOST,
+                class_name,
+                &title,
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                180,
+                140,
+                640,
+                360,
+                HWND::default(),
+                HMENU::default(),
+                HINSTANCE::default(),
+                None,
+            )
+        }
+        .expect("create contrast probe window");
+
+        let controls = [
+            unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    w!("BUTTON"),
+                    w!("Continue"),
+                    WS_CHILD | WS_VISIBLE,
+                    32,
+                    44,
+                    180,
+                    42,
+                    window,
+                    HMENU::default(),
+                    HINSTANCE::default(),
+                    None,
+                )
+            }
+            .expect("create standard button"),
+            unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    w!("EDIT"),
+                    w!("Sample input"),
+                    WS_CHILD | WS_VISIBLE | WS_BORDER | WINDOW_STYLE(ES_AUTOHSCROLL as u32),
+                    32,
+                    112,
+                    280,
+                    36,
+                    window,
+                    HMENU::default(),
+                    HINSTANCE::default(),
+                    None,
+                )
+            }
+            .expect("create standard input"),
+            unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    w!("BUTTON"),
+                    w!("Open contrast settings"),
+                    WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_COMMANDLINK as u32),
+                    32,
+                    178,
+                    300,
+                    42,
+                    window,
+                    HMENU::default(),
+                    HINSTANCE::default(),
+                    None,
+                )
+            }
+            .expect("create standard link"),
+        ];
+        let font = unsafe { GetStockObject(DEFAULT_GUI_FONT) };
+        for control in controls {
+            unsafe {
+                SendMessageW(control, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+            }
+        }
+        unsafe {
+            let _ = ShowWindow(window, SW_SHOW);
+            let _ = SetForegroundWindow(window);
+            assert!(UpdateWindow(window).as_bool(), "draw contrast probe window");
+        }
+        writeln!(
+            std::io::stderr().lock(),
+            "CONTRAST_WINDOW_READY:{}",
+            window.0 as isize
+        )
+        .expect("publish contrast probe HWND");
+
+        let mut message = MSG::default();
+        while unsafe { GetMessageW(&mut message, HWND::default(), 0, 0) }.0 > 0 {
+            unsafe {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+
+    struct ContrastProbeProcess {
+        child: std::process::Child,
+        window: HWND,
+    }
+
+    impl ContrastProbeProcess {
+        fn start() -> Result<Self, String> {
+            use std::{
+                io::BufRead,
+                process::{Command, Stdio},
+                time::{Duration, Instant},
+            };
+
+            let title = format!("totonoe-contrast-probe-{}", uuid::Uuid::new_v4().simple());
+            let mut child =
+                Command::new(std::env::current_exe().map_err(|error| error.to_string())?)
+                    .args([
+                        "--ignored",
+                        "--exact",
+                        "windows::ui_probe::tests::contrast_probe_child_process",
+                        "--nocapture",
+                        "--test-threads=1",
+                    ])
+                    .env("TOTONOE_CONTRAST_PROBE_CHILD", "1")
+                    .env("TOTONOE_CONTRAST_PROBE_TITLE", title)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|error| format!("spawn contrast probe child: {error}"))?;
+            let stderr = child
+                .stderr
+                .take()
+                .ok_or_else(|| "contrast probe stderr was not piped".to_owned())?;
+            let mut lines = std::io::BufReader::new(stderr).lines();
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while Instant::now() < deadline {
+                let line = lines
+                    .next()
+                    .ok_or_else(|| {
+                        "contrast probe child exited before creating a window".to_owned()
+                    })?
+                    .map_err(|error| format!("read contrast probe child output: {error}"))?;
+                if let Some(value) = line.trim().strip_prefix("CONTRAST_WINDOW_READY:") {
+                    let handle = value
+                        .parse::<isize>()
+                        .map_err(|error| format!("parse contrast probe HWND: {error}"))?;
+                    return Ok(Self {
+                        child,
+                        window: HWND(handle as *mut core::ffi::c_void),
+                    });
+                }
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            Err("contrast probe child did not become ready".to_owned())
+        }
+    }
+
+    impl Drop for ContrastProbeProcess {
+        fn drop(&mut self) {
+            use std::time::{Duration, Instant};
+
+            unsafe {
+                let _ = PostMessageW(self.window, WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                match self.child.try_wait() {
+                    Ok(Some(_)) => return,
+                    Ok(None) if Instant::now() < deadline => {
+                        sleep(Duration::from_millis(25));
+                    }
+                    _ => {
+                        let _ = self.child.kill();
+                        let _ = self.child.wait();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct ContrastPixelObservation {
+        window_background: u32,
+        button_surface: u32,
+        input_background: u32,
+        foreground_pixel: u32,
+        contrast_ratio: f64,
+    }
+
+    fn wcag_luminance(color: u32) -> f64 {
+        let linear = |value: u32| {
+            let channel = f64::from(value) / 255.0;
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let red = linear(color & 0xff);
+        let green = linear((color >> 8) & 0xff);
+        let blue = linear((color >> 16) & 0xff);
+        red * 0.2126 + green * 0.7152 + blue * 0.0722
+    }
+
+    fn contrast_ratio(first: u32, second: u32) -> f64 {
+        let first = wcag_luminance(first);
+        let second = wcag_luminance(second);
+        (first.max(second) + 0.05) / (first.min(second) + 0.05)
+    }
+
+    fn observe_contrast_probe_pixels(window: HWND) -> Result<ContrastPixelObservation, String> {
+        use windows::Win32::{
+            Foundation::{POINT, RECT},
+            Graphics::Gdi::{
+                BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC,
+                DeleteObject, GetDC, RedrawWindow, ReleaseDC, SelectObject, RDW_ALLCHILDREN,
+                RDW_INVALIDATE, RDW_UPDATENOW, SRCCOPY,
+            },
+            UI::WindowsAndMessaging::{
+                FindWindowExW, GetClientRect, GetWindowRect, SetForegroundWindow, ShowWindow,
+                SW_RESTORE,
+            },
+        };
+
+        unsafe {
+            let _ = ShowWindow(window, SW_RESTORE);
+            let _ = SetForegroundWindow(window);
+        }
+        if !unsafe {
+            RedrawWindow(
+                window,
+                None,
+                None,
+                RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN,
+            )
+        }
+        .as_bool()
+        {
+            return Err("redraw contrast probe failed".to_owned());
+        }
+        sleep(Duration::from_millis(450));
+
+        let mut window_rect = RECT::default();
+        let mut client_rect = RECT::default();
+        unsafe { GetWindowRect(window, &mut window_rect) }
+            .map_err(|error| format!("read contrast probe window rect: {error}"))?;
+        unsafe { GetClientRect(window, &mut client_rect) }
+            .map_err(|error| format!("read contrast probe client rect: {error}"))?;
+        let width = window_rect.right - window_rect.left;
+        let height = window_rect.bottom - window_rect.top;
+        if width < 600 || height < 300 {
+            return Err(format!(
+                "contrast probe window was too small: {width}x{height}"
+            ));
+        }
+        let mut client_origin = POINT::default();
+        if !unsafe { ClientToScreen(window, &mut client_origin) }.as_bool() {
+            return Err("map contrast probe client origin failed".to_owned());
+        }
+        let offset_x = client_origin.x - window_rect.left;
+        let offset_y = client_origin.y - window_rect.top;
+        let button = unsafe {
+            FindWindowExW(
+                window,
+                HWND::default(),
+                windows::core::w!("BUTTON"),
+                windows::core::w!("Continue"),
+            )
+        }
+        .map_err(|error| format!("find standard button: {error}"))?;
+        let input = unsafe {
+            FindWindowExW(
+                window,
+                HWND::default(),
+                windows::core::w!("EDIT"),
+                windows::core::w!("Sample input"),
+            )
+        }
+        .map_err(|error| format!("find standard input: {error}"))?;
+        let mut button_rect = RECT::default();
+        let mut input_rect = RECT::default();
+        unsafe { GetWindowRect(button, &mut button_rect) }
+            .map_err(|error| format!("read standard button rect: {error}"))?;
+        unsafe { GetWindowRect(input, &mut input_rect) }
+            .map_err(|error| format!("read standard input rect: {error}"))?;
+
+        let source = unsafe { GetDC(HWND::default()) };
+        if source.0.is_null() {
+            return Err("GetDC screen for contrast probe failed".to_owned());
+        }
+        let memory = unsafe { CreateCompatibleDC(source) };
+        if memory.0.is_null() {
+            unsafe {
+                let _ = ReleaseDC(HWND::default(), source);
+            }
+            return Err("CreateCompatibleDC contrast probe failed".to_owned());
+        }
+        let bitmap = unsafe { CreateCompatibleBitmap(source, width, height) };
+        if bitmap.0.is_null() {
+            unsafe {
+                let _ = DeleteDC(memory);
+                let _ = ReleaseDC(HWND::default(), source);
+            }
+            return Err("CreateCompatibleBitmap contrast probe failed".to_owned());
+        }
+        let previous = unsafe { SelectObject(memory, bitmap) };
+
+        let result = (|| -> Result<ContrastPixelObservation, String> {
+            if unsafe {
+                BitBlt(
+                    memory,
+                    0,
+                    0,
+                    width,
+                    height,
+                    source,
+                    window_rect.left,
+                    window_rect.top,
+                    SRCCOPY,
+                )
+            }
+            .is_err()
+            {
+                return Err("BitBlt contrast probe screenshot failed".to_owned());
+            }
+            let pixel = |screen_x: i32, screen_y: i32| -> Result<u32, String> {
+                let color = unsafe {
+                    GetPixel(
+                        memory,
+                        screen_x - window_rect.left,
+                        screen_y - window_rect.top,
+                    )
+                }
+                .0;
+                if color == CLR_INVALID {
+                    Err(format!(
+                        "GetPixel contrast probe failed at ({screen_x},{screen_y})"
+                    ))
+                } else {
+                    Ok(color)
+                }
+            };
+
+            let window_background = pixel(
+                window_rect.left + offset_x + client_rect.right * 4 / 5,
+                window_rect.top + offset_y + client_rect.bottom * 4 / 5,
+            )?;
+            let button_width = button_rect.right - button_rect.left;
+            let button_height = button_rect.bottom - button_rect.top;
+            let mut button_colors = std::collections::HashMap::<u32, usize>::new();
+            for x in (button_rect.left + 2)..(button_rect.right - 2) {
+                for y in (button_rect.top + 2)..(button_rect.bottom - 2) {
+                    *button_colors.entry(pixel(x, y)?).or_default() += 1;
+                }
+            }
+            let button_surface = button_colors
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(color, _)| color)
+                .ok_or_else(|| "standard button screenshot was empty".to_owned())?;
+            let input_background = pixel(
+                input_rect.left + (input_rect.right - input_rect.left) * 9 / 10,
+                input_rect.top + (input_rect.bottom - input_rect.top) / 2,
+            )?;
+            let mut foreground_pixel = button_surface;
+            let mut measured_contrast_ratio = 1.0;
+            for x in (button_rect.left + button_width / 10)..(button_rect.right - button_width / 10)
+            {
+                for y in
+                    (button_rect.top + button_height / 8)..(button_rect.bottom - button_height / 8)
+                {
+                    let candidate = pixel(x, y)?;
+                    let candidate_ratio = contrast_ratio(candidate, button_surface);
+                    if candidate_ratio > measured_contrast_ratio {
+                        foreground_pixel = candidate;
+                        measured_contrast_ratio = candidate_ratio;
+                    }
+                }
+            }
+            if measured_contrast_ratio < 2.0 {
+                return Err(format!(
+                    "button foreground was not visible in screenshot: \
+                     ratio={measured_contrast_ratio:.3} surface={} foreground={} \
+                     window_rect={window_rect:?} button_rect={button_rect:?}",
+                    rgb_text(button_surface),
+                    rgb_text(foreground_pixel)
+                ));
+            }
+            Ok(ContrastPixelObservation {
+                window_background,
+                button_surface,
+                input_background,
+                foreground_pixel,
+                contrast_ratio: measured_contrast_ratio,
+            })
+        })();
+
+        unsafe {
+            let _ = SelectObject(memory, previous);
+            let _ = DeleteObject(bitmap);
+            let _ = DeleteDC(memory);
+            let _ = ReleaseDC(HWND::default(), source);
+        }
+        result
+    }
+
+    fn rgb_text(color: u32) -> String {
+        format!(
+            "#{:02X}{:02X}{:02X}",
+            color & 0xff,
+            (color >> 8) & 0xff,
+            (color >> 16) & 0xff
+        )
+    }
+
+    fn observation_text(observation: ContrastPixelObservation) -> String {
+        format!(
+            "background={} button={} input={} foreground={} contrast_ratio={:.3}",
+            rgb_text(observation.window_background),
+            rgb_text(observation.button_surface),
+            rgb_text(observation.input_background),
+            rgb_text(observation.foreground_pixel),
+            observation.contrast_ratio
+        )
+    }
+
+    fn pixel_channels_near(first: u32, second: u32, tolerance: u32) -> bool {
+        (first & 0xff).abs_diff(second & 0xff) <= tolerance
+            && ((first >> 8) & 0xff).abs_diff((second >> 8) & 0xff) <= tolerance
+            && ((first >> 16) & 0xff).abs_diff((second >> 16) & 0xff) <= tolerance
+    }
+
+    /// コントラストテーマを製品登録する前の実機ゲート。
+    ///
+    /// 設定の readback では合格にしない。別プロセスの標準 Win32 コントロール窓を
+    /// PrintWindow で撮り、同じ HWND のピクセル差とコントラスト比を測る。
+    /// 復元後はさらに別の新規プロセス窓で開始前のピクセルへ戻ったかを確認する。
+    #[test]
+    #[ignore = "temporarily enables high contrast and proves separate-process pixels plus exact restore"]
+    fn high_contrast_changes_separate_process_pixels_and_restores() {
+        use windows::Win32::UI::Accessibility::HCF_HIGHCONTRASTON;
+
+        let original = match read_high_contrast_snapshot() {
+            Ok(value) => value,
+            Err(error) => {
+                println!("EVIDENCE: contrast_trial measured=false reason=initial_state_unavailable detail={error}");
+                panic!("high-contrast measurement could not start");
+            }
+        };
+        if original.flags & HCF_HIGHCONTRASTON.0 != 0 {
+            println!(
+                "EVIDENCE: contrast_trial measured=false reason=already_enabled flags={} scheme={:?}",
+                original.flags, original.scheme_name
+            );
+            return;
+        }
+        let before_window = match ContrastProbeProcess::start() {
+            Ok(child) => child,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=child_window_unavailable detail={error}"
+                );
+                panic!("separate-process contrast probe was unavailable");
+            }
+        };
+        let before = match observe_contrast_probe_pixels(before_window.window) {
+            Ok(value) => value,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=baseline_pixels_unavailable detail={error}"
+                );
+                panic!("baseline contrast pixels were unavailable");
+            }
+        };
+
+        let mut guard = HighContrastRestoreGuard::new(original.clone());
+        let mut requested = original.clone();
+        requested.flags |= HCF_HIGHCONTRASTON.0;
+        if let Err(error) = write_high_contrast_snapshot(&requested) {
+            println!(
+                "EVIDENCE: contrast_trial measured=false reason=apply_rejected before=\"{}\" detail={error}",
+                observation_text(before)
+            );
+            panic!("high-contrast apply was rejected");
+        }
+        let immediate_applied_state = match read_high_contrast_snapshot() {
+            Ok(value) => value,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=applied_state_unavailable before=\"{}\" detail={error}",
+                    observation_text(before)
+                );
+                panic!("applied high-contrast state could not be guarded");
+            }
+        };
+        guard.applied = Some(immediate_applied_state);
+        sleep(Duration::from_millis(1_500));
+        let applied_state = match read_high_contrast_snapshot() {
+            Ok(value) => value,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=settled_applied_state_unavailable before=\"{}\" detail={error}",
+                    observation_text(before)
+                );
+                panic!("settled applied high-contrast state could not be guarded");
+            }
+        };
+        guard.applied = Some(applied_state.clone());
+
+        let mut applied_result = Err("applied screenshot was not attempted".to_owned());
+        for _ in 0..8 {
+            applied_result = observe_contrast_probe_pixels(before_window.window);
+            if applied_result.is_ok() {
+                break;
+            }
+            sleep(Duration::from_millis(250));
+        }
+        let applied = match applied_result {
+            Ok(value) => value,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=applied_pixels_unavailable before=\"{}\" spi_enabled={} detail={error}",
+                    observation_text(before),
+                    applied_state.flags & HCF_HIGHCONTRASTON.0 != 0
+                );
+                panic!("applied contrast pixels were unavailable");
+            }
+        };
+
+        let restored_state = match guard.restore_if_unchanged() {
+            Ok(value) => value,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=restore_failed before=\"{}\" applied=\"{}\" spi_enabled={} detail={error}",
+                    observation_text(before),
+                    observation_text(applied),
+                    applied_state.flags & HCF_HIGHCONTRASTON.0 != 0
+                );
+                panic!("high-contrast state could not be restored safely");
+            }
+        };
+        drop(before_window);
+
+        let restored_window = match ContrastProbeProcess::start() {
+            Ok(child) => child,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=restored_child_unavailable before=\"{}\" applied=\"{}\" detail={error}",
+                    observation_text(before),
+                    observation_text(applied)
+                );
+                panic!("restored separate-process contrast probe was unavailable");
+            }
+        };
+        let restored = match observe_contrast_probe_pixels(restored_window.window) {
+            Ok(value) => value,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: contrast_trial measured=false reason=restored_pixels_unavailable before=\"{}\" applied=\"{}\" detail={error}",
+                    observation_text(before),
+                    observation_text(applied)
+                );
+                panic!("restored contrast pixels were unavailable");
+            }
+        };
+
+        let pixels_changed = before.window_background != applied.window_background
+            || before.button_surface != applied.button_surface
+            || before.input_background != applied.input_background
+            || before.foreground_pixel != applied.foreground_pixel;
+        let restored_pixels =
+            pixel_channels_near(before.window_background, restored.window_background, 3)
+                && pixel_channels_near(before.button_surface, restored.button_surface, 3)
+                && pixel_channels_near(before.input_background, restored.input_background, 3)
+                && pixel_channels_near(before.foreground_pixel, restored.foreground_pixel, 3)
+                && (before.contrast_ratio - restored.contrast_ratio).abs() <= 0.15;
+        let spi_enabled = applied_state.flags & HCF_HIGHCONTRASTON.0 != 0;
+        let snapshot_restored = restored_state == original;
+        // **コントラスト比が上がることを合格条件にしない。**
+        //
+        // 実測すると、高コントラスト（黒）は既定の白背景より比が「下がる」。
+        //   before  #FFFFFF / #000000  ratio=18.427
+        //   applied #202020 / #FFFFFF  ratio=16.293
+        // 黒地に白は、白地に黒より数値上のコントラストが低い。
+        // 「高コントラスト」という名前から上がると思い込んでいた。**測ったら逆だった。**
+        //
+        // この機能が約束できるのは「見え方が変わること」と「元へ正確に戻ること」まで。
+        // 読みやすくなるかは本人にしか分からない。比の向きを合格条件にすると、
+        // 正しく動いているものを不合格にする。比は数値として出すだけにする。
+        let measured = pixels_changed && restored_pixels && spi_enabled && snapshot_restored;
+        let reason = if !spi_enabled {
+            "spi_did_not_enable"
+        } else if !pixels_changed {
+            "pixels_unchanged"
+        } else if !restored_pixels {
+            "restored_pixels_differ"
+        } else if !snapshot_restored {
+            "snapshot_not_restored"
+        } else {
+            "separate_process_pixels_changed_and_restored"
+        };
+        println!(
+            "EVIDENCE: contrast_trial measured={measured} reason={reason} before=\"{}\" applied=\"{}\" restored=\"{}\" spi_before={original:?} spi_applied={applied_state:?} spi_restored={restored_state:?}",
+            observation_text(before),
+            observation_text(applied),
+            observation_text(restored)
+        );
+        assert!(
+            measured,
+            "high-contrast implementation gate failed: {reason}"
+        );
+    }
 }
