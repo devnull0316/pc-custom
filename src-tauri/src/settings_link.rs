@@ -43,6 +43,7 @@ pub const fn settings_page_for(action: ActionId) -> Option<&'static str> {
         | ActionId::ThemeColorMode
         | ActionId::AppearanceTransparency => "ms-settings:personalization-colors",
         ActionId::AppearanceTaskbarAnimations => "ms-settings:easeofaccess-visualeffects",
+        ActionId::AppearanceHighContrastTrial => "ms-settings:easeofaccess-highcontrast",
         // 通知
         ActionId::NotificationsToastBanners
         | ActionId::NotificationsUsbErrors

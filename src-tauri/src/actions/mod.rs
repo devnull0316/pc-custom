@@ -9,6 +9,7 @@ mod default_printer;
 mod explorer_visibility;
 mod game_readiness;
 mod guided_setup;
+mod high_contrast;
 mod pointer_feel;
 mod power_mode_switch;
 mod power_scheme_switch;
@@ -33,6 +34,7 @@ pub use explorer_visibility::{
 };
 pub use game_readiness::{GameReadinessCheckAction, GAME_READINESS_CHECK_ACTION};
 pub use guided_setup::{GuidedSetupAction, SETUP_AUDIO_OUTPUT_ACTION, SETUP_DEFAULT_APPS_ACTION};
+pub use high_contrast::{HighContrastAction, HIGH_CONTRAST_ACTION};
 pub use pointer_feel::{PointerFeelAction, POINTER_FEEL_ACTION};
 pub use power_mode_switch::{PowerModeSwitchAction, POWER_MODE_SWITCH_ACTION};
 pub use power_scheme_switch::{PowerSchemeSwitchAction, POWER_SCHEME_SWITCH_ACTION};

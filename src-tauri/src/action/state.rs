@@ -249,6 +249,13 @@ pub enum ObservedValue {
         configured: Option<u32>,
     },
     Theme(ThemeObservation),
+    /// `HIGHCONTRASTW` の全フィールド。scheme の NULL は `None`、空文字は `Some("")`。
+    HighContrast {
+        enabled: bool,
+        structure_size: u32,
+        flags: u32,
+        scheme: Option<String>,
+    },
     SleepLease {
         owned: bool,
         owner_count: usize,

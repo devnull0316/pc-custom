@@ -309,7 +309,7 @@ export function pickGameExecutable(): Promise<string | null> {
   return call<string | null>("pick_game_executable", {});
 }
 
-/** 試用として適用する。確定しなければ、次に開いたときに元へ戻る。 */
+/** 試用として適用する。確定しなければ期限時に元へ戻り、停止中なら次回起動で復元する。 */
 export function commitPreviewAsTrial(
   request: CommitPreviewRequest,
   holdSeconds: number,
@@ -320,6 +320,11 @@ export function commitPreviewAsTrial(
 /** 試用を確定する。以後この変更は自動で戻らない。 */
 export function confirmTrial(transactionId: string): Promise<boolean> {
   return call<boolean>("confirm_trial", { transactionId });
+}
+
+/** 期限を過ぎた試用を journal から復元する。 */
+export function revertExpiredTrials(): Promise<number> {
+  return call<number>("revert_expired_trials");
 }
 
 /** 適用した設定が今も残っているかを照合する。読むだけで何も変更しない。 */

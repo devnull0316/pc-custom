@@ -1,7 +1,9 @@
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{mpsc, Arc},
+    thread,
+    time::Duration,
 };
 
 use crate::{
@@ -11,6 +13,51 @@ use crate::{
     journal::JournalDatabase,
     presentation::BootstrapStatus,
 };
+
+struct TrialReverter {
+    shutdown: mpsc::Sender<()>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl TrialReverter {
+    fn spawn(engine: Arc<PcCustomEngine>) -> Self {
+        let (shutdown, receiver) = mpsc::channel();
+        let worker = thread::Builder::new()
+            .name("totonoe-trial-reverter".to_owned())
+            .spawn(move || {
+                let mut error_reported = false;
+                loop {
+                    match receiver.recv_timeout(Duration::from_millis(500)) {
+                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            match engine.revert_expired_trials() {
+                                Ok(_) => error_reported = false,
+                                Err(error) if !error_reported => {
+                                    eprintln!("expired trial revert failed: {error:?}");
+                                    error_reported = true;
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                }
+            })
+            .expect("trial reverter thread must start");
+        Self {
+            shutdown,
+            worker: Some(worker),
+        }
+    }
+}
+
+impl Drop for TrialReverter {
+    fn drop(&mut self) {
+        let _ = self.shutdown.send(());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
 
 /// Tauri-managed application state. Initialization failures keep the UI alive in
 /// fail-closed mode; no command can reach a mutation path without an engine.
@@ -26,6 +73,7 @@ pub struct ApplicationState {
     initialization_error: Option<CoreError>,
     _instance_guard: Option<crate::windows::AppInstanceGuard>,
     profile_watcher: Option<crate::game_profile::ProfileWatcher>,
+    _trial_reverter: Option<TrialReverter>,
 }
 
 impl ApplicationState {
@@ -41,6 +89,7 @@ impl ApplicationState {
                 share_session_store,
             )) => {
                 let engine = Arc::new(engine);
+                let trial_reverter = TrialReverter::spawn(engine.clone());
                 let hot_corner_presenter =
                     Arc::new(crate::hot_corner::HotCornerPresenter::default());
                 let mode_ribbon = match crate::windows::ModeRibbonController::spawn() {
@@ -77,6 +126,7 @@ impl ApplicationState {
                         initialization_error: None,
                         _instance_guard: Some(instance_guard),
                         profile_watcher: Some(watcher),
+                        _trial_reverter: Some(trial_reverter),
                     },
                     Err(error) => Self {
                         // 監視開始失敗時も store は残し、自動適用の無効化・削除だけは許可する。
@@ -92,6 +142,7 @@ impl ApplicationState {
                         initialization_error: Some(error),
                         _instance_guard: Some(instance_guard),
                         profile_watcher: None,
+                        _trial_reverter: Some(trial_reverter),
                     },
                 }
             }
@@ -107,6 +158,7 @@ impl ApplicationState {
                 initialization_error: Some(error),
                 _instance_guard: None,
                 profile_watcher: None,
+                _trial_reverter: None,
             },
         }
     }

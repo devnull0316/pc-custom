@@ -472,6 +472,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::AppearanceTransparency => {
             ActionParameters::AppearanceTransparency { enabled: true }
         }
+        ActionId::AppearanceHighContrastTrial => ActionParameters::AppearanceHighContrastTrial {},
         ActionId::TaskbarTaskView => ActionParameters::TaskbarTaskView { show: true },
         ActionId::TaskbarWidgets => ActionParameters::TaskbarWidgets { show: true },
         ActionId::ExplorerItemCheckboxes => ActionParameters::ExplorerItemCheckboxes { show: true },
@@ -640,6 +641,7 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::ExplorerCompactView => "explorer",
         ActionId::ThemeColorMode
         | ActionId::AppearanceTransparency
+        | ActionId::AppearanceHighContrastTrial
         | ActionId::TaskbarTaskView
         | ActionId::TaskbarWidgets
         | ActionId::TaskbarSearchMode
@@ -727,6 +729,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
         ActionId::ExplorerClockSeconds => "タスクバーの時計で秒まで確認したい人向け",
         ActionId::AppearanceTransparency => "透明効果のオン・オフを切り替えたい人向け",
+        ActionId::AppearanceHighContrastTrial => {
+            "Windowsの色と文字の組み合わせを30秒だけ試したい人向け"
+        }
         ActionId::TaskbarTaskView => "タスクビューボタンの表示を切り替えたい人向け",
         ActionId::TaskbarWidgets => "ウィジェットボタンの表示を切り替えたい人向け",
         ActionId::ExplorerItemCheckboxes => "チェックボックスでの複数選択を切り替えたい人向け",
@@ -827,6 +832,9 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::ExplorerShowHidden => "隠しファイルを表示",
         ActionId::ExplorerClockSeconds => "タスクバーの時計に秒を表示",
         ActionId::AppearanceTransparency => "選択した透明効果の状態",
+        ActionId::AppearanceHighContrastTrial => {
+            "見え方を30秒だけ切り替え、開始前の値へ戻す（既に有効なら出番なし）"
+        }
         ActionId::TaskbarTaskView => "選択したタスクビューボタンの表示",
         ActionId::TaskbarWidgets => "選択したウィジェットボタンの表示",
         ActionId::ExplorerItemCheckboxes => "選択した項目チェックボックスの表示",
@@ -939,6 +947,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::InputShiftInterruptionGuard => {
             "Windowsが公開している入力設定の機能で、確認画面を開く動作だけを一時停止"
         }
+        ActionId::AppearanceHighContrastTrial => {
+            "SystemParametersInfoWで全フラグとschemeを保存し、30秒後に同じ値へ復元"
+        }
         ActionId::AudioCommsMicMute => {
             "Windowsが公開している音声設定で、既定の通話用入力1台のミュート設定だけを変更"
         }
@@ -1030,6 +1041,13 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             ThemeObservation::Mixed => "アプリとシステムで明暗が混在".to_owned(),
             ThemeObservation::Unconfigured => "値は未設定".to_owned(),
         },
+        ObservedValue::HighContrast { enabled, .. } => {
+            if *enabled {
+                "既にコントラストテーマを使用中（この試用は出番なし）".to_owned()
+            } else {
+                "コントラストテーマは使用していません".to_owned()
+            }
+        }
         ObservedValue::SleepLease {
             owned,
             owner_count,
@@ -1252,6 +1270,10 @@ fn observed_detail(value: &ObservedValue) -> String {
         }
         ObservedValue::Theme(_) => {
             "アプリとシステムの2値を別々に確認しています。".to_owned()
+        }
+        ObservedValue::HighContrast { .. } => {
+            "Windows公開APIから構造体サイズ・全フラグ・schemeを読み、開始前の値として保存します。"
+                .to_owned()
         }
         ObservedValue::SleepLease { .. } => {
             "Windows全体ではなく、PCカスタムが所有するleaseだけを表示します。".to_owned()
@@ -2182,7 +2204,7 @@ mod count_report {
             guided_settings,
             one_way
         );
-        assert_eq!(total, 72, "総数が変わったら README も直すこと");
+        assert_eq!(total, 73, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"

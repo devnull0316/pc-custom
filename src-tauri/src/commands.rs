@@ -425,7 +425,7 @@ pub fn pick_game_executable() -> CoreResult<Option<String>> {
     })
 }
 
-/// 試用として適用する。`holdSeconds` 以内に確定されなければ、次の起動で元へ戻る。
+/// 試用として適用する。`holdSeconds` 以内に確定されなければ、期限監視か次回起動で戻る。
 #[tauri::command]
 pub fn commit_preview_as_trial(
     state: State<'_, ApplicationState>,
@@ -446,4 +446,10 @@ pub fn confirm_trial(
     let parsed = uuid::Uuid::parse_str(&transaction_id)
         .map_err(|_| CoreError::invalid_request("指定された変更のまとまりが見つかりません。"))?;
     state.engine()?.confirm_trial(parsed)
+}
+
+/// 期限を過ぎた試用を、保存済み journal と登録済み Action の復元経路で戻す。
+#[tauri::command]
+pub fn revert_expired_trials(state: State<'_, ApplicationState>) -> CoreResult<u32> {
+    state.engine()?.revert_expired_trials()
 }

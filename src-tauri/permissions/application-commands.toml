@@ -11,6 +11,7 @@ commands.allow = [
   "commit_preview",
   "commit_preview_as_trial",
   "confirm_trial",
+  "revert_expired_trials",
   "list_timeline",
   "build_health_report",
   "taskbar_auto_hide_state",

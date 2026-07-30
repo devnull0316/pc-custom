@@ -119,6 +119,7 @@ impl PcCustomEngine {
     pub fn revert_expired_trials(&self) -> CoreResult<u32> {
         let expired = self.journal.expired_trials(now_ms())?;
         let mut reverted = 0u32;
+        let mut unresolved = false;
         for transaction_id in expired {
             let items = self.journal.list_timeline(200)?;
             let mut all_ok = true;
@@ -127,10 +128,15 @@ impl PcCustomEngine {
                 .filter(|item| item.transaction_id == transaction_id)
             {
                 if !item.rollback_available {
+                    if item.status != "rolled_back" {
+                        all_ok = false;
+                        unresolved = true;
+                    }
                     continue;
                 }
                 if self.rollback_item(item.item_id).is_err() {
                     all_ok = false;
+                    unresolved = true;
                 } else {
                     reverted += 1;
                 }
@@ -138,6 +144,11 @@ impl PcCustomEngine {
             if all_ok {
                 self.journal.clear_trial(transaction_id)?;
             }
+        }
+        if unresolved {
+            return Err(CoreError::recovery_required(
+                "期限が切れた試用を自動で復元できない項目があります。履歴の復旧案内を確認してください。",
+            ));
         }
         Ok(reverted)
     }

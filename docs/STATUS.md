@@ -1904,3 +1904,59 @@ restored background=#FFFFFF foreground=#000000  ratio=18.427  spi_flags=126
 **この機能が約束できるのは「見え方が変わる」と「正確に戻る」まで。**
 読みやすくなるかは本人にしか分からない。研究文書にもそう書いてある。
 
+## コントラストテーマ30秒試用を出荷可能にした（2026-07-30）
+
+- `appearance.high_contrast_trial` を登録した。登録 Action は **73件**、
+  変更できる Action は **18件**。
+- 製品側も `SystemParametersInfoW` だけを使い、`HIGHCONTRASTW` の構造体サイズ、
+  全 flags、scheme の NULL / 空文字 / 文字列を区別して durable backup に保存する。
+  適用後は Windows の scheme 正規化が落ち着いてから実状態の fingerprint を記録する。
+- 復元時は現在の全フィールドが自分の適用 fingerprint と一致する場合だけ開始前の
+  snapshot を書く。違えば `ExternalConflict` とし、復元後の全フィールドが一致しなければ
+  `RecoveryRequired` とする。
+- 開始時点で既に有効なら書かず、画面に「出番なし」と出す。無効かつ scheme が
+  NULL / 空文字の場合は、過去の実測で exact rollback できなかったため一度も書かない。
+- 30秒の期限は既存の preview → commit → journal に保存する。ネイティブ側が500ms間隔で
+  期限切れ journal を復元し、画面側も期限到達時に同じ固定コマンドを呼ぶ。
+  この Action を含む trial はコア側でも確定保存を拒否する。
+- 出荷文言と静的カタログの両方に、未測定の効果を表す7語の禁止語テストを置いた。
+- 既存計器は判定内容を変えていない。復元直後のテーマ遷移中に青いボタン面を拾うことが
+  2回続いたため、適用側と同じ1.5秒の安定待ちだけを復元側にも置いた。最終実測:
+
+```text
+EVIDENCE: contrast_trial measured=true reason=separate_process_pixels_changed_and_restored
+before  background=#FFFFFF foreground=#000000 contrast_ratio=18.427
+applied background=#202020 foreground=#FFFFFF contrast_ratio=16.293
+restored background=#FFFFFF foreground=#000000 contrast_ratio=18.427
+spi flags=126 -> 127 -> 126
+scheme=Some("ハイコントラスト 黒") -> Some("ハイコントラスト 黒") -> Some("ハイコントラスト 黒")
+```
+
+完了コマンド:
+
+```text
+cargo test --lib -- --test-threads=1
+test result: ok. 344 passed; 0 failed; 69 ignored; 0 measured; 0 filtered out
+
+cargo test --lib request_round_trip -- --test-threads=1
+test result: ok. 2 passed; 0 failed
+
+cargo test --lib category_contract -- --test-threads=1
+test result: ok. 1 passed; 0 failed
+
+cargo test --lib count_report -- --nocapture --test-threads=1
+総数=73 変更できる(persistent+session)=18 確認のみ=9 表示専用=39 設定案内=6 一方向=1
+
+cargo test --lib high_contrast_changes_separate_process_pixels_and_restores -- --ignored --nocapture --test-threads=1
+test result: ok. 1 passed; 0 failed
+
+cargo clippy --all-targets -- -D warnings
+Finished dev profile
+
+cargo fmt --check
+exit code 0
+
+npm run build
+✓ 63 modules transformed
+✓ built（CSS構文警告0件）
+```

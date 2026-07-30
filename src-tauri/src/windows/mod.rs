@@ -8,6 +8,7 @@ mod desktop_icons;
 mod execution_state;
 // 実行ファイルを手で打たせない。Windows自身の選択画面を開く。
 mod file_picker;
+mod high_contrast;
 mod mode_ribbon;
 mod observations;
 // オーバーレイをタスクバーの上へ置き続けるための、位置と状況の読み取り。
@@ -51,6 +52,9 @@ pub use audio::{
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};
 pub use file_picker::pick_executable;
+pub use high_contrast::{
+    read_high_contrast, replace_high_contrast, HighContrastScheme, HighContrastSnapshot,
+};
 pub use mode_ribbon::{
     mode_ribbon_rect, ActiveModeRibbon, ModeRibbonController, ModeRibbonRect, MODE_RIBBON_THICKNESS,
 };

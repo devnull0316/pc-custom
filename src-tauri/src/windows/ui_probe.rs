@@ -4643,6 +4643,9 @@ mod tests {
                 panic!("high-contrast state could not be restored safely");
             }
         };
+        // 有効化側と同じく、Windows のテーマ遷移が落ち着いてから別プロセスを描く。
+        // 判定値は緩めず、遷移中の一時色を復元後の色として採らないための待機だけを置く。
+        sleep(Duration::from_millis(1_500));
         drop(before_window);
 
         let restored_window = match ContrastProbeProcess::start() {

@@ -156,6 +156,7 @@ pub enum BackupPayload {
     PointerFeel(PointerFeelBackup),
     CommsMicMute(CommsMicMuteBackup),
     DefaultPrinter(DefaultPrinterBackup),
+    HighContrast(HighContrastBackup),
 }
 
 /// ポインターの動き方の変更前状態。
@@ -187,6 +188,17 @@ pub struct CommsMicMuteBackup {
 pub struct DefaultPrinterBackup {
     pub original: crate::windows::PrinterName,
     pub intended: crate::windows::PrinterName,
+}
+
+/// `HIGHCONTRASTW` の開始前状態と、Windowsへ要求する適用状態。
+///
+/// 実際の適用値は Windows が scheme 名を正規化することがあるため、
+/// `BackupEnvelope::applied_fingerprint` に読み直した状態を別途記録する。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HighContrastBackup {
+    pub original: crate::windows::HighContrastSnapshot,
+    pub intended: crate::windows::HighContrastSnapshot,
 }
 
 /// 電源モードの変更前状態。

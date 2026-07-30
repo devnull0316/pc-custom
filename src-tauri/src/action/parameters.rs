@@ -167,6 +167,8 @@ pub enum ActionParameters {
     ExplorerClockSeconds { show: bool },
     #[serde(rename = "appearance.transparency")]
     AppearanceTransparency { enabled: bool },
+    #[serde(rename = "appearance.high_contrast_trial")]
+    AppearanceHighContrastTrial {},
     #[serde(rename = "taskbar.task_view")]
     TaskbarTaskView { show: bool },
     #[serde(rename = "taskbar.widgets")]
@@ -304,6 +306,7 @@ impl ActionParameters {
             Self::ExplorerShowHidden { .. } => ActionId::ExplorerShowHidden,
             Self::ExplorerClockSeconds { .. } => ActionId::ExplorerClockSeconds,
             Self::AppearanceTransparency { .. } => ActionId::AppearanceTransparency,
+            Self::AppearanceHighContrastTrial { .. } => ActionId::AppearanceHighContrastTrial,
             Self::TaskbarTaskView { .. } => ActionId::TaskbarTaskView,
             Self::TaskbarWidgets { .. } => ActionId::TaskbarWidgets,
             Self::ExplorerItemCheckboxes { .. } => ActionId::ExplorerItemCheckboxes,

@@ -63,6 +63,7 @@ pub fn run() {
             commands::commit_preview,
             commands::commit_preview_as_trial,
             commands::confirm_trial,
+            commands::revert_expired_trials,
             commands::list_timeline,
             commands::build_health_report,
             commands::taskbar_auto_hide_state,

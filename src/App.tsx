@@ -13,6 +13,7 @@ import {
   publicErrorCode,
   publicErrorMessage,
   reconcileNow,
+  revertExpiredTrials,
   restoreProfileNow,
   rollbackItem,
   runProfileNow,
@@ -83,6 +84,7 @@ function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "explorer.show_hidden") return { show: true };
   if (actionId === "explorer.clock_seconds") return { show: true };
   if (actionId === "appearance.transparency") return { enabled: true };
+  if (actionId === "appearance.high_contrast_trial") return {};
   if (actionId === "taskbar.task_view") return { show: true };
   if (actionId === "taskbar.widgets") return { show: true };
   if (actionId === "explorer.item_checkboxes") return { show: true };
@@ -178,8 +180,8 @@ export function App() {
   // 以前は適用後にタイムラインへ強制移動しており、戻すのに画面移動と項目探しが必要だった。
   const [justApplied, setJustApplied] = useState<CommitItem[]>([]);
   const [undoPending, setUndoPending] = useState(false);
-  // 試用中の変更。残り時間が0になる前に「保存する」を押さなければ、次の起動で元へ戻る。
-  const [trial, setTrial] = useState<{ transactionId: string; endsAt: number } | null>(null);
+  // 試用中の変更。期限は journal とネイティブ監視が持ち、画面は残り時間だけを表示する。
+  const [trial, setTrial] = useState<{ transactionId: string; endsAt: number; saveable: boolean } | null>(null);
   const [trialLeft, setTrialLeft] = useState(0);
   const initialLoadStarted = useRef(false);
 
@@ -361,6 +363,9 @@ export function App() {
       // 見た目に関わる変更は、説明を読んでも良し悪しが判断できない。
       // 実際に適用した状態を見てから決められるよう、既定を試用にする。
       const HOLD_SECONDS = 30;
+      const saveable = !preview.changes.some(
+        (change) => change.actionId === "appearance.high_contrast_trial",
+      );
       const result = await commitPreviewAsTrial(
         { previewToken: preview.previewToken },
         HOLD_SECONDS,
@@ -369,7 +374,11 @@ export function App() {
         setNotice(commitNotice(result.message, result.details));
         // 戻す手段をその場に置く。画面は動かさない。
         setJustApplied(result.items ?? []);
-        setTrial({ transactionId: result.transactionId, endsAt: Date.now() + HOLD_SECONDS * 1000 });
+        setTrial({
+          transactionId: result.transactionId,
+          endsAt: Date.now() + HOLD_SECONDS * 1000,
+          saveable,
+        });
         setTrialLeft(HOLD_SECONDS);
       } else {
         setUiError({ message: result.message, code: result.status.toLocaleUpperCase("en-US") });
@@ -397,6 +406,27 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [trial]);
 
+  useEffect(() => {
+    if (trial === null || trialLeft !== 0) return;
+    let cancelled = false;
+    void revertExpiredTrials()
+      .then(async () => {
+        if (cancelled) return;
+        setTrial(null);
+        setJustApplied([]);
+        setNotice("試用時間が終わったため、開始前の値へ戻しました。");
+        await refreshSnapshot(false);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshSnapshot, trial, trialLeft]);
+
   async function undoJustApplied() {
     if (justApplied.length === 0) return;
     setUndoPending(true);
@@ -411,6 +441,7 @@ export function App() {
       }
       setNotice("元へ戻しました。");
       setJustApplied([]);
+      setTrial(null);
       await refreshSnapshot(false);
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -660,10 +691,14 @@ export function App() {
         <div aria-live="polite" className="undo-bar">
           <Icon name="check" size={16} />
           <span>
-            {trial === null ? "適用しました" : `試しに適用しています（保存しなければ元に戻ります・残り${trialLeft}秒）`}
+            {trial === null
+              ? "適用しました"
+              : trial.saveable
+                ? `試しに適用しています（保存しなければ元に戻ります・残り${trialLeft}秒）`
+                : `見え方を試しています（自動的に元へ戻ります・残り${trialLeft}秒）`}
             <strong>{justApplied.map((item) => item.name).join("、")}</strong>
           </span>
-          {trial === null ? null : (
+          {trial === null || !trial.saveable ? null : (
             <button className="primary-button" onClick={() => void keepTrial()} type="button">
               <Icon name="check" />この変更を保存する
             </button>

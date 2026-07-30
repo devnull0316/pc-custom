@@ -30,6 +30,8 @@ pub enum ActionId {
     ExplorerClockSeconds,
     #[serde(rename = "appearance.transparency")]
     AppearanceTransparency,
+    #[serde(rename = "appearance.high_contrast_trial")]
+    AppearanceHighContrastTrial,
     #[serde(rename = "taskbar.task_view")]
     TaskbarTaskView,
     #[serde(rename = "taskbar.widgets")]
@@ -153,7 +155,7 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 72] = [
+    pub const ALL: [Self; 73] = [
         Self::SessionPreventSleep,
         Self::SessionDefaultPrinter,
         Self::InputShiftInterruptionGuard,
@@ -166,6 +168,7 @@ impl ActionId {
         Self::ExplorerShowHidden,
         Self::ExplorerClockSeconds,
         Self::AppearanceTransparency,
+        Self::AppearanceHighContrastTrial,
         Self::TaskbarTaskView,
         Self::TaskbarWidgets,
         Self::ExplorerItemCheckboxes,
@@ -242,6 +245,7 @@ impl ActionId {
             Self::ExplorerShowHidden => "explorer.show_hidden",
             Self::ExplorerClockSeconds => "explorer.clock_seconds",
             Self::AppearanceTransparency => "appearance.transparency",
+            Self::AppearanceHighContrastTrial => "appearance.high_contrast_trial",
             Self::TaskbarTaskView => "taskbar.task_view",
             Self::TaskbarWidgets => "taskbar.widgets",
             Self::ExplorerItemCheckboxes => "explorer.item_checkboxes",
@@ -340,6 +344,7 @@ impl FromStr for ActionId {
             "explorer.show_hidden" => Ok(Self::ExplorerShowHidden),
             "explorer.clock_seconds" => Ok(Self::ExplorerClockSeconds),
             "appearance.transparency" => Ok(Self::AppearanceTransparency),
+            "appearance.high_contrast_trial" => Ok(Self::AppearanceHighContrastTrial),
             "taskbar.task_view" => Ok(Self::TaskbarTaskView),
             "taskbar.widgets" => Ok(Self::TaskbarWidgets),
             "explorer.item_checkboxes" => Ok(Self::ExplorerItemCheckboxes),

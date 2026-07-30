@@ -3,7 +3,7 @@ use crate::journal::{PreparedItem, TransactionState};
 
 impl PcCustomEngine {
     /// 試用として適用する。`hold_seconds` 以内に `confirm_trial` が来なければ、
-    /// 次の起動時に自動で元へ戻す。
+    /// 期限監視で自動的に元へ戻す。期限中にアプリが止まった場合も、次の起動時に戻す。
     ///
     /// 見た目に関わる設定は、説明を読んでも良し悪しが判断できない。
     /// 実際に適用した状態を見てから決められるようにするための経路。
@@ -26,6 +26,14 @@ impl PcCustomEngine {
 
     /// 利用者が「保存する」を押した。以後この変更は自動で戻さない。
     pub fn confirm_trial(&self, transaction_id: Uuid) -> CoreResult<bool> {
+        if self
+            .journal
+            .transaction_contains_action(transaction_id, ActionId::AppearanceHighContrastTrial)?
+        {
+            return Err(CoreError::invalid_request(
+                "コントラストテーマの試用は保存できません。時間切れか「元に戻す」で開始前の値へ戻します。",
+            ));
+        }
         self.journal.confirm_trial(transaction_id, now_ms())
     }
 

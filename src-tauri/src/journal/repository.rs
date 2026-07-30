@@ -529,6 +529,22 @@ impl JournalDatabase {
         })
     }
 
+    pub fn transaction_contains_action(
+        &self,
+        transaction_id: Uuid,
+        action_id: crate::action::ActionId,
+    ) -> CoreResult<bool> {
+        self.with_connection(|database| {
+            let count: i64 = database.query_row(
+                "SELECT COUNT(*) FROM transaction_items
+                 WHERE transaction_id = ?1 AND action_id = ?2",
+                rusqlite::params![transaction_id.to_string(), action_id.as_str()],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        })
+    }
+
     /// 期限を過ぎても確定されていない試用。起動時にこれを元へ戻す。
     pub fn expired_trials(&self, now_unix_ms: u64) -> CoreResult<Vec<Uuid>> {
         self.with_connection(|database| {
@@ -877,6 +893,7 @@ fn primitive_name(payload: &BackupPayload) -> &'static str {
         BackupPayload::WindowLayout(_) => "window_layout",
         BackupPayload::ShiftInterruptionGuard(_) => "shift_interruption_guard",
         BackupPayload::DefaultPrinter(_) => "default_printer",
+        BackupPayload::HighContrast(_) => "high_contrast",
     }
 }
 
