@@ -237,6 +237,9 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
   // 既定を1つ決め打ちにすると「選ぶ」と書いてあるのに選べない画面になる。
   const [powerMode, setPowerMode] = useState("balanced");
   const picksPowerMode = action.id === "power.mode_switch";
+  const picksDefaultPrinter = action.id === "session.default_printer";
+  const [printerScene, setPrinterScene] = useState("");
+  const [selectedPrinter, setSelectedPrinter] = useState("");
   const current = action.currentState;
   const readOnly = action.availability === "read_only" || action.availability === "detect_only";
   const needsBinding = action.id === "games.process_watch";
@@ -246,6 +249,11 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
     && (action.kind === "persistent" || action.kind === "session");
   const observationLike = action.kind === "observation" || action.kind === "guided";
   const guidedCandidate = action.kind === "guided" && action.methodClass === "unverified_storage";
+  const printerOptions = picksDefaultPrinter && current?.kind === "known"
+    ? (current.items ?? []).slice(1)
+    : [];
+  const printerSelectionReady = !picksDefaultPrinter
+    || (printerScene.trim().length > 0 && selectedPrinter.length > 0 && printerOptions.includes(selectedPrinter));
 
   return (
     <div className="action-detail__inner">
@@ -281,6 +289,42 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           </div>
           {/* この PC が受け付けない値がある。押す前には分からないので、そう書いておく。 */}
           <small>選べない値があるPCもあります。その場合は何も変更せずにお知らせします。</small>
+        </div>
+      )}
+      {!picksDefaultPrinter ? null : (
+        <div aria-label="場面と既定プリンターを選ぶ" className="printer-choice">
+          <label>
+            <span>場面の名前</span>
+            <input
+              autoComplete="off"
+              maxLength={64}
+              onChange={(event) => setPrinterScene(event.target.value)}
+              placeholder="例: 自宅、職場、ラベル印刷"
+              type="text"
+              value={printerScene}
+            />
+          </label>
+          <label>
+            <span>今回だけ既定にするプリンター</span>
+            <select
+              disabled={printerOptions.length === 0}
+              onChange={(event) => setSelectedPrinter(event.target.value)}
+              value={selectedPrinter}
+            >
+              <option value="">選択してください</option>
+              {printerOptions.map((printer) => <option key={printer} value={printer}>{printer}</option>)}
+            </select>
+          </label>
+          {current?.kind === "policy_managed" ? (
+            <small>Windowsの「通常使うプリンターをWindowsで管理する」が有効なため、変更しません。</small>
+          ) : printerOptions.length === 0 ? (
+            <small>別のインストール済みプリンターがありません。状態を再確認してください。</small>
+          ) : (
+            <small>場所は自動推測しません。プリンターの追加や印刷も行いません。</small>
+          )}
+          <button className="secondary-button" disabled={dataMode !== "live" || detecting} onClick={onDetect} type="button">
+            {detecting ? <Icon className="spin" name="spinner" /> : <Icon name="search" />}候補を再確認
+          </button>
         </div>
       )}
       <div aria-label="現在と適用後の状態" className="state-comparison">
@@ -337,7 +381,21 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         {readOnly ? (
           <button className="primary-button" disabled={dataMode !== "live" || detecting || needsBinding} onClick={onDetect} type="button">{detecting ? <Icon className="spin" name="spinner" /> : <Icon name={needsBinding ? "info" : "search"} />}{needsBinding ? "実行ファイル登録後に確認" : "状態を確認"}</button>
         ) : (
-          <button className="primary-button" disabled={!mutationAllowed || previewing} onClick={() => onPreview(picksPowerMode ? { mode: powerMode } : undefined)} type="button">{previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}{previewing ? "プレビュー作成中" : "適用プレビュー"}</button>
+          <button
+            className="primary-button"
+            disabled={!mutationAllowed || previewing || !printerSelectionReady}
+            onClick={() => onPreview(
+              picksPowerMode
+                ? { mode: powerMode }
+                : picksDefaultPrinter
+                  ? { scene: printerScene.trim(), printer: selectedPrinter }
+                  : undefined,
+            )}
+            type="button"
+          >
+            {previewing ? <Icon className="spin" name="spinner" /> : <Icon name="arrow" />}
+            {previewing ? "プレビュー作成中" : "適用プレビュー"}
+          </button>
         )}
         {/* 「自動適用の対象外」は永久に押せないボタンだった。押せないものはボタンではなく状態なので、
             文で書く。押せる可能性があるときだけボタンを出す。 */}

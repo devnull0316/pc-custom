@@ -865,6 +865,16 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .mode-choice > span { color: var(--text-secondary); font-size: var(--fs-sm); }
 .mode-choice small { color: var(--text-tertiary); font-size: var(--fs-xs); }
 
+.printer-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 10px 12px; align-items: end; margin: 14px 0; padding: 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-muted); }
+.printer-choice label { display: grid; gap: 5px; min-width: 0; }
+.printer-choice label span { color: var(--text-secondary); font-size: var(--fs-sm); }
+.printer-choice input, .printer-choice select { width: 100%; min-width: 0; padding: 8px 10px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-control);
+  background: var(--surface-solid); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.printer-choice small { grid-column: 1 / -1; color: var(--text-tertiary); font-size: var(--fs-xs); }
+
 /* 最大化中だけタスクバーを隠す。設定が1つだけなので、項目一覧の外に静かに置く。 */
 .taskbar-autohide-panel { display: grid; gap: 10px; padding: 13px; margin-bottom: 16px;
   border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }

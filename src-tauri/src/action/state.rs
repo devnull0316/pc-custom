@@ -161,6 +161,20 @@ pub struct AudioOutputObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct InstalledPrinterObservation {
+    pub name: crate::windows::PrinterName,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultPrinterObservation {
+    pub windows_managed: bool,
+    pub printers: Vec<InstalledPrinterObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GameReadinessObservation {
     pub refresh_rate: ReadinessComponent<PrimaryRefreshRateObservation>,
     pub advanced_color: ReadinessComponent<AdvancedColorObservation>,
@@ -284,6 +298,7 @@ pub enum ObservedValue {
     PowerToysInstallation(PowerToysInstallationObservation),
     WindowsUpdateStatus(WindowsUpdateStatusObservation),
     AudioOutput(AudioOutputObservation),
+    DefaultPrinter(DefaultPrinterObservation),
     WindowLayout(WindowLayoutObservation),
     AccentColor {
         hex: String,

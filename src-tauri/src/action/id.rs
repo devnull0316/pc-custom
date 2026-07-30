@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub enum ActionId {
     #[serde(rename = "session.prevent_sleep")]
     SessionPreventSleep,
+    #[serde(rename = "session.default_printer")]
+    SessionDefaultPrinter,
     #[serde(rename = "input.shift_interruption_guard")]
     InputShiftInterruptionGuard,
     #[serde(rename = "power.active_scheme_check")]
@@ -151,8 +153,9 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 71] = [
+    pub const ALL: [Self; 72] = [
         Self::SessionPreventSleep,
+        Self::SessionDefaultPrinter,
         Self::InputShiftInterruptionGuard,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
@@ -228,6 +231,7 @@ impl ActionId {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SessionPreventSleep => "session.prevent_sleep",
+            Self::SessionDefaultPrinter => "session.default_printer",
             Self::InputShiftInterruptionGuard => "input.shift_interruption_guard",
             Self::PowerActiveSchemeCheck => "power.active_scheme_check",
             Self::PowerActiveSchemeSwitch => "power.active_scheme_switch",
@@ -325,6 +329,7 @@ impl FromStr for ActionId {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "session.prevent_sleep" => Ok(Self::SessionPreventSleep),
+            "session.default_printer" => Ok(Self::SessionDefaultPrinter),
             "input.shift_interruption_guard" => Ok(Self::InputShiftInterruptionGuard),
             "power.active_scheme_check" => Ok(Self::PowerActiveSchemeCheck),
             "power.active_scheme_switch" => Ok(Self::PowerActiveSchemeSwitch),

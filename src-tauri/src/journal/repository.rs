@@ -876,6 +876,7 @@ fn primitive_name(payload: &BackupPayload) -> &'static str {
         BackupPayload::CommsMicMute(_) => "comms_mic_mute",
         BackupPayload::WindowLayout(_) => "window_layout",
         BackupPayload::ShiftInterruptionGuard(_) => "shift_interruption_guard",
+        BackupPayload::DefaultPrinter(_) => "default_printer",
     }
 }
 

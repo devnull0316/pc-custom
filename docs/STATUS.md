@@ -1688,3 +1688,56 @@ npm run build
 ✓ 63 modules transformed
 ✓ built（CSS構文警告0件）
 ```
+
+## 場面ごとの既定プリンター（2026-07-30）
+
+- `session.default_printer` を session Action として追加した。登録 Action は **72件**、
+  変更できる Action は **17件**。場面名と、`EnumPrintersW` で列挙した
+  インストール済みプリンターを利用者が明示的に選ぶ。GPS・ネットワークによる
+  場所推測、プリンター／ドライバー追加、印刷設定の一括変更、印刷は行わない。
+- `GetDefaultPrinterW` で開始前の正確な名前を durable backup に保存し、
+  `SetDefaultPrinterW` 後に再読する。終了時は現在値が適用値のままで、元の名前が
+  まだ列挙できる場合だけ元へ戻す。途中の外部変更は `ExternalConflict`、
+  元のプリンター消失は `RecoveryRequired` として上書きしない。
+- Windows の「通常使うプリンターをWindowsで管理する」が有効な場合は、
+  その設定を変更せず `PolicyManaged` として画面に理由を出す。
+- プリンター名と場面名は `Debug` で常に redaction する。画面と durable backup
+  以外の診断文へ入れず、実機 `EVIDENCE:` も同一／別の判定と件数だけを出す。
+- 実機テストの適用後／復元後 readback は、別テストプロセスの
+  `PRINTDLGEXW + PD_RETURNDEFAULT` を使う。印刷ジョブは作らない。
+
+実機 ignored test:
+
+```text
+EVIDENCE: default_printer current_present=true installed_count=1 windows_managed=true
+EVIDENCE: default_printer measured=false reason=windows_manages_default no_change=true
+```
+
+この実機は Windows 自動管理が有効だったため、タスク指定どおりそこで測定不能として
+終了し、既定値を変更していない。
+
+完了コマンド:
+
+```text
+cargo test --lib -- --test-threads=1
+test result: ok. 340 passed; 0 failed; 67 ignored; 0 measured; 0 filtered out
+
+cargo test --lib request_round_trip -- --test-threads=1
+test result: ok. 2 passed; 0 failed
+
+cargo test --lib category_contract -- --test-threads=1
+test result: ok. 1 passed; 0 failed
+
+cargo test --lib count_report -- --nocapture --test-threads=1
+総数=72 変更できる(persistent+session)=17 確認のみ=9 表示専用=39 設定案内=6
+
+cargo clippy --all-targets -- -D warnings
+Finished dev profile
+
+cargo fmt --check
+exit code 0
+
+npm run build
+✓ 63 modules transformed
+✓ built（CSS構文警告0件）
+```

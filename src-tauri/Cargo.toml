@@ -44,6 +44,7 @@ windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
+  "Win32_Graphics_Printing",
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",
   "Win32_Security",
@@ -64,6 +65,8 @@ windows = { version = "0.58", features = [
   "Win32_UI_Shell_Common",
   "Win32_UI_Shell_PropertiesSystem",
   "Win32_UI_Accessibility",
+  "Win32_UI_Controls",
+  "Win32_UI_Controls_Dialogs",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

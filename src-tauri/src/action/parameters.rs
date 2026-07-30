@@ -1,6 +1,9 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::window_layout::WindowLayoutInvocation;
+use crate::windows::PrinterName;
 
 use super::{ActionId, WindowColorPreset};
 
@@ -101,6 +104,35 @@ pub struct ProcessBindingParameters {
     pub file_identity: ProcessFileIdentity,
 }
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SceneLabel(String);
+
+impl SceneLabel {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    pub(crate) fn unselected() -> Self {
+        Self(String::new())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_valid(&self) -> bool {
+        let length = self.0.chars().count();
+        (1..=64).contains(&length) && !self.0.contains('\0')
+    }
+}
+
+impl fmt::Debug for SceneLabel {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SceneLabel([REDACTED])")
+    }
+}
+
 /// The tagged enum prevents an Action ID from being paired with another Action's parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action_id", content = "parameters", deny_unknown_fields)]
@@ -109,6 +141,11 @@ pub enum ActionParameters {
     SessionPreventSleep {
         #[serde(default)]
         keep_display_on: bool,
+    },
+    #[serde(rename = "session.default_printer")]
+    SessionDefaultPrinter {
+        scene: SceneLabel,
+        printer: PrinterName,
     },
     #[serde(rename = "input.shift_interruption_guard")]
     InputShiftInterruptionGuard {},
@@ -256,6 +293,7 @@ impl ActionParameters {
     pub const fn action_id(&self) -> ActionId {
         match self {
             Self::SessionPreventSleep { .. } => ActionId::SessionPreventSleep,
+            Self::SessionDefaultPrinter { .. } => ActionId::SessionDefaultPrinter,
             Self::InputShiftInterruptionGuard { .. } => ActionId::InputShiftInterruptionGuard,
             Self::PowerActiveSchemeCheck { .. } => ActionId::PowerActiveSchemeCheck,
             Self::PowerActiveSchemeSwitch { .. } => ActionId::PowerActiveSchemeSwitch,

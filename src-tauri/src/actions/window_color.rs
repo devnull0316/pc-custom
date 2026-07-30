@@ -19,9 +19,10 @@ use crate::{
         ValidationReport, Verification, WindowColorPreset, WindowsReleaseFamily,
     },
     backup::{
-        prepare_registry_backup, read_registry_state, restore_registry_backup,
-        verify_registry_backup_restored, BackupDraft, BackupEnvelope, BackupPayload,
-        CompositeBackup, Fingerprint, RegistryBackup, RegistryRestoreOutcome, RegistryTarget,
+        classify_registry_backup, prepare_registry_backup, read_registry_state,
+        restore_registry_backup, verify_registry_backup_restored, BackupDraft, BackupEnvelope,
+        BackupPayload, CompositeBackup, Fingerprint, RegistryBackup, RegistryClassification,
+        RegistryRestoreOutcome, RegistryTarget,
     },
     windows::{notify_theme_changed, system_accent_color, write_raw_value},
 };
@@ -354,6 +355,34 @@ impl Action for WindowColorAction {
         validate_base(&METADATA, context, parameters, false, ActionStage::Rollback)?;
         validate_backup(&METADATA, context, envelope, ActionStage::Rollback)?;
         let composite = Self::composite(envelope, ActionStage::Rollback)?;
+
+        // **1バイトも書く前に、全部の値を先に見る。**
+        //
+        // 以前はここで書きながら判定していた。2つ目が第三者に変えられていると、
+        // 1つ目だけ元に戻したところでエラーを返し、**半分だけ戻った状態が残った。**
+        // 戻せると言っている機能が、途中で止まって混ざった状態を作るのが一番悪い。
+        //
+        // 同じ形の `color_mode` は最初からこうしている。片方だけ違っていた。
+        let mut classifications = Vec::with_capacity(composite.registry_entries.len());
+        for entry in &composite.registry_entries {
+            classifications.push(classify_registry_backup(entry).map_err(|error| {
+                map_windows_error(
+                    ActionStage::Rollback,
+                    "action.window_color.rollback_preflight_failed",
+                    error,
+                )
+            })?);
+        }
+        if classifications.contains(&RegistryClassification::Third) {
+            // 1つでも第三者の値なら、**何も書かずに**止める。
+            return Err(ActionError::new(
+                crate::action::ActionErrorCode::ExternalConflict,
+                ActionStage::Rollback,
+                false,
+                "action.rollback.external_change_detected",
+            ));
+        }
+
         for entry in composite.registry_entries.iter().rev() {
             match restore_registry_backup(entry).map_err(|error| {
                 map_windows_error(

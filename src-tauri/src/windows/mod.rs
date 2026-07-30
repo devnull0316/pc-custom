@@ -16,6 +16,7 @@ mod pointer_feel;
 mod power;
 mod power_mode;
 mod powertoys;
+mod printer;
 mod process;
 mod readiness;
 mod registry;
@@ -68,6 +69,12 @@ pub use overlay_anchor::{
 };
 pub use power::{active_power_scheme, active_power_scheme_guid, set_active_power_scheme};
 pub use powertoys::read_powertoys_installation;
+#[cfg(all(test, windows))]
+pub(crate) use printer::read_print_dialog_default_in_child;
+pub use printer::{
+    enumerate_installed_printers, read_default_printer_inventory, replace_default_printer,
+    DefaultPrinterInventory, PrinterName,
+};
 pub use process::{
     process_instance_status, registered_file_identity, snapshot_process_identities,
     ProcessIdentity, ProcessInstanceStatus, ProcessSnapshotReport,

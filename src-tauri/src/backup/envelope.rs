@@ -155,6 +155,7 @@ pub enum BackupPayload {
     PowerMode(PowerModeBackup),
     PointerFeel(PointerFeelBackup),
     CommsMicMute(CommsMicMuteBackup),
+    DefaultPrinter(DefaultPrinterBackup),
 }
 
 /// ポインターの動き方の変更前状態。
@@ -177,6 +178,15 @@ pub struct PointerFeelBackup {
 pub struct CommsMicMuteBackup {
     pub original: crate::windows::CommsMicMuteState,
     pub intended: crate::windows::CommsMicMuteState,
+}
+
+/// Exact printer names are private rollback data. Their `Debug` representation
+/// is redacted by `PrinterName`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultPrinterBackup {
+    pub original: crate::windows::PrinterName,
+    pub intended: crate::windows::PrinterName,
 }
 
 /// 電源モードの変更前状態。

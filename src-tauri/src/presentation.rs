@@ -450,6 +450,10 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
         ActionId::SessionPreventSleep => ActionParameters::SessionPreventSleep {
             keep_display_on: false,
         },
+        ActionId::SessionDefaultPrinter => ActionParameters::SessionDefaultPrinter {
+            scene: crate::action::SceneLabel::unselected(),
+            printer: crate::windows::PrinterName::unselected(),
+        },
         ActionId::InputShiftInterruptionGuard => ActionParameters::InputShiftInterruptionGuard {},
         ActionId::PowerActiveSchemeCheck => ActionParameters::PowerActiveSchemeCheck {},
         ActionId::PowerActiveSchemeSwitch => ActionParameters::PowerActiveSchemeSwitch {
@@ -597,6 +601,7 @@ pub fn listing_parameters(action_id: ActionId) -> Option<ActionParameters> {
             | ActionId::SetupWindowsUpdateStatus
             | ActionId::SetupAudioOutput
             | ActionId::SetupWindowLayout
+            | ActionId::SessionDefaultPrinter
     ) {
         None
     } else {
@@ -673,7 +678,8 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::GamesReadinessCheck
         | ActionId::GamesGameMode
         | ActionId::GamesControllerGameBar => "games",
-        ActionId::DevicesAutoplay
+        ActionId::SessionDefaultPrinter
+        | ActionId::DevicesAutoplay
         | ActionId::SetupStartupInventory
         | ActionId::SetupPowerToysStatus
         | ActionId::SetupLaunchApps
@@ -698,6 +704,9 @@ fn category_for(action_id: ActionId) -> &'static str {
 fn audience_for(action_id: ActionId) -> &'static str {
     match action_id {
         ActionId::SessionPreventSleep => "長い作業やゲーム中に、自動スリープを避けたい人向け",
+        ActionId::SessionDefaultPrinter => {
+            "自宅や職場などの場面ごとに、既にあるプリンターを今回だけ既定にしたい人向け"
+        }
         ActionId::InputShiftInterruptionGuard => {
             "ゲーム中にShift操作で確認画面へ割り込まれたくない人向け。入力の補助機能をShift操作から開く人には向きません"
         }
@@ -805,6 +814,7 @@ fn audience_for(action_id: ActionId) -> &'static str {
 fn desired_state(action_id: ActionId) -> &'static str {
     match action_id {
         ActionId::SessionPreventSleep => "自動スリープを一時的に防ぐ",
+        ActionId::SessionDefaultPrinter => "選択した場面のインストール済みプリンター",
         ActionId::InputShiftInterruptionGuard => {
             "Shift操作による確認画面を、このモードの間だけ出さない"
         }
@@ -932,6 +942,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::AudioCommsMicMute => {
             "Windowsが公開している音声設定で、既定の通話用入力1台のミュート設定だけを変更"
         }
+        ActionId::SessionDefaultPrinter => {
+            "GetDefaultPrinter・EnumPrinters・SetDefaultPrinterによる明示切替。印刷ジョブは作りません"
+        }
         ActionId::SetupStartupInventory => {
             "固定HKCU/HKLM RunキーとKnown Startup Folderの上限付き読み取り"
         }
@@ -989,6 +1002,12 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
                 "既定の通話マイクはミュート解除設定".to_owned()
             }
         }
+        ObservedValue::DefaultPrinter(observed) => observed
+            .printers
+            .iter()
+            .find(|printer| printer.is_default)
+            .map(|printer| format!("現在の既定: {}", printer.name.as_str()))
+            .unwrap_or_else(|| "現在の既定を確認できません".to_owned()),
         ObservedValue::PowerMode {
             requested_ac,
             requested_dc,
@@ -1215,6 +1234,15 @@ fn observed_detail(value: &ObservedValue) -> String {
             "Windowsの既定の通話用入力1台のsoftware mute設定を読みました。別の入力端末を使うアプリや排他モードでの無音は保証しません。"
                 .to_owned()
         }
+        ObservedValue::DefaultPrinter(observed) => format!(
+            "インストール済み{}台を確認しました。Windowsの自動管理は{}です。プリンターやドライバーの追加、印刷は行いません。",
+            observed.printers.len(),
+            if observed.windows_managed {
+                "有効"
+            } else {
+                "無効"
+            }
+        ),
         ObservedValue::PowerMode { .. } => {
             "選んだモードと、Windowsがいま効いていると報告するモードは別々に確認しています。             選んだほうは他の設定に上書きされることがあります。"
                 .to_owned()
@@ -1292,6 +1320,14 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
                 )
             })
             .collect(),
+        ObservedValue::DefaultPrinter(observed) => {
+            let mut printers = observed.printers.iter().collect::<Vec<_>>();
+            printers.sort_by_key(|printer| !printer.is_default);
+            printers
+                .into_iter()
+                .map(|printer| printer.name.as_str().to_owned())
+                .collect()
+        }
         // ゲーム準備チェックは1行の要約ではなく、項目ごとに並べて見せる（BRIEF §4 の準備確認画面）。
         ObservedValue::PowerToysInstallation(observed) => vec![
             format!(
@@ -2109,6 +2145,7 @@ mod count_report {
         let mut observation = 0;
         let mut guided_candidate = 0;
         let mut guided_settings = 0;
+        let mut one_way = 0;
         for action in ACTION_REGISTRY.iter() {
             let m = action.metadata();
             match m.kind {
@@ -2122,19 +2159,30 @@ mod count_report {
                         guided_settings += 1;
                     }
                 }
-                _ => {}
+                // 数え漏らさない。`_ => {}` にしていたときは `OneWay` が
+                // どの区分にも入らず、**内訳の合計が総数より1件少なかった。**
+                // README の内訳表がそのズレをそのまま写していた。
+                ActionKind::OneWay => one_way += 1,
             }
         }
         let total = ACTION_REGISTRY.iter().count();
+        // 区分の合計が総数と合わないなら、それは数え方が壊れているということ。
+        // 合わないまま README へ書き写すと、足して合わない表ができる。
+        assert_eq!(
+            persistent + session + observation + guided_candidate + guided_settings + one_way,
+            total,
+            "区分の合計が総数と合わない。数え漏らしている区分がある"
+        );
         println!(
-            "総数={} 変更できる(persistent+session)={} 確認のみ={} 表示専用={} 設定案内={}",
+            "総数={} 変更できる(persistent+session)={} 確認のみ={} 表示専用={} 設定案内={} 一方向={}",
             total,
             persistent + session,
             observation,
             guided_candidate,
-            guided_settings
+            guided_settings,
+            one_way
         );
-        assert_eq!(total, 71, "総数が変わったら README も直すこと");
+        assert_eq!(total, 72, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"

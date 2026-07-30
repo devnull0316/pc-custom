@@ -14,14 +14,15 @@ pub use metadata::{
 };
 pub use parameters::{
     ActionParameters, AppLaunchBundle, ExplorerLaunchTarget, PowerModeChoice, PowerScheme,
-    ProcessBindingParameters, ProcessFileIdentity, StartLayout, TaskbarAlignment,
+    ProcessBindingParameters, ProcessFileIdentity, SceneLabel, StartLayout, TaskbarAlignment,
     TaskbarGroupingMode, TaskbarMultiMonitorMode, TaskbarSearchMode, ThemeColorMode,
 };
 pub use registry::{ActionRegistry, ACTION_REGISTRY};
 pub use state::{
     AdvancedColorObservation, AudioOutputEndpointObservation, AudioOutputObservation,
-    DefaultRenderAudioObservation, DetectedState, GameReadinessObservation, KnownAppObservation,
-    KnownAppState, KnownAppsObservation, ObservationWarning, ObservedProcess, ObservedValue,
+    DefaultPrinterObservation, DefaultRenderAudioObservation, DetectedState,
+    GameReadinessObservation, InstalledPrinterObservation, KnownAppObservation, KnownAppState,
+    KnownAppsObservation, ObservationWarning, ObservedProcess, ObservedValue,
     PowerToysInstallationObservation, PrimaryRefreshRateObservation, ReadinessComponent,
     StartupEntrySource, StartupEntryStatus, StartupInventoryEntry, StartupInventoryObservation,
     StateEvidence, SystemDriveSpaceObservation, TempFilesObservation, ThemeObservation,

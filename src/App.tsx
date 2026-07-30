@@ -77,6 +77,7 @@ function commitNotice(message: string, details: readonly string[] | undefined): 
 
 function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "session.prevent_sleep") return { keepDisplayOn: false };
+  if (actionId === "session.default_printer") return {};
   if (actionId === "input.shift_interruption_guard") return {};
   if (actionId === "explorer.show_extensions") return { show: true };
   if (actionId === "explorer.show_hidden") return { show: true };

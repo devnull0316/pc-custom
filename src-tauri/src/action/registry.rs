@@ -4,8 +4,9 @@ use crate::actions::*;
 
 use super::{Action, ActionError, ActionErrorCode, ActionId, ActionResult, ActionStage};
 
-static REGISTERED_ACTIONS: [&'static dyn Action; 71] = [
+static REGISTERED_ACTIONS: [&'static dyn Action; 72] = [
     &PREVENT_SLEEP_ACTION,
+    &DEFAULT_PRINTER_ACTION,
     &POWER_MODE_SWITCH_ACTION,
     &POINTER_FEEL_ACTION,
     &COMMS_MIC_MUTE_ACTION,
