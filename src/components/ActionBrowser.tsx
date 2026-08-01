@@ -1,5 +1,5 @@
 import { openWindowsSettings } from "../backend";
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import { CATEGORIES } from "../catalog";
 import type {
@@ -63,6 +63,14 @@ function availabilityLabel(action: ActionPresentation): string {
   if (action.availability === "detect_only") return "検出のみ";
   return "この環境では停止";
 }
+
+const POWER_MODE_OPTIONS = [
+  { value: "best_efficiency", label: "電池優先" },
+  { value: "balanced", label: "バランス" },
+  { value: "best_performance", label: "パフォーマンス優先" },
+] as const;
+
+type PowerMode = (typeof POWER_MODE_OPTIONS)[number]["value"];
 
 function blockReason(
   dataMode: DataMode,
@@ -171,12 +179,12 @@ export function ActionBrowser({
                 onClick={() => onSelectAction(action.id)}
                 type="button"
               >
-                <span className={`risk-rail risk-rail--${action.riskLevel}`} />
+                <span aria-hidden="true" className={`risk-rail risk-rail--${action.riskLevel}`} />
                 <span className="action-row__copy">
                   <strong>{action.name}</strong>
                   <small>{action.currentState == null ? "現在の状態を確認" : screenText(action.currentState.label, "Windowsから読み取った状態")}</small>
                 </span>
-                <span className="action-row__kind">{availabilityLabel(action)}</span>
+                <span className="action-row__kind">{riskLabel(action.riskLevel)}・{availabilityLabel(action)}</span>
                 <Icon name="chevron" size={16} />
               </button>
             ))}
@@ -240,13 +248,34 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
   const [detailsOpen, setDetailsOpen] = useState(false);
   // 電源モードだけは、押す前にどれにするかを選ばせる。
   // 既定を1つ決め打ちにすると「選ぶ」と書いてあるのに選べない画面になる。
-  const [powerMode, setPowerMode] = useState("balanced");
+  const [powerMode, setPowerMode] = useState<PowerMode>("balanced");
   const picksPowerMode = action.id === "power.mode_switch";
   const picksDefaultPrinter = action.id === "session.default_printer";
   const picksTemporaryVpn = action.id === "session.temporary_vpn";
   const [printerScene, setPrinterScene] = useState("");
   const [selectedPrinter, setSelectedPrinter] = useState("");
   const [selectedVpn, setSelectedVpn] = useState("");
+
+  function handlePowerModeKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentMode: PowerMode) {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = POWER_MODE_OPTIONS.findIndex(({ value }) => value === currentMode);
+    const lastIndex = POWER_MODE_OPTIONS.length - 1;
+    const movesForward = event.key === "ArrowRight" || event.key === "ArrowDown";
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? lastIndex
+        : movesForward
+          ? (currentIndex + 1) % POWER_MODE_OPTIONS.length
+          : (currentIndex - 1 + POWER_MODE_OPTIONS.length) % POWER_MODE_OPTIONS.length;
+    const nextMode = POWER_MODE_OPTIONS[nextIndex]?.value;
+    if (nextMode === undefined) return;
+    setPowerMode(nextMode);
+    event.currentTarget.parentElement
+      ?.querySelectorAll<HTMLButtonElement>("[role='radio']")[nextIndex]
+      ?.focus();
+  }
   const current = action.currentState;
   const readOnly = action.availability === "read_only" || action.availability === "detect_only";
   const needsBinding = action.id === "games.process_watch";
@@ -279,20 +308,18 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
       </div>
       <p className="audience-line"><Icon name="info" size={16} />{screenText(action.audience, "この項目の状態を確認してから変更したい人向け")}</p>
       {!picksPowerMode ? null : (
-        <div aria-label="どのモードにするか" className="mode-choice">
-          <span>どれにしますか</span>
-          <div className="segmented" role="tablist">
-            {[
-              { value: "best_efficiency", label: "電池優先" },
-              { value: "balanced", label: "バランス" },
-              { value: "best_performance", label: "パフォーマンス優先" },
-            ].map((option) => (
+        <div className="mode-choice">
+          <span id="power-mode-choice-label">どれにしますか</span>
+          <div aria-labelledby="power-mode-choice-label" className="segmented" role="radiogroup">
+            {POWER_MODE_OPTIONS.map((option) => (
               <button
-                aria-selected={powerMode === option.value}
+                aria-checked={powerMode === option.value}
                 className="segmented__item"
                 key={option.value}
                 onClick={() => setPowerMode(option.value)}
-                role="tab"
+                onKeyDown={(event) => handlePowerModeKeyDown(event, option.value)}
+                role="radio"
+                tabIndex={powerMode === option.value ? 0 : -1}
                 type="button"
               >
                 {option.label}
@@ -329,8 +356,12 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           </label>
           {current?.kind === "policy_managed" ? (
             <small>Windowsの「通常使うプリンターをWindowsで管理する」が有効なため、変更しません。</small>
+          ) : current === undefined ? (
+            /* まだ読んでいない状態を「ありません」と書かない。
+               読めていないだけかもしれない。 */
+            <small>まだ確認していません。「候補を再確認」を押してください。</small>
           ) : printerOptions.length === 0 ? (
-            <small>別のインストール済みプリンターがありません。状態を再確認してください。</small>
+            <small>別のインストール済みプリンターが見つかりませんでした。</small>
           ) : (
             <small>場所は自動推測しません。プリンターの追加や印刷も行いません。</small>
           )}
@@ -352,8 +383,10 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
               {vpnOptions.map((connection) => <option key={connection} value={connection}>{connection}</option>)}
             </select>
           </label>
-          {vpnOptions.length === 0 ? (
-            <small>Windows標準の登録済みVPNがありません。状態を再確認してください。</small>
+          {current === undefined ? (
+            <small>まだ確認していません。「候補を再確認」を押してください。</small>
+          ) : vpnOptions.length === 0 ? (
+            <small>Windowsに登録済みのVPNが見つかりませんでした。</small>
           ) : (
             <small>開始前から接続中なら何も変えません。認証が必要な場合はWindowsのVPN画面で接続してください。</small>
           )}

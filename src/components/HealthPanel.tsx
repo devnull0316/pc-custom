@@ -67,7 +67,7 @@ export function HealthPanel({ dataMode }: HealthPanelProps) {
   }
   if (error !== null) {
     return (
-      <section className="health-panel health-panel--quiet">
+      <section className="health-panel health-panel--quiet" role="alert">
         <Icon name="warning" size={16} />
         <p>{error}</p>
       </section>
@@ -89,7 +89,7 @@ export function HealthPanel({ dataMode }: HealthPanelProps) {
   const nothingConfirmed = report.holding.length === 0 && report.changed.length === 0;
   const tone = report.changed.length > 0 || nothingConfirmed ? "alert" : "calm";
   return (
-    <section aria-label="適用した設定の照合" className={`health-panel health-panel--${tone}`}>
+    <section aria-label="適用した設定の照合" aria-live="polite" className={`health-panel health-panel--${tone}`}>
       <header className="health-panel__head">
         <Icon name={tone === "alert" ? "warning" : "check"} size={18} />
         <div>
@@ -146,13 +146,14 @@ interface FoldProps {
 }
 
 function Fold({ entries, label, name, open, onToggle }: FoldProps) {
+  const listId = `health-${name}-list`;
   return (
     <div className="health-fold">
-      <button aria-expanded={open} className="text-button" onClick={() => onToggle(open ? null : name)} type="button">
+      <button aria-controls={listId} aria-expanded={open} className="text-button" onClick={() => onToggle(open ? null : name)} type="button">
         {label}
       </button>
       {open ? (
-        <ul className="health-list health-list--quiet">
+        <ul className="health-list health-list--quiet" id={listId}>
           {entries.map((entry) => (
             <li key={entry.actionId}>
               <strong>{entry.name}</strong>

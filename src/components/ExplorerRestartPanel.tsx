@@ -34,7 +34,12 @@ export function ExplorerRestartPanel({ dataMode }: ExplorerRestartPanelProps) {
           : "再起動を試みましたが、タスクバーの復帰を確認できませんでした。サインインし直すと戻ります。",
       );
     } catch (error: unknown) {
-      setMessage(publicErrorMessage(error));
+      // 失敗をそのまま出して終わらない。**次に何をすればいいかを書く。**
+      // ここで止まると、タスクバーが戻らないまま利用者が取り残される。
+      setMessage(
+        `${publicErrorMessage(error)} サインインし直すとタスクバーは戻ります。`
+        + "それでも戻らない場合は、PCを再起動してください。",
+      );
     } finally {
       setBusy(false);
     }

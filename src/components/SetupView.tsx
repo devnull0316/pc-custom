@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
 import { configSnapshotExport, publicErrorMessage, setupCatalog, setupInstall } from "../backend";
 import type {
@@ -35,6 +35,14 @@ const CATEGORY_LABELS: Readonly<Record<string, string>> = {
   game: "ゲーム",
   work: "作業・学習",
 };
+
+const SETUP_TABS = [
+  ["essentials", "Windowsの仕上げ"],
+  ["everyday", "普段使いの機能"],
+  ["apps", "アプリを入れる"],
+] as const;
+
+type SetupTab = (typeof SETUP_TABS)[number][0];
 
 export function SetupView({
   bootstrap,
@@ -121,11 +129,32 @@ export function SetupView({
 
   // 1画面に「Windowsの仕上げ」「普段使いの機能」「アプリ導入」を全部並べていたため、
   // 2400文字・79個の箱が同時に見えていた。目的を1つずつに切る。
-  const [tab, setTab] = useState<"essentials" | "everyday" | "apps">("essentials");
+  const [tab, setTab] = useState<SetupTab>("essentials");
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentTab: SetupTab) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = SETUP_TABS.findIndex(([id]) => id === currentTab);
+    const lastIndex = SETUP_TABS.length - 1;
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? lastIndex
+        : event.key === "ArrowRight"
+          ? (currentIndex + 1) % SETUP_TABS.length
+          : (currentIndex - 1 + SETUP_TABS.length) % SETUP_TABS.length;
+    const nextTab = SETUP_TABS[nextIndex]?.[0];
+    if (nextTab === undefined) return;
+    setTab(nextTab);
+    event.currentTarget.parentElement
+      ?.querySelectorAll<HTMLButtonElement>("[role='tab']")[nextIndex]
+      ?.focus();
+  }
 
   function showPowerToysInstall() {
     setTab("apps");
     window.setTimeout(() => {
+      document.getElementById("setup-tab-apps")?.focus();
       document.getElementById("setup-app-powertoys")?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 60);
   }
@@ -142,17 +171,17 @@ export function SetupView({
       </header>
 
       <div aria-label="セットアップの内容" className="segmented" role="tablist">
-        {([
-          ["essentials", "Windowsの仕上げ"],
-          ["everyday", "普段使いの機能"],
-          ["apps", "アプリを入れる"],
-        ] as const).map(([id, label]) => (
+        {SETUP_TABS.map(([id, label]) => (
           <button
+            aria-controls={`setup-panel-${id}`}
             aria-selected={tab === id}
             className="segmented__item"
+            id={`setup-tab-${id}`}
             key={id}
             onClick={() => setTab(id)}
+            onKeyDown={(event) => handleTabKeyDown(event, id)}
             role="tab"
+            tabIndex={tab === id ? 0 : -1}
             type="button"
           >
             {label}
@@ -161,7 +190,7 @@ export function SetupView({
       </div>
 
       {tab !== "essentials" ? null : (
-      <>
+      <div aria-labelledby="setup-tab-essentials" className="setup-tab-panel" id="setup-panel-essentials" role="tabpanel">
         <SetupEssentialsPanel
           audioAction={actions.find((action) => action.id === "setup.audio_output")}
           bootstrap={bootstrap}
@@ -181,23 +210,25 @@ export function SetupView({
           onError={onError}
           onNotice={onNotice}
         />
-      </>
+      </div>
       )}
 
       {tab !== "everyday" ? null : (
-      <PowerToysPanel
-        action={powerToysAction}
-        dataMode={dataMode}
-        detecting={powerToysDetecting}
-        launching={powerToysLaunching}
-        onDetect={onPowerToysDetect}
-        onLaunch={onPowerToysLaunch}
-        onShowInstall={showPowerToysInstall}
-      />
+      <div aria-labelledby="setup-tab-everyday" className="setup-tab-panel" id="setup-panel-everyday" role="tabpanel">
+        <PowerToysPanel
+          action={powerToysAction}
+          dataMode={dataMode}
+          detecting={powerToysDetecting}
+          launching={powerToysLaunching}
+          onDetect={onPowerToysDetect}
+          onLaunch={onPowerToysLaunch}
+          onShowInstall={showPowerToysInstall}
+        />
+      </div>
       )}
 
       {tab !== "apps" ? null : (
-      <>
+      <div aria-labelledby="setup-tab-apps" className="setup-tab-panel" id="setup-panel-apps" role="tabpanel">
       <section aria-labelledby="setup-apps-title" className="setup-apps">
         <header className="setup-apps__header">
           <h2 id="setup-apps-title">よく使うアプリをまとめて入れる</h2>
@@ -214,7 +245,7 @@ export function SetupView({
           </div>
         )}
         {loadError === null ? null : (
-          <div className="inline-note" role="note">
+          <div className="inline-note" role="alert">
             <Icon name="warning" />
             <span>{loadError}</span>
           </div>
@@ -286,7 +317,7 @@ export function SetupView({
       <p className="muted small">
         導入はMicrosoftのWinGetカタログ経由で、ユーザー範囲で行います。一部アプリは管理者確認が出る場合があります。
       </p>
-      </>
+      </div>
       )}
 
       {message === null ? null : <p className="setup-view__message" role="status">{message}</p>}

@@ -50,7 +50,17 @@ export function TaskbarAutoHidePanel({ dataMode }: TaskbarAutoHidePanelProps) {
     }
   }
 
-  if (!live || state === null) return null;
+  if (!live) return null;
+  if (state === null) {
+    return error === null ? null : (
+      <section aria-label="最大化中のタスクバー" className="taskbar-autohide-panel">
+        <p className="taskbar-autohide-panel__error" role="alert">
+          <Icon name="warning" size={14} />
+          {error}
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section aria-label="最大化中のタスクバー" className="taskbar-autohide-panel">
@@ -92,13 +102,13 @@ export function TaskbarAutoHidePanel({ dataMode }: TaskbarAutoHidePanelProps) {
         </p>
       ) : null}
       {state.lastError === null ? null : (
-        <p className="taskbar-autohide-panel__error">
+        <p className="taskbar-autohide-panel__error" role="alert">
           <Icon name="warning" size={14} />
           {state.lastError}
         </p>
       )}
       {error === null ? null : (
-        <p className="taskbar-autohide-panel__error">
+        <p className="taskbar-autohide-panel__error" role="alert">
           <Icon name="warning" size={14} />
           {error}
         </p>

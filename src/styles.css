@@ -91,7 +91,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
 .skip-link { position: fixed; top: 8px; left: 8px; z-index: 50; transform: translateY(-150%); padding: 7px 10px; border-radius: var(--radius-control); background: var(--surface-solid); color: var(--text); }
-.skip-link:focus { transform: translateY(0); }
+.skip-link:focus-visible { transform: translateY(0); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .app-shell { display: grid; grid-template-columns: 224px minmax(0, 1fr); width: 100%; height: 100%; background: var(--canvas); backdrop-filter: blur(34px) saturate(120%); }
 .app-surface { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
@@ -319,6 +319,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .dialog-footer { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface-muted); }
 .palette-search { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-muted); }
 .palette-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); }
+.palette-search input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .palette-results { display: grid; gap: 2px; margin-top: 10px; max-height: 390px; overflow: auto; }
 .palette-result { display: grid; grid-template-columns: 30px 1fr auto; gap: 9px; align-items: center; min-height: 48px; padding: 6px 9px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
 .palette-result[aria-selected="true"] { background: var(--surface-active); }
@@ -782,6 +783,9 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
 .segmented__item:hover { color: var(--text); background: var(--surface-hover); }
 .segmented__item[aria-selected="true"] { color: var(--text); background: var(--surface-solid);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.segmented__item[aria-checked="true"] { color: var(--text); background: var(--surface-solid);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.setup-tab-panel { display: flex; flex-direction: column; gap: 1.25rem; }
 
 /* 押せないボタンではなく、状態を伝える文。 */
 .detail-note { align-self: center; color: var(--text-tertiary); font-size: var(--fs-sm); }

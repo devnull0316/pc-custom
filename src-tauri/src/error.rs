@@ -69,7 +69,9 @@ impl From<ActionError> for CoreError {
             }
             ActionErrorCode::AccessDenied => "Windowsからこの操作が拒否されました。",
             ActionErrorCode::StateUnknown => "現在の状態を確認できないため、変更を停止しました。",
-            _ => "Windows操作を完了できませんでした。変更履歴を確認してください。",
+            // 未知のコードでも、次に何をすればいいかまでは書く。
+            // 「できませんでした」で止めると、利用者が次の一手を持てない。
+            _ => "Windows操作を完了できませんでした。タイムラインで、                  何が適用されて何が残っているかを確認してください。",
         };
         Self {
             code: error.code.as_code().to_owned(),

@@ -325,7 +325,9 @@ export function ProfilesView({
                   : "先にセットアップ画面で現在のウィンドウ配置を保存してください。保存されるまで作成できません。"}
               </p>
             ) : null}
-            {selectable.length === 0 ? (
+            {selectable.length === 0 && dataMode !== "live" ? (
+              <p className="muted">安全コアへ接続していないため、選べる項目を読み取れていません。</p>
+            ) : selectable.length === 0 ? (
               <p className="muted">
                 選べる項目がありません。<button className="link-button" onClick={onOpenActions} type="button">変更できる項目</button>を確認してください。
               </p>
@@ -375,7 +377,21 @@ export function ProfilesView({
 
         <div className="profile-list-panel">
           <h2>登録済みのモード</h2>
-          {profiles.length === 0 ? (
+          {profiles.length === 0 && dataMode !== "live" ? (
+            /* 0件を「無い」と言い切らない。
+               安全コアへ繋がっていないときは、そもそも読めていない。
+               読めなかったことを「まだありません」と書くと、
+               登録済みのモードが消えたように見える。 */
+            <div className="empty-block">
+              <Icon name="warning" />
+              <strong>登録済みのモードを読み取れていません</strong>
+              <span>
+                {dataMode === "loading"
+                  ? "読み込み中です。"
+                  : "安全コアへ接続できていないため、この一覧は空のままです。登録したモードが消えたわけではありません。"}
+              </span>
+            </div>
+          ) : profiles.length === 0 ? (
             <div className="empty-block">
               <Icon name="game" />
               <strong>まだモードはありません</strong>

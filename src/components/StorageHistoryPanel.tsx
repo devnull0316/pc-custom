@@ -197,7 +197,9 @@ export function StorageHistoryPanel({ dataMode }: StorageHistoryPanelProps) {
         ) : null}
       </div>
 
-      {history.length === 0 ? (
+      {history.length === 0 && dataMode !== "live" ? (
+        <p className="muted small">記録を読み取れていません。安全コアへ接続すると表示します。</p>
+      ) : history.length === 0 ? (
         <p className="muted small">まだ記録はありません。2回目から期間ごとの増減を表示します。</p>
       ) : (
         <ol className="storage-history__timeline">

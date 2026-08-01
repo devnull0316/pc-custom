@@ -27,6 +27,7 @@ export function Sidebar({ activeView, dataMode, profileCount, onNavigate, onOpen
       <nav aria-label="メインナビゲーション" className="main-nav">
         {NAV_ITEMS.map((item) => (
           <button
+            aria-label={item.label}
             aria-current={activeView === item.id ? "page" : undefined}
             className="nav-button"
             key={item.id}
@@ -38,7 +39,7 @@ export function Sidebar({ activeView, dataMode, profileCount, onNavigate, onOpen
         ))}
       </nav>
       <div className="sidebar-spacer" />
-      <button className="draft-button" onClick={onOpenDraft} type="button">
+      <button aria-label="モードの下書きを開く" className="draft-button" onClick={onOpenDraft} type="button">
         <span className="draft-button__icon"><Icon name="plus" size={16} /></span>
         <span><strong>モードの下書き</strong><small>{profileCount === 0 ? "まだ空です" : `${profileCount}件のAction`}</small></span>
       </button>
