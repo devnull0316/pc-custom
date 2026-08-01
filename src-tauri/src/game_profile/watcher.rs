@@ -465,6 +465,19 @@ fn follow_taskbar_auto_hide(
         }
     }
 
+    // **他の変更と同時に書かない。**
+    //
+    // ここだけプロセス間のロックを取らずに書いていた。監視スレッドが
+    // タスクバーを書いている最中に、利用者が別の項目を適用すると、
+    // 相手の「適用前を読む → 比べる → 書く」の途中に割り込むことになる。
+    // 割り込まれた側は、自分の書き込みが第三者に変えられたと観測する。
+    //
+    // 取れなければ**今回は書かない。** 次の巡回で取り直す。
+    // 監視は繰り返し走るので、1回見送っても取り戻せる。
+    let Ok(_process_guard) = crate::windows::acquire_core_mutation_lock() else {
+        return;
+    };
+
     match crate::windows::replace_taskbar_auto_hide(observation.auto_hide_bit, target) {
         Ok(after) if after.auto_hide_bit == target => {
             store.record_error(None);
