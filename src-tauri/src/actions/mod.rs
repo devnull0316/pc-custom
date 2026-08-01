@@ -18,6 +18,7 @@ mod process_watch;
 mod registry_settings;
 mod shift_interruption_guard;
 mod system_observations;
+mod temporary_vpn;
 mod window_color;
 mod window_layout;
 
@@ -50,6 +51,7 @@ pub use system_observations::{
     POWERTOYS_STATUS_ACTION, STARTUP_INVENTORY_ACTION, TEMP_FILES_CHECK_ACTION,
     WINDOWS_UPDATE_STATUS_ACTION,
 };
+pub use temporary_vpn::{TemporaryVpnAction, TEMPORARY_VPN_ACTION};
 pub use window_color::{WindowColorAction, WINDOW_COLOR_ACTION};
 pub(crate) use window_layout::classify_recoverable_window_layout;
 pub use window_layout::{WindowLayoutAction, WINDOW_LAYOUT_ACTION};

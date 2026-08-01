@@ -64,6 +64,9 @@ impl From<ActionError> for CoreError {
             ActionErrorCode::ExternalConflict | ActionErrorCode::BackupMismatch => {
                 "適用後に別の変更を検出したため、自動では上書きしません。"
             }
+            ActionErrorCode::GuidedRequired => {
+                "WindowsのVPN画面で接続状態と認証を確認してください。PCカスタムは認証情報を受け取りません。"
+            }
             ActionErrorCode::AccessDenied => "Windowsからこの操作が拒否されました。",
             ActionErrorCode::StateUnknown => "現在の状態を確認できないため、変更を停止しました。",
             _ => "Windows操作を完了できませんでした。変更履歴を確認してください。",

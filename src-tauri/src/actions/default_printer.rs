@@ -202,6 +202,14 @@ impl Action for DefaultPrinterAction {
         parameters: &ActionParameters,
     ) -> ActionResult<DetectedState> {
         validate_base(&METADATA, context, parameters, false, ActionStage::Detect)?;
+        let ActionParameters::SessionDefaultPrinter { .. } = parameters else {
+            return Err(ActionError::new(
+                ActionErrorCode::WrongParameters,
+                ActionStage::Detect,
+                false,
+                "action.parameters.id_mismatch",
+            ));
+        };
         let inventory = Self::read_inventory(ActionStage::Detect)?;
         Ok(Self::observed_state(context, &inventory))
     }

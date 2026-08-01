@@ -30,6 +30,7 @@ mod transaction_lock;
 #[cfg(test)]
 mod ui_probe;
 mod update_status;
+mod vpn;
 mod window_effects;
 mod window_placement;
 mod wmi_process;
@@ -96,6 +97,12 @@ pub use transaction_lock::{
     acquire_app_instance_lock, acquire_core_mutation_lock, AppInstanceGuard, CoreMutationGuard,
 };
 pub use update_status::read_windows_update_status;
+#[cfg(all(test, windows))]
+pub(crate) use vpn::read_vpn_probe_in_child;
+pub use vpn::{
+    connect_registered_vpn, disconnect_owned_vpn, read_vpn_inventory, VpnConnectionHandle,
+    VpnEntryName, VpnEntryState, VpnInventory,
+};
 pub use window_effects::{apply_mica_backdrop, system_accent_color, AccentColor};
 #[cfg(all(test, windows))]
 pub(crate) use window_placement::{

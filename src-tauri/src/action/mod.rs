@@ -25,8 +25,8 @@ pub use state::{
     KnownAppsObservation, ObservationWarning, ObservedProcess, ObservedValue,
     PowerToysInstallationObservation, PrimaryRefreshRateObservation, ReadinessComponent,
     StartupEntrySource, StartupEntryStatus, StartupInventoryEntry, StartupInventoryObservation,
-    StateEvidence, SystemDriveSpaceObservation, TempFilesObservation, ThemeObservation,
-    WindowColorPreset, WindowsUpdateStatusObservation,
+    StateEvidence, SystemDriveSpaceObservation, TempFilesObservation, TemporaryVpnObservation,
+    ThemeObservation, WindowColorPreset, WindowsUpdateStatusObservation,
 };
 pub use traits::Action;
 pub use types::{

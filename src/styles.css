@@ -417,7 +417,7 @@ kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--border); border
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
 .hot-corner-panel__heading { display: flex; align-items: flex-start; gap: .75rem; }
 .hot-corner-panel__heading h2 { margin: 0 0 .2rem; font-size: var(--fs-md); font-weight: 600; }
-.hot-corner-panel__heading p { margin: 0; color: color-mix(in srgb, var(--text) 66%, transparent); line-height: 1.5; }
+.hot-corner-panel__heading p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
 .hot-corner-panel__icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 9px;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .hot-corner-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }

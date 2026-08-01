@@ -156,6 +156,7 @@ pub enum BackupPayload {
     PointerFeel(PointerFeelBackup),
     CommsMicMute(CommsMicMuteBackup),
     DefaultPrinter(DefaultPrinterBackup),
+    TemporaryVpn(TemporaryVpnBackup),
     HighContrast(HighContrastBackup),
 }
 
@@ -188,6 +189,16 @@ pub struct CommsMicMuteBackup {
 pub struct DefaultPrinterBackup {
     pub original: crate::windows::PrinterName,
     pub intended: crate::windows::PrinterName,
+}
+
+/// The selected entry name is private rollback data. No connection handle is
+/// serialized: after process exit ownership can no longer be proven.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemporaryVpnBackup {
+    pub connection: crate::windows::VpnEntryName,
+    pub original_connected: bool,
+    pub intended_connected: bool,
 }
 
 /// `HIGHCONTRASTW` の開始前状態と、Windowsへ要求する適用状態。

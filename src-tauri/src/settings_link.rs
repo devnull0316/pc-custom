@@ -60,6 +60,7 @@ pub const fn settings_page_for(action: ActionId) -> Option<&'static str> {
         ActionId::DevicesAutoplay => "ms-settings:autoplay",
         ActionId::SetupAudioOutput | ActionId::AudioCommsMicMute => "ms-settings:sound",
         ActionId::SessionDefaultPrinter => "ms-settings:printers",
+        ActionId::SessionTemporaryVpn => "ms-settings:network-vpn",
         // 電源・ストレージ
         ActionId::PowerActiveSchemeCheck
         | ActionId::PowerActiveSchemeSwitch

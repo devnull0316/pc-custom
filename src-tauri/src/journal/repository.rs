@@ -50,7 +50,7 @@ impl JournalDatabase {
             )?;
 
             for item in items {
-                let invocation_json = serde_json::to_string(&item.parameters)
+                let invocation_json = serialize_invocation_for_journal(&item.parameters)
                     .map_err(|error| sql_conversion(0, Type::Text, error))?;
                 let resource_keys_json = serde_json::to_string(&item.resource_keys)
                     .map_err(|error| sql_conversion(0, Type::Text, error))?;
@@ -792,6 +792,16 @@ fn insert_backup(
     Ok(())
 }
 
+fn serialize_invocation_for_journal(parameters: &ActionParameters) -> serde_json::Result<String> {
+    let safe_parameters = match parameters {
+        ActionParameters::SessionTemporaryVpn { .. } => ActionParameters::SessionTemporaryVpn {
+            connection: crate::windows::VpnEntryName::journal_redacted(),
+        },
+        _ => parameters.clone(),
+    };
+    serde_json::to_string(&safe_parameters)
+}
+
 fn persisted_item_from_row(row: &Row<'_>) -> rusqlite::Result<PersistedItem> {
     let item_id = parse_uuid(row.get::<_, String>(0)?, 0)?;
     let transaction_id = parse_uuid(row.get::<_, String>(1)?, 1)?;
@@ -806,7 +816,7 @@ fn persisted_item_from_row(row: &Row<'_>) -> rusqlite::Result<PersistedItem> {
         ActionId::from_str(&action_text).map_err(|error| sql_conversion(4, Type::Text, error))?;
     let action_version = u32::try_from(row.get::<_, i64>(5)?)
         .map_err(|error| sql_conversion(5, Type::Integer, error))?;
-    let parameters = serde_json::from_str::<ActionParameters>(&row.get::<_, String>(6)?)
+    let mut parameters = serde_json::from_str::<ActionParameters>(&row.get::<_, String>(6)?)
         .map_err(|error| sql_conversion(6, Type::Text, error))?;
     if parameters.action_id() != action_id {
         return Err(sql_message(
@@ -826,6 +836,13 @@ fn persisted_item_from_row(row: &Row<'_>) -> rusqlite::Result<PersistedItem> {
         || !backup.verify_integrity()
     {
         return Err(sql_message(8, Type::Blob, "backup integrity mismatch"));
+    }
+    if let (
+        ActionParameters::SessionTemporaryVpn { connection },
+        BackupPayload::TemporaryVpn(payload),
+    ) = (&mut parameters, &backup.payload)
+    {
+        *connection = payload.connection.clone();
     }
     let diagnostic_id = row
         .get::<_, Option<String>>(10)?
@@ -893,6 +910,7 @@ fn primitive_name(payload: &BackupPayload) -> &'static str {
         BackupPayload::WindowLayout(_) => "window_layout",
         BackupPayload::ShiftInterruptionGuard(_) => "shift_interruption_guard",
         BackupPayload::DefaultPrinter(_) => "default_printer",
+        BackupPayload::TemporaryVpn(_) => "temporary_vpn",
         BackupPayload::HighContrast(_) => "high_contrast",
     }
 }
@@ -970,4 +988,25 @@ fn format_timestamp(unix_ms: i64) -> String {
     DateTime::<Utc>::from_timestamp_millis(unix_ms)
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
         .to_rfc3339()
+}
+
+#[cfg(test)]
+mod privacy_tests {
+    use super::*;
+
+    #[test]
+    fn temporary_vpn_invocation_journal_never_contains_the_connection_name() {
+        let private = "Confidential connection name";
+        let parameters = ActionParameters::SessionTemporaryVpn {
+            connection: crate::windows::VpnEntryName::new(private.to_owned())
+                .expect("valid test connection name"),
+        };
+        let serialized =
+            serialize_invocation_for_journal(&parameters).expect("serialize safe invocation");
+        assert!(!serialized.contains(private));
+        assert!(serialized.contains("[REDACTED]"));
+        let decoded: ActionParameters =
+            serde_json::from_str(&serialized).expect("redacted invocation remains typed");
+        assert_eq!(decoded.action_id(), ActionId::SessionTemporaryVpn);
+    }
 }

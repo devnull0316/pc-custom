@@ -243,8 +243,10 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
   const [powerMode, setPowerMode] = useState("balanced");
   const picksPowerMode = action.id === "power.mode_switch";
   const picksDefaultPrinter = action.id === "session.default_printer";
+  const picksTemporaryVpn = action.id === "session.temporary_vpn";
   const [printerScene, setPrinterScene] = useState("");
   const [selectedPrinter, setSelectedPrinter] = useState("");
+  const [selectedVpn, setSelectedVpn] = useState("");
   const current = action.currentState;
   const readOnly = action.availability === "read_only" || action.availability === "detect_only";
   const needsBinding = action.id === "games.process_watch";
@@ -259,6 +261,11 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
     : [];
   const printerSelectionReady = !picksDefaultPrinter
     || (printerScene.trim().length > 0 && selectedPrinter.length > 0 && printerOptions.includes(selectedPrinter));
+  const vpnOptions = picksTemporaryVpn && current?.kind === "known"
+    ? (current.items ?? [])
+    : [];
+  const vpnSelectionReady = !picksTemporaryVpn
+    || (selectedVpn.length > 0 && vpnOptions.includes(selectedVpn));
 
   return (
     <div className="action-detail__inner">
@@ -332,6 +339,29 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
           </button>
         </div>
       )}
+      {!picksTemporaryVpn ? null : (
+        <div aria-label="一時接続する登録済みVPNを選ぶ" className="printer-choice">
+          <label>
+            <span>今回だけ接続するVPN</span>
+            <select
+              disabled={vpnOptions.length === 0}
+              onChange={(event) => setSelectedVpn(event.target.value)}
+              value={selectedVpn}
+            >
+              <option value="">選択してください</option>
+              {vpnOptions.map((connection) => <option key={connection} value={connection}>{connection}</option>)}
+            </select>
+          </label>
+          {vpnOptions.length === 0 ? (
+            <small>Windows標準の登録済みVPNがありません。状態を再確認してください。</small>
+          ) : (
+            <small>開始前から接続中なら何も変えません。認証が必要な場合はWindowsのVPN画面で接続してください。</small>
+          )}
+          <button className="secondary-button" disabled={dataMode !== "live" || detecting} onClick={onDetect} type="button">
+            {detecting ? <Icon className="spin" name="spinner" /> : <Icon name="search" />}候補を再確認
+          </button>
+        </div>
+      )}
       <div aria-label="現在と適用後の状態" className="state-comparison">
         <div className={`state-panel state-panel--${current?.kind ?? "unknown"}`}>
           <span>現在</span>
@@ -388,12 +418,14 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         ) : (
           <button
             className="primary-button"
-            disabled={!mutationAllowed || previewing || !printerSelectionReady}
+            disabled={!mutationAllowed || previewing || !printerSelectionReady || !vpnSelectionReady}
             onClick={() => onPreview(
               picksPowerMode
                 ? { mode: powerMode }
                 : picksDefaultPrinter
                   ? { scene: printerScene.trim(), printer: selectedPrinter }
+                  : picksTemporaryVpn
+                    ? { connection: selectedVpn }
                   : undefined,
             )}
             type="button"

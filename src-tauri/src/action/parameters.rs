@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::window_layout::WindowLayoutInvocation;
-use crate::windows::PrinterName;
+use crate::windows::{PrinterName, VpnEntryName};
 
 use super::{ActionId, WindowColorPreset};
 
@@ -147,6 +147,8 @@ pub enum ActionParameters {
         scene: SceneLabel,
         printer: PrinterName,
     },
+    #[serde(rename = "session.temporary_vpn")]
+    SessionTemporaryVpn { connection: VpnEntryName },
     #[serde(rename = "input.shift_interruption_guard")]
     InputShiftInterruptionGuard {},
     #[serde(rename = "power.active_scheme_check")]
@@ -296,6 +298,7 @@ impl ActionParameters {
         match self {
             Self::SessionPreventSleep { .. } => ActionId::SessionPreventSleep,
             Self::SessionDefaultPrinter { .. } => ActionId::SessionDefaultPrinter,
+            Self::SessionTemporaryVpn { .. } => ActionId::SessionTemporaryVpn,
             Self::InputShiftInterruptionGuard { .. } => ActionId::InputShiftInterruptionGuard,
             Self::PowerActiveSchemeCheck { .. } => ActionId::PowerActiveSchemeCheck,
             Self::PowerActiveSchemeSwitch { .. } => ActionId::PowerActiveSchemeSwitch,

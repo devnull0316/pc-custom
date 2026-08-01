@@ -175,6 +175,12 @@ pub struct DefaultPrinterObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TemporaryVpnObservation {
+    pub entries: Vec<crate::windows::VpnEntryState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GameReadinessObservation {
     pub refresh_rate: ReadinessComponent<PrimaryRefreshRateObservation>,
     pub advanced_color: ReadinessComponent<AdvancedColorObservation>,
@@ -306,6 +312,7 @@ pub enum ObservedValue {
     WindowsUpdateStatus(WindowsUpdateStatusObservation),
     AudioOutput(AudioOutputObservation),
     DefaultPrinter(DefaultPrinterObservation),
+    TemporaryVpn(TemporaryVpnObservation),
     WindowLayout(WindowLayoutObservation),
     AccentColor {
         hex: String,

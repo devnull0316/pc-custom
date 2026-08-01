@@ -10,6 +10,8 @@ pub enum ActionId {
     SessionPreventSleep,
     #[serde(rename = "session.default_printer")]
     SessionDefaultPrinter,
+    #[serde(rename = "session.temporary_vpn")]
+    SessionTemporaryVpn,
     #[serde(rename = "input.shift_interruption_guard")]
     InputShiftInterruptionGuard,
     #[serde(rename = "power.active_scheme_check")]
@@ -155,9 +157,10 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 73] = [
+    pub const ALL: [Self; 74] = [
         Self::SessionPreventSleep,
         Self::SessionDefaultPrinter,
+        Self::SessionTemporaryVpn,
         Self::InputShiftInterruptionGuard,
         Self::PowerActiveSchemeCheck,
         Self::PowerActiveSchemeSwitch,
@@ -235,6 +238,7 @@ impl ActionId {
         match self {
             Self::SessionPreventSleep => "session.prevent_sleep",
             Self::SessionDefaultPrinter => "session.default_printer",
+            Self::SessionTemporaryVpn => "session.temporary_vpn",
             Self::InputShiftInterruptionGuard => "input.shift_interruption_guard",
             Self::PowerActiveSchemeCheck => "power.active_scheme_check",
             Self::PowerActiveSchemeSwitch => "power.active_scheme_switch",
@@ -334,6 +338,7 @@ impl FromStr for ActionId {
         match value {
             "session.prevent_sleep" => Ok(Self::SessionPreventSleep),
             "session.default_printer" => Ok(Self::SessionDefaultPrinter),
+            "session.temporary_vpn" => Ok(Self::SessionTemporaryVpn),
             "input.shift_interruption_guard" => Ok(Self::InputShiftInterruptionGuard),
             "power.active_scheme_check" => Ok(Self::PowerActiveSchemeCheck),
             "power.active_scheme_switch" => Ok(Self::PowerActiveSchemeSwitch),

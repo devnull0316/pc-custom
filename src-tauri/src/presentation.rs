@@ -454,6 +454,9 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
             scene: crate::action::SceneLabel::unselected(),
             printer: crate::windows::PrinterName::unselected(),
         },
+        ActionId::SessionTemporaryVpn => ActionParameters::SessionTemporaryVpn {
+            connection: crate::windows::VpnEntryName::unselected(),
+        },
         ActionId::InputShiftInterruptionGuard => ActionParameters::InputShiftInterruptionGuard {},
         ActionId::PowerActiveSchemeCheck => ActionParameters::PowerActiveSchemeCheck {},
         ActionId::PowerActiveSchemeSwitch => ActionParameters::PowerActiveSchemeSwitch {
@@ -603,6 +606,7 @@ pub fn listing_parameters(action_id: ActionId) -> Option<ActionParameters> {
             | ActionId::SetupAudioOutput
             | ActionId::SetupWindowLayout
             | ActionId::SessionDefaultPrinter
+            | ActionId::SessionTemporaryVpn
     ) {
         None
     } else {
@@ -629,7 +633,7 @@ pub fn risk_name(risk: ActionRiskLevel) -> &'static str {
 
 fn category_for(action_id: ActionId) -> &'static str {
     match action_id {
-        ActionId::SessionPreventSleep => "session",
+        ActionId::SessionPreventSleep | ActionId::SessionTemporaryVpn => "session",
         ActionId::PowerActiveSchemeCheck
         | ActionId::PowerActiveSchemeSwitch
         | ActionId::PowerModeSwitch => "power",
@@ -708,6 +712,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         ActionId::SessionPreventSleep => "長い作業やゲーム中に、自動スリープを避けたい人向け",
         ActionId::SessionDefaultPrinter => {
             "自宅や職場などの場面ごとに、既にあるプリンターを今回だけ既定にしたい人向け"
+        }
+        ActionId::SessionTemporaryVpn => {
+            "Windowsに登録済みの仕事用VPNを、必要な作業の間だけ接続したい人向け"
         }
         ActionId::InputShiftInterruptionGuard => {
             "ゲーム中にShift操作で確認画面へ割り込まれたくない人向け。入力の補助機能をShift操作から開く人には向きません"
@@ -820,6 +827,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
     match action_id {
         ActionId::SessionPreventSleep => "自動スリープを一時的に防ぐ",
         ActionId::SessionDefaultPrinter => "選択した場面のインストール済みプリンター",
+        ActionId::SessionTemporaryVpn => "選択した登録済みVPNを一時接続（既に接続中なら出番なし）",
         ActionId::InputShiftInterruptionGuard => {
             "Shift操作による確認画面を、このモードの間だけ出さない"
         }
@@ -956,6 +964,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         ActionId::SessionDefaultPrinter => {
             "GetDefaultPrinter・EnumPrinters・SetDefaultPrinterによる明示切替。印刷ジョブは作りません"
         }
+        ActionId::SessionTemporaryVpn => {
+            "Windows公開RAS APIで登録済みVPNだけを列挙・一時接続し、同一実行中に得たハンドルだけを切断"
+        }
         ActionId::SetupStartupInventory => {
             "固定HKCU/HKLM RunキーとKnown Startup Folderの上限付き読み取り"
         }
@@ -1019,6 +1030,21 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             .find(|printer| printer.is_default)
             .map(|printer| format!("現在の既定: {}", printer.name.as_str()))
             .unwrap_or_else(|| "現在の既定を確認できません".to_owned()),
+        ObservedValue::TemporaryVpn(observed) => {
+            let connected = observed
+                .entries
+                .iter()
+                .filter(|entry| entry.connected)
+                .count();
+            if connected > 0 {
+                format!(
+                    "登録済みVPN {}件・接続中 {connected}件（接続中のものは出番なし）",
+                    observed.entries.len()
+                )
+            } else {
+                format!("登録済みVPN {}件・接続中なし", observed.entries.len())
+            }
+        }
         ObservedValue::PowerMode {
             requested_ac,
             requested_dc,
@@ -1261,6 +1287,10 @@ fn observed_detail(value: &ObservedValue) -> String {
                 "無効"
             }
         ),
+        ObservedValue::TemporaryVpn(_) => {
+            "Windows標準の登録済みVPNと接続状態だけを読みました。接続先や利用者情報は表示・記録せず、認証が必要ならWindowsのVPN画面へ案内します。"
+                .to_owned()
+        }
         ObservedValue::PowerMode { .. } => {
             "選んだモードと、Windowsがいま効いていると報告するモードは別々に確認しています。             選んだほうは他の設定に上書きされることがあります。"
                 .to_owned()
@@ -1350,6 +1380,11 @@ fn observed_items(value: &ObservedValue) -> Vec<String> {
                 .map(|printer| printer.name.as_str().to_owned())
                 .collect()
         }
+        ObservedValue::TemporaryVpn(observed) => observed
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str().to_owned())
+            .collect(),
         // ゲーム準備チェックは1行の要約ではなく、項目ごとに並べて見せる（BRIEF §4 の準備確認画面）。
         ObservedValue::PowerToysInstallation(observed) => vec![
             format!(
@@ -2204,7 +2239,7 @@ mod count_report {
             guided_settings,
             one_way
         );
-        assert_eq!(total, 73, "総数が変わったら README も直すこと");
+        assert_eq!(total, 74, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"
