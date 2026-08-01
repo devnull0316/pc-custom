@@ -1815,7 +1815,7 @@ fn bind_original_window_markers(
 #[cfg(windows)]
 fn enumerate_visible_windows() -> WindowsResult<Vec<isize>> {
     use windows::Win32::{
-        Foundation::{BOOL, HWND, LPARAM, TRUE},
+        Foundation::{SetLastError, BOOL, HWND, LPARAM, TRUE, WIN32_ERROR},
         UI::WindowsAndMessaging::{EnumWindows, IsWindowVisible},
     };
 
@@ -1842,18 +1842,20 @@ fn enumerate_visible_windows() -> WindowsResult<Vec<isize>> {
         overflow: false,
     };
     unsafe {
-        EnumWindows(
+        SetLastError(WIN32_ERROR(0));
+        if let Err(error) = EnumWindows(
             Some(callback),
             LPARAM(&mut enumeration as *mut Enumeration as isize),
-        )
+        ) {
+            if error.code().0 != 0 {
+                return Err(WindowsError::new(
+                    WindowsErrorKind::ApiFailure,
+                    "EnumWindows for window placement",
+                    Some(i64::from(error.code().0)),
+                ));
+            }
+        }
     }
-    .map_err(|error| {
-        WindowsError::new(
-            WindowsErrorKind::ApiFailure,
-            "EnumWindows for window placement",
-            Some(i64::from(error.code().0)),
-        )
-    })?;
     if enumeration.overflow {
         return Err(WindowsError::new(
             WindowsErrorKind::ResourceLimit,

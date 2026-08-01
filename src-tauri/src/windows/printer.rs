@@ -22,6 +22,10 @@ impl PrinterName {
         Self(String::new())
     }
 
+    pub(crate) fn journal_redacted() -> Self {
+        Self("[REDACTED]".to_owned())
+    }
+
     pub fn new(value: String) -> WindowsResult<Self> {
         let candidate = Self(value);
         if candidate.is_valid() {

@@ -794,9 +794,22 @@ fn insert_backup(
 
 fn serialize_invocation_for_journal(parameters: &ActionParameters) -> serde_json::Result<String> {
     let safe_parameters = match parameters {
+        ActionParameters::SessionDefaultPrinter { .. } => ActionParameters::SessionDefaultPrinter {
+            scene: crate::action::SceneLabel::journal_redacted(),
+            printer: crate::windows::PrinterName::journal_redacted(),
+        },
         ActionParameters::SessionTemporaryVpn { .. } => ActionParameters::SessionTemporaryVpn {
             connection: crate::windows::VpnEntryName::journal_redacted(),
         },
+        ActionParameters::SetupWindowLayout { invocation } => {
+            let mut invocation = invocation.clone();
+            for entry in &mut invocation.desired.entries {
+                entry.application_label = "[REDACTED]".to_owned();
+                entry.class_name = "[REDACTED]".to_owned();
+                entry.title = crate::window_layout::SensitiveWindowTitle::journal_redacted();
+            }
+            ActionParameters::SetupWindowLayout { invocation }
+        }
         _ => parameters.clone(),
     };
     serde_json::to_string(&safe_parameters)
@@ -837,13 +850,7 @@ fn persisted_item_from_row(row: &Row<'_>) -> rusqlite::Result<PersistedItem> {
     {
         return Err(sql_message(8, Type::Blob, "backup integrity mismatch"));
     }
-    if let (
-        ActionParameters::SessionTemporaryVpn { connection },
-        BackupPayload::TemporaryVpn(payload),
-    ) = (&mut parameters, &backup.payload)
-    {
-        *connection = payload.connection.clone();
-    }
+    restore_invocation_from_backup(&mut parameters, &backup.payload);
     let diagnostic_id = row
         .get::<_, Option<String>>(10)?
         .map(|value| parse_uuid(value, 10))
@@ -861,6 +868,28 @@ fn persisted_item_from_row(row: &Row<'_>) -> rusqlite::Result<PersistedItem> {
         error_code: row.get(9)?,
         diagnostic_id,
     })
+}
+
+fn restore_invocation_from_backup(parameters: &mut ActionParameters, payload: &BackupPayload) {
+    match (parameters, payload) {
+        (
+            ActionParameters::SessionTemporaryVpn { connection },
+            BackupPayload::TemporaryVpn(payload),
+        ) => *connection = payload.connection.clone(),
+        (
+            ActionParameters::SessionDefaultPrinter { printer, .. },
+            BackupPayload::DefaultPrinter(payload),
+        ) => *printer = payload.intended.clone(),
+        (
+            ActionParameters::SetupWindowLayout { invocation },
+            BackupPayload::WindowLayout(payload),
+        ) => {
+            invocation.desired = payload.desired.clone();
+            invocation.excluded_game_file_identities =
+                payload.excluded_game_file_identities.clone();
+        }
+        _ => {}
+    }
 }
 
 // journal の 1 行に入る列がそのまま引数になっている。まとめる構造体を作っても
@@ -994,6 +1023,57 @@ fn format_timestamp(unix_ms: i64) -> String {
 mod privacy_tests {
     use super::*;
 
+    fn private_window_invocation(private_title: &str) -> ActionParameters {
+        use crate::{
+            action::ProcessFileIdentity,
+            window_layout::{
+                SavedWindowPlacement, SavedWindowPlacementEntry, SensitiveWindowTitle,
+                WindowLayoutInvocation, WindowLayoutSnapshot, WindowPoint, WindowRect,
+            },
+        };
+
+        ActionParameters::SetupWindowLayout {
+            invocation: WindowLayoutInvocation {
+                desired: WindowLayoutSnapshot {
+                    snapshot_id: uuid::Uuid::new_v4(),
+                    captured_at_unix_ms: 1,
+                    entries: vec![SavedWindowPlacementEntry {
+                        entry_id: uuid::Uuid::new_v4(),
+                        process_file_identity: ProcessFileIdentity {
+                            volume_serial_number: 7,
+                            file_id: [3; 16],
+                        },
+                        application_label: "private-app.exe".to_owned(),
+                        class_name: "PrivateWindowClass".to_owned(),
+                        title: SensitiveWindowTitle::new(private_title.to_owned())
+                            .expect("bounded private title"),
+                        placement: SavedWindowPlacement {
+                            flags: 0,
+                            show_cmd: 1,
+                            min_position: WindowPoint { x: -1, y: -1 },
+                            max_position: WindowPoint { x: -1, y: -1 },
+                            normal_position: WindowRect {
+                                left: 10,
+                                top: 20,
+                                right: 410,
+                                bottom: 320,
+                            },
+                        },
+                        observed_rect: WindowRect {
+                            left: 10,
+                            top: 20,
+                            right: 410,
+                            bottom: 320,
+                        },
+                    }],
+                    excluded_game_windows: 0,
+                    skipped_windows: 0,
+                },
+                excluded_game_file_identities: Vec::new(),
+            },
+        }
+    }
+
     #[test]
     fn temporary_vpn_invocation_journal_never_contains_the_connection_name() {
         let private = "Confidential connection name";
@@ -1008,5 +1088,72 @@ mod privacy_tests {
         let decoded: ActionParameters =
             serde_json::from_str(&serialized).expect("redacted invocation remains typed");
         assert_eq!(decoded.action_id(), ActionId::SessionTemporaryVpn);
+    }
+
+    #[test]
+    fn default_printer_invocation_journal_never_contains_private_labels() {
+        let private_scene = "Confidential office";
+        let private_printer = "Finance floor printer";
+        let parameters = ActionParameters::SessionDefaultPrinter {
+            scene: crate::action::SceneLabel::new(private_scene.to_owned()),
+            printer: crate::windows::PrinterName::new(private_printer.to_owned())
+                .expect("valid test printer"),
+        };
+
+        let serialized =
+            serialize_invocation_for_journal(&parameters).expect("serialize safe invocation");
+        assert!(!serialized.contains(private_scene));
+        assert!(!serialized.contains(private_printer));
+        assert!(serialized.contains("[REDACTED]"));
+
+        let original = crate::windows::PrinterName::new("Original printer".to_owned())
+            .expect("valid original printer");
+        let intended = crate::windows::PrinterName::new(private_printer.to_owned())
+            .expect("valid intended printer");
+        let payload = BackupPayload::DefaultPrinter(crate::backup::DefaultPrinterBackup {
+            original,
+            intended: intended.clone(),
+        });
+        let mut decoded: ActionParameters =
+            serde_json::from_str(&serialized).expect("decode redacted invocation");
+        restore_invocation_from_backup(&mut decoded, &payload);
+        let ActionParameters::SessionDefaultPrinter { scene, printer } = decoded else {
+            unreachable!();
+        };
+        assert_eq!(scene.as_str(), "[REDACTED]");
+        assert_eq!(printer, intended);
+    }
+
+    #[test]
+    fn window_layout_invocation_journal_never_contains_window_identity_text() {
+        let private_title = "Confidential quarterly plan";
+        let parameters = private_window_invocation(private_title);
+
+        let serialized =
+            serialize_invocation_for_journal(&parameters).expect("serialize safe invocation");
+        assert!(!serialized.contains(private_title));
+        assert!(!serialized.contains("private-app.exe"));
+        assert!(!serialized.contains("PrivateWindowClass"));
+        assert!(serialized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn redacted_window_invocation_is_rehydrated_from_durable_backup() {
+        let original = private_window_invocation("Private recovery title");
+        let ActionParameters::SetupWindowLayout { invocation } = &original else {
+            unreachable!();
+        };
+        let payload = BackupPayload::WindowLayout(crate::window_layout::WindowLayoutBackup {
+            desired: invocation.desired.clone(),
+            original_entries: Vec::new(),
+            excluded_game_file_identities: invocation.excluded_game_file_identities.clone(),
+        });
+        let serialized =
+            serialize_invocation_for_journal(&original).expect("serialize safe invocation");
+        let mut decoded: ActionParameters =
+            serde_json::from_str(&serialized).expect("decode redacted invocation");
+
+        restore_invocation_from_backup(&mut decoded, &payload);
+        assert_eq!(decoded, original);
     }
 }

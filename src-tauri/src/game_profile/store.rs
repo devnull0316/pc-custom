@@ -354,6 +354,11 @@ impl ProfileStore {
     }
 
     fn parse_import(json: &str) -> CoreResult<Vec<StoredProfile>> {
+        if json.len() as u64 > MAX_PROFILES_FILE_BYTES {
+            return Err(CoreError::invalid_request(
+                "バックアップJSONが読込上限を超えています。",
+            ));
+        }
         let parsed: ProfilesFile = serde_json::from_str(json).map_err(|_| {
             CoreError::invalid_request("バックアップJSONを読めません。形式を確認してください。")
         })?;
@@ -1030,6 +1035,14 @@ mod tests {
         assert!(result.imported.is_empty());
         assert_eq!(result.skipped.len(), 1);
         assert!(store.list().is_empty());
+    }
+
+    #[test]
+    fn import_rejects_oversized_json_before_deserialization() {
+        let oversized = " ".repeat(MAX_PROFILES_FILE_BYTES as usize + 1);
+        let error = ProfileStore::parse_import(&oversized).expect_err("oversized import rejected");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.user_message.contains("読込上限"));
     }
 
     #[test]

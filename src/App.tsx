@@ -47,7 +47,7 @@ import type {
   ViewId,
   CommitItem,
 } from "./model";
-import { screenText } from "./publicCopy";
+import { getRiskReasons, screenText } from "./publicCopy";
 
 interface UiError {
   message: string;
@@ -662,7 +662,43 @@ export function App() {
           width="wide"
         >
           <div className="preview-list">
-            {preview.changes.map((change) => <article className="preview-change" key={change.actionId}><header><span className={`risk-label risk-label--${change.riskLevel}`}>{change.riskLevel === "safe" ? "低リスク" : change.riskLevel === "caution" ? "注意" : "実験的"}</span><h3>{change.title}</h3></header><div><span><small>現在</small><strong>{screenText(change.before, "Windowsから読み取った状態")}</strong></span><Icon name="arrow" /><span><small>適用後</small><strong>{screenText(change.after, "この項目に必要な状態")}</strong></span></div><p>Windowsのこの項目に必要な範囲だけを扱います。</p><small>{change.reversible ? "変更前の状態を保存し、この変更だけ元へ戻せます" : "Windowsの状態は変更しません"}</small></article>)}
+            {preview.changes.map((change) => {
+              const matchingAction = actions.find((a) => a.id === change.actionId);
+              const reasons = matchingAction ? getRiskReasons(matchingAction) : [];
+              return (
+                <article className="preview-change" key={change.actionId}>
+                  <header>
+                    <span className={`risk-label risk-label--${change.riskLevel}`}>
+                      {change.riskLevel === "safe" ? "低リスク" : change.riskLevel === "caution" ? "注意" : "実験的"}
+                    </span>
+                    <h3>{change.title}</h3>
+                  </header>
+                  <div>
+                    <span>
+                      <small>現在</small>
+                      <strong>{screenText(change.before, "Windowsから読み取った状態")}</strong>
+                    </span>
+                    <Icon name="arrow" />
+                    <span>
+                      <small>適用後</small>
+                      <strong>{screenText(change.after, "この項目に必要な状態")}</strong>
+                    </span>
+                  </div>
+                  <p>Windowsのこの項目に必要な範囲だけを扱います。</p>
+                  <small>{change.reversible ? "変更前の状態を保存し、この変更だけ元へ戻せます" : "Windowsの状態は変更しません"}</small>
+                  {reasons.length === 0 ? null : (
+                    <div className="preview-change-reasons">
+                      <strong><Icon name="warning" size={13} />注意事項:</strong>
+                      <ul>
+                        {reasons.map((r) => (
+                          <li key={r}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
           {preview.warnings.length === 0 ? null : <div className="preview-warnings"><strong><Icon name="warning" />確認事項</strong><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
           <label className="confirmation-check"><input checked={previewConfirmed} onChange={(event) => setPreviewConfirmed(event.target.checked)} type="checkbox" /><span>変更前の状態が保存され、失敗時は逆順で復元されることを確認しました。</span></label>

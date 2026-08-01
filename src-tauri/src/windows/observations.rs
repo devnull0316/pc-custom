@@ -522,6 +522,7 @@ pub fn read_system_drive_space() -> WindowsResult<SystemDriveSpaceObservation> {
 fn user_temp_path() -> WindowsResult<std::path::PathBuf> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt};
     use windows::Win32::Storage::FileSystem::GetTempPath2W;
+    use windows::Win32::UI::Shell::FOLDERID_LocalAppData;
 
     let mut buffer = vec![0u16; 32_768];
     let length = unsafe { GetTempPath2W(Some(&mut buffer)) } as usize;
@@ -540,7 +541,11 @@ fn user_temp_path() -> WindowsResult<std::path::PathBuf> {
         ));
     }
     let path = std::path::PathBuf::from(OsString::from_wide(&buffer[..length]));
-    if !path.is_absolute() || !is_local_disk_path(&path) {
+    let local_app_data = known_folder_path(FOLDERID_LocalAppData)?;
+    if !path.is_absolute()
+        || !is_local_disk_path(&path)
+        || !is_expected_user_temp_path(&path, &local_app_data)
+    {
         return Err(WindowsError::new(
             WindowsErrorKind::InvalidData,
             "validate user temp directory",
@@ -548,6 +553,18 @@ fn user_temp_path() -> WindowsResult<std::path::PathBuf> {
         ));
     }
     Ok(path)
+}
+
+#[cfg(windows)]
+fn is_expected_user_temp_path(path: &std::path::Path, local_app_data: &std::path::Path) -> bool {
+    fn normalized(path: &std::path::Path) -> String {
+        path.as_os_str()
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_owned()
+    }
+
+    normalized(path).eq_ignore_ascii_case(&normalized(&local_app_data.join("Temp")))
 }
 
 #[cfg(windows)]
@@ -717,6 +734,44 @@ mod tests {
             r"C:relative\Temp"
         )));
     }
+
+    #[test]
+    fn destructive_temp_cleanup_accepts_only_local_app_data_temp() {
+        let local_app_data = std::path::Path::new(r"C:\Users\example\AppData\Local");
+        assert!(is_expected_user_temp_path(
+            std::path::Path::new(r"C:\Users\example\AppData\Local\Temp\"),
+            local_app_data
+        ));
+        assert!(!is_expected_user_temp_path(
+            std::path::Path::new(r"C:\Users\example\Documents"),
+            local_app_data
+        ));
+    }
+
+    #[test]
+    fn handle_based_temp_deletion_rejects_files_outside_the_trusted_root() {
+        let root_directory = tempfile::tempdir().expect("trusted temp root");
+        let outside_directory = tempfile::tempdir().expect("outside directory");
+        let inside = root_directory.path().join("inside.tmp");
+        let outside = outside_directory.path().join("outside.txt");
+        std::fs::write(&inside, b"inside").expect("write inside file");
+        std::fs::write(&outside, b"outside").expect("write outside file");
+        let root = TrustedTempRoot::open(root_directory.path().to_path_buf())
+            .expect("open trusted root handle");
+
+        let deleted = delete_validated_temp_file(&root, &inside, 0)
+            .expect("delete an opened in-root file by handle");
+        assert_eq!(deleted, 6);
+        assert!(!inside.exists());
+
+        let error = delete_validated_temp_file(&root, &outside, 0)
+            .expect_err("outside file must not be deleted");
+        assert_eq!(error.kind, WindowsErrorKind::ExternalConflict);
+        assert_eq!(
+            std::fs::read(&outside).expect("outside file remains"),
+            b"outside"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -775,7 +830,11 @@ pub fn seconds_to_days(seconds: u64) -> u64 {
 }
 
 #[cfg(windows)]
-fn temp_cleanup_walk<F>(min_age_days: u64, mut visit: F) -> WindowsResult<bool>
+fn temp_cleanup_walk<F>(
+    root: &std::path::Path,
+    min_age_days: u64,
+    mut visit: F,
+) -> WindowsResult<bool>
 where
     F: FnMut(&std::path::Path, &str, u64, u64),
 {
@@ -785,8 +844,7 @@ where
 
     const MAX_SCAN_DURATION: Duration = Duration::from_millis(500);
 
-    let root = user_temp_path()?;
-    if path_has_reparse_component(&root).unwrap_or(true) {
+    if path_has_reparse_component(root).unwrap_or(true) {
         return Err(WindowsError::new(
             WindowsErrorKind::InvalidData,
             "temp root has a reparse component",
@@ -798,7 +856,7 @@ where
     let mut truncated = false;
     let mut visited = 0usize;
     let mut directories = 0u64;
-    let mut pending = vec![(root, 0u8)];
+    let mut pending = vec![(root.to_path_buf(), 0u8)];
 
     while let Some((directory, depth)) = pending.pop() {
         if started.elapsed() >= MAX_SCAN_DURATION || visited >= MAX_CLEANUP_CANDIDATES {
@@ -863,7 +921,8 @@ where
 pub fn plan_user_temp_cleanup(min_age_days: u64) -> WindowsResult<TempCleanupPlan> {
     let mut candidates = Vec::new();
     let mut total_bytes = 0u64;
-    let truncated = temp_cleanup_walk(min_age_days, |_path, file_name, size, age_days| {
+    let root = user_temp_path()?;
+    let truncated = temp_cleanup_walk(&root, min_age_days, |_path, file_name, size, age_days| {
         total_bytes = total_bytes.saturating_add(size);
         candidates.push(TempCleanupCandidate {
             file_name: file_name.to_owned(),
@@ -879,35 +938,237 @@ pub fn plan_user_temp_cleanup(min_age_days: u64) -> WindowsResult<TempCleanupPla
     })
 }
 
+#[cfg(windows)]
+struct TrustedTempRoot {
+    path: std::path::PathBuf,
+    final_path: String,
+    _handle: std::fs::File,
+}
+
+#[cfg(windows)]
+impl TrustedTempRoot {
+    fn open(path: std::path::PathBuf) -> WindowsResult<Self> {
+        use std::os::windows::fs::MetadataExt;
+        use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+        if path_has_reparse_component(&path).unwrap_or(true) {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "open trusted temp root without reparse components",
+                None,
+            ));
+        }
+        let handle = open_temp_handle(&path, false, true)?;
+        let metadata = handle
+            .metadata()
+            .map_err(|error| WindowsError::io("read trusted temp root", &error))?;
+        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "validate trusted temp root handle",
+                None,
+            ));
+        }
+        let final_path = final_path_for_handle(&handle)?;
+        Ok(Self {
+            path,
+            final_path,
+            _handle: handle,
+        })
+    }
+}
+
+#[cfg(windows)]
+fn open_temp_handle(
+    path: &std::path::Path,
+    request_delete: bool,
+    directory: bool,
+) -> WindowsResult<std::fs::File> {
+    use std::os::windows::{ffi::OsStrExt, io::FromRawHandle};
+    use windows::{
+        core::PCWSTR,
+        Win32::{
+            Foundation::HANDLE,
+            Storage::FileSystem::{
+                CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS,
+                FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+                FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+            },
+        },
+    };
+
+    let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    wide.push(0);
+    let access = FILE_READ_ATTRIBUTES.0 | if request_delete { DELETE.0 } else { 0 };
+    let flags = if directory {
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT
+    } else {
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT
+    };
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR::from_raw(wide.as_ptr()),
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            flags,
+            HANDLE::default(),
+        )
+    }
+    .map_err(|error| api_error("open temp cleanup object", error))?;
+    Ok(unsafe { std::fs::File::from_raw_handle(handle.0) })
+}
+
+#[cfg(windows)]
+fn final_path_for_handle(file: &std::fs::File) -> WindowsResult<String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::{
+        Foundation::{GetLastError, HANDLE},
+        Storage::FileSystem::{GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED},
+    };
+
+    let mut buffer = vec![0u16; 512];
+    loop {
+        let length = unsafe {
+            GetFinalPathNameByHandleW(
+                HANDLE(file.as_raw_handle()),
+                &mut buffer,
+                FILE_NAME_NORMALIZED,
+            )
+        } as usize;
+        if length == 0 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ApiFailure,
+                "resolve final temp cleanup path",
+                Some(i64::from(unsafe { GetLastError() }.0)),
+            ));
+        }
+        if length < buffer.len() {
+            return String::from_utf16(&buffer[..length]).map_err(|_| {
+                WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "decode final temp cleanup path",
+                    None,
+                )
+            });
+        }
+        if length > 32_768 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::ResourceLimit,
+                "read bounded final temp cleanup path",
+                None,
+            ));
+        }
+        buffer.resize(length, 0);
+    }
+}
+
+#[cfg(windows)]
+fn final_path_is_below(root: &str, candidate: &str) -> bool {
+    let root = root.trim_end_matches(['\\', '/']);
+    let Some(prefix) = candidate.get(..root.len()) else {
+        return false;
+    };
+    if !prefix.eq_ignore_ascii_case(root) {
+        return false;
+    }
+    candidate
+        .get(root.len()..)
+        .and_then(|suffix| suffix.chars().next())
+        .is_some_and(|separator| matches!(separator, '\\' | '/'))
+}
+
+#[cfg(windows)]
+fn delete_validated_temp_file(
+    root: &TrustedTempRoot,
+    path: &std::path::Path,
+    min_age_days: u64,
+) -> WindowsResult<u64> {
+    use std::{os::windows::fs::MetadataExt, os::windows::io::AsRawHandle, time::SystemTime};
+    use windows::Win32::{
+        Foundation::{BOOLEAN, HANDLE},
+        Storage::FileSystem::{
+            FileDispositionInfo, SetFileInformationByHandle, FILE_ATTRIBUTE_REPARSE_POINT,
+            FILE_DISPOSITION_INFO,
+        },
+    };
+
+    // Open the leaf without following a leaf reparse point, then make every
+    // decision and the final disposition against this same handle. If an
+    // ancestor was swapped for a junction before open, the final path check
+    // below rejects the resulting object; swaps after open cannot retarget it.
+    let file = open_temp_handle(path, true, false)?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| WindowsError::io("revalidate temp cleanup file", &error))?;
+    let age_days = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .map(|elapsed| seconds_to_days(elapsed.as_secs()));
+    if !metadata.is_file()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+        || !age_days.is_some_and(|age| age >= min_age_days)
+    {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ExternalConflict,
+            "revalidate temp cleanup candidate",
+            None,
+        ));
+    }
+    let final_path = final_path_for_handle(&file)?;
+    if !final_path_is_below(&root.final_path, &final_path) {
+        return Err(WindowsError::new(
+            WindowsErrorKind::ExternalConflict,
+            "reject temp cleanup candidate outside trusted root",
+            None,
+        ));
+    }
+
+    let disposition = FILE_DISPOSITION_INFO {
+        DeleteFile: BOOLEAN(1),
+    };
+    unsafe {
+        SetFileInformationByHandle(
+            HANDLE(file.as_raw_handle()),
+            FileDispositionInfo,
+            (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    }
+    .map_err(|error| api_error("delete validated temp cleanup file by handle", error))?;
+    Ok(metadata.len())
+}
+
 /// 同じ条件で再走査し、1件ずつ削除する。**元に戻せない**。
 #[cfg(windows)]
 pub fn delete_user_temp_files(min_age_days: u64) -> WindowsResult<TempCleanupOutcome> {
     let mut deleted_count = 0u64;
     let mut freed_bytes = 0u64;
     let mut skipped: Vec<TempCleanupSkip> = Vec::new();
-    let truncated =
-        temp_cleanup_walk(
-            min_age_days,
-            |path, file_name, size, _age| match std::fs::remove_file(path) {
-                Ok(()) => {
-                    deleted_count = deleted_count.saturating_add(1);
-                    freed_bytes = freed_bytes.saturating_add(size);
+    let root = TrustedTempRoot::open(user_temp_path()?)?;
+    let truncated = temp_cleanup_walk(&root.path, min_age_days, |path, file_name, _size, _age| {
+        match delete_validated_temp_file(&root, path, min_age_days) {
+            Ok(size) => {
+                deleted_count = deleted_count.saturating_add(1);
+                freed_bytes = freed_bytes.saturating_add(size);
+            }
+            Err(error) => {
+                if skipped.len() < MAX_WARNINGS {
+                    let reason = match error.kind {
+                        WindowsErrorKind::AccessDenied => "使用中か、権限がありません",
+                        WindowsErrorKind::ExternalConflict => "対象が変わったため触りませんでした",
+                        _ => "削除できませんでした",
+                    };
+                    skipped.push(TempCleanupSkip {
+                        file_name: file_name.to_owned(),
+                        reason: reason.to_owned(),
+                    });
                 }
-                Err(error) => {
-                    if skipped.len() < MAX_WARNINGS {
-                        let reason = match error.kind() {
-                            std::io::ErrorKind::PermissionDenied => "使用中か、権限がありません",
-                            std::io::ErrorKind::NotFound => "すでにありません",
-                            _ => "削除できませんでした",
-                        };
-                        skipped.push(TempCleanupSkip {
-                            file_name: file_name.to_owned(),
-                            reason: reason.to_owned(),
-                        });
-                    }
-                }
-            },
-        )?;
+            }
+        }
+    })?;
     Ok(TempCleanupOutcome {
         deleted_count,
         freed_bytes,

@@ -117,6 +117,10 @@ impl SceneLabel {
         Self(String::new())
     }
 
+    pub(crate) fn journal_redacted() -> Self {
+        Self("[REDACTED]".to_owned())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

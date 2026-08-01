@@ -41,6 +41,10 @@ impl SensitiveWindowTitle {
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub(crate) fn journal_redacted() -> Self {
+        Self("[REDACTED]".to_owned())
+    }
 }
 
 impl fmt::Debug for SensitiveWindowTitle {

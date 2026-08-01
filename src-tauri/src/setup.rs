@@ -197,13 +197,45 @@ fn bounded_summary(stdout: &[u8], stderr: &[u8], succeeded: bool) -> String {
     }
 }
 
+fn winget_alias_path(local_app_data: &std::path::Path) -> std::path::PathBuf {
+    local_app_data
+        .join("Microsoft")
+        .join("WindowsApps")
+        .join("winget.exe")
+}
+
+#[cfg(windows)]
+fn winget_executable_path() -> CoreResult<std::path::PathBuf> {
+    use windows::Win32::UI::Shell::FOLDERID_LocalAppData;
+
+    let local_app_data =
+        crate::windows::known_folder_path(FOLDERID_LocalAppData).map_err(|_| {
+            CoreError::new(
+                "WINGET_PATH_UNAVAILABLE",
+                "APPLY",
+                false,
+                "WinGetの安全な起動場所を確認できませんでした。",
+            )
+        })?;
+    if !local_app_data.is_absolute() {
+        return Err(CoreError::new(
+            "WINGET_PATH_UNAVAILABLE",
+            "APPLY",
+            false,
+            "WinGetの安全な起動場所を確認できませんでした。",
+        ));
+    }
+    Ok(winget_alias_path(&local_app_data))
+}
+
 #[cfg(windows)]
 pub fn install(app_id: &str) -> CoreResult<InstallOutcome> {
     let app = find_allowed(app_id).ok_or_else(|| {
         CoreError::invalid_request("許可されていないアプリIDです。一覧のアプリだけ導入できます。")
     })?;
     let args = install_args(app.winget_id);
-    let output = std::process::Command::new("winget")
+    let winget = winget_executable_path()?;
+    let output = std::process::Command::new(winget)
         .args(&args)
         .output()
         .map_err(|_| {
@@ -260,6 +292,22 @@ mod tests {
         assert!(find_allowed("totally-unknown").is_none());
         assert!(find_allowed("../../evil").is_none());
         assert!(find_allowed("Discord.Discord; rm -rf").is_none());
+    }
+
+    #[test]
+    fn winget_path_is_anchored_to_the_known_local_app_data_directory() {
+        let local_app_data = std::path::Path::new(r"C:\Users\example\AppData\Local");
+        assert_eq!(
+            winget_alias_path(local_app_data),
+            local_app_data
+                .join("Microsoft")
+                .join("WindowsApps")
+                .join("winget.exe")
+        );
+        assert_ne!(
+            winget_alias_path(local_app_data),
+            std::path::PathBuf::from("winget.exe")
+        );
     }
 
     #[test]

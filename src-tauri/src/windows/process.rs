@@ -240,6 +240,25 @@ impl Drop for OwnedHandle {
 }
 
 #[cfg(windows)]
+fn process_session_id(process_id: u32) -> WindowsResult<u32> {
+    use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+
+    let mut session_id = 0;
+    unsafe { ProcessIdToSessionId(process_id, &mut session_id) }.map_err(|error| {
+        WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "ProcessIdToSessionId for process observation",
+            Some(i64::from(error.code().0)),
+        )
+    })?;
+    Ok(session_id)
+}
+
+fn belongs_to_process_session(own_session_id: u32, candidate_session_id: u32) -> bool {
+    own_session_id == candidate_session_id
+}
+
+#[cfg(windows)]
 pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
     use windows::{
         core::HRESULT,
@@ -252,6 +271,7 @@ pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
         },
     };
 
+    let own_session_id = process_session_id(std::process::id())?;
     let snapshot = OwnedHandle(
         unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.map_err(|error| {
             WindowsError::new(
@@ -291,8 +311,16 @@ pub fn snapshot_process_identities() -> WindowsResult<ProcessSnapshotReport> {
     loop {
         let process_id = entry.th32ProcessID;
         if process_id != 0 {
-            match identity_for_process(process_id, wmi_ids.contains(&process_id)) {
-                Ok(identity) => report.processes.push(identity),
+            let identity = process_session_id(process_id).and_then(|session_id| {
+                if belongs_to_process_session(own_session_id, session_id) {
+                    identity_for_process(process_id, wmi_ids.contains(&process_id)).map(Some)
+                } else {
+                    Ok(None)
+                }
+            });
+            match identity {
+                Ok(Some(identity)) => report.processes.push(identity),
+                Ok(None) => {}
                 Err(error) => {
                     let end = entry
                         .szExeFile
@@ -484,5 +512,25 @@ mod tests {
                 .expect("mismatched creation time status"),
             ProcessInstanceStatus::Exited
         );
+    }
+
+    #[test]
+    fn process_session_filter_rejects_other_sessions() {
+        assert!(belongs_to_process_session(4, 4));
+        assert!(!belongs_to_process_session(4, 9));
+    }
+
+    #[test]
+    fn process_snapshot_contains_only_the_callers_session() {
+        let own_session = process_session_id(std::process::id()).expect("current process session");
+        let report = snapshot_process_identities().expect("same-session process snapshot");
+        assert!(report
+            .processes
+            .iter()
+            .any(|identity| identity.process_id == std::process::id()));
+        assert!(report
+            .processes
+            .iter()
+            .all(|identity| { process_session_id(identity.process_id).ok() == Some(own_session) }));
     }
 }

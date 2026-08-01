@@ -9,7 +9,7 @@ import type {
   DataMode,
 } from "../model";
 import { isMutationAllowed, riskLabel } from "../model";
-import { detailPointsForScreen, methodSummaryForScreen, screenText } from "../publicCopy";
+import { detailPointsForScreen, getRiskReasons, methodSummaryForScreen, screenText } from "../publicCopy";
 import { AppearanceScenesPanel } from "./AppearanceScenesPanel";
 import { ExplorerRestartPanel } from "./ExplorerRestartPanel";
 import { Icon } from "./Icon";
@@ -101,8 +101,30 @@ export function ActionBrowser({
   onAddToDraft,
   onError,
 }: ActionBrowserProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+
   const categoryActions = actions.filter((action) => action.category === selectedCategory);
-  const selected = actions.find((action) => action.id === selectedActionId) ?? categoryActions[0];
+
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const isSearching = trimmedQuery.length > 0;
+
+  const displayedActions = isSearching
+    ? actions.filter((action) => {
+        const categoryObj = CATEGORIES.find((c) => c.id === action.category);
+        const categoryLabel = categoryObj?.label.toLowerCase() ?? "";
+        const categoryDesc = categoryObj?.description.toLowerCase() ?? "";
+        const nameMatch = action.name.toLowerCase().includes(trimmedQuery);
+        const descMatch = action.description.toLowerCase().includes(trimmedQuery)
+          || screenText(action.description, "").toLowerCase().includes(trimmedQuery);
+        const tagMatch = action.tags.some((tag) => tag.toLowerCase().includes(trimmedQuery));
+        const categoryMatch = action.category.toLowerCase().includes(trimmedQuery)
+          || categoryLabel.includes(trimmedQuery)
+          || categoryDesc.includes(trimmedQuery);
+        return nameMatch || descMatch || tagMatch || categoryMatch;
+      })
+    : categoryActions;
+
+  const selected = actions.find((action) => action.id === selectedActionId) ?? displayedActions[0];
 
   return (
     <div className="view action-view">
@@ -113,6 +135,27 @@ export function ActionBrowser({
           <p>左で結果を選び、右で現在の状態、適用後、戻し方まで確認できます。</p>
         </div>
       </header>
+      <div className="action-search-box">
+        <Icon name="search" size={16} />
+        <input
+          aria-label="キーワードで項目を絞り込む"
+          className="action-search-input"
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="キーワードで絞り込み（名前・説明・タグ・カテゴリ）…"
+          type="text"
+          value={searchQuery}
+        />
+        {searchQuery.length > 0 ? (
+          <button
+            aria-label="検索をクリア"
+            className="action-search-clear"
+            onClick={() => setSearchQuery("")}
+            type="button"
+          >
+            <Icon name="close" size={14} />
+          </button>
+        ) : null}
+      </div>
       {/* カテゴリは横一列にする。以前は左の列の8割をこれが占め、
           肝心のAction一覧が最下部に押し込まれていた。下で選んで上のボタンへ戻る、
           という往復はこの配置が作っていた。 */}
@@ -146,16 +189,16 @@ export function ActionBrowser({
               // Raycast や Linear と同じく、一覧は上下キーだけで辿れるようにする。
               // 選択が動くと右の詳細も追従するので、手をキーボードから離さずに読める。
               const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
-              if (!keys.includes(event.key) || categoryActions.length === 0) return;
+              if (!keys.includes(event.key) || displayedActions.length === 0) return;
               event.preventDefault();
-              const current = categoryActions.findIndex((item) => item.id === selected?.id);
-              const last = categoryActions.length - 1;
+              const current = displayedActions.findIndex((item) => item.id === selected?.id);
+              const last = displayedActions.length - 1;
               const next =
                 event.key === "Home" ? 0
                 : event.key === "End" ? last
                 : event.key === "ArrowDown" ? Math.min(current + 1, last)
                 : Math.max(current - 1, 0);
-              const target = categoryActions[next];
+              const target = displayedActions[next];
               if (target === undefined || target.id === selected?.id) return;
               onSelectAction(target.id);
               const row = event.currentTarget.querySelectorAll<HTMLButtonElement>(".action-row")[next];
@@ -164,14 +207,20 @@ export function ActionBrowser({
             }}
           >
             <p className="list-label">
-              <span>このカテゴリ</span>
+              <span>{isSearching ? `絞り込み (${actions.length}件中 ${displayedActions.length}件)` : `このカテゴリ (${categoryActions.length}件 / 全${actions.length}件)`}</span>
               {/* 矢印で辿れることは、言われなければ誰も気づかない。
                   コマンドパレットと同じようにヒントを出す（Raycast/Linear の作法）。 */}
               <span className="list-label__hint"><kbd>↑</kbd><kbd>↓</kbd>で移動</span>
             </p>
-            {categoryActions.length === 0 ? (
-              <div className="inline-empty"><Icon name="action" /><p><strong>この種類には項目がありません</strong>別の種類を選んでください。</p></div>
-            ) : categoryActions.map((action) => (
+            {actions.length === 0 ? (
+              <div className="inline-empty"><Icon name="action" /><p><strong>項目が読めていません</strong>安全コアからの応答を確認してください。</p></div>
+            ) : displayedActions.length === 0 ? (
+              isSearching ? (
+                <div className="inline-empty"><Icon name="search" /><p><strong>「{searchQuery}」に該当する項目はありません</strong>検索キーワードを変えてお試しください。</p></div>
+              ) : (
+                <div className="inline-empty"><Icon name="action" /><p><strong>この種類には項目がありません</strong>別の種類を選んでください。</p></div>
+              )
+            ) : displayedActions.map((action) => (
               <button
                 aria-current={selected?.id === action.id ? "true" : undefined}
                 className="action-row"
@@ -429,6 +478,23 @@ function ActionDetail({ action, bootstrap, dataMode, detecting, inDraft, preview
         {action.requiresExplorerRestart ? <span className="attribute-chip attribute-chip--caution">反映にエクスプローラーの再起動が必要</span> : null}
         {action.riskLevel === "experimental" ? <span className="attribute-chip attribute-chip--experimental">実験的</span> : null}
       </div>
+      {(() => {
+        const reasons = getRiskReasons(action);
+        if (reasons.length === 0) return null;
+        return (
+          <div aria-label="注意が必要な理由" className="risk-reasons-box">
+            <span className="risk-reasons-title">
+              <Icon name="warning" size={14} />
+              {action.riskLevel === "safe" ? "注意事項" : `${riskLabel(action.riskLevel)}の理由`}
+            </span>
+            <ul>
+              {reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
       {detailsOpen ? (
         <div className="detail-disclosure" id={`details-${action.id}`}>
           <div><span className="detail-disclosure__label">{observationLike ? "確認方法" : "変更方法"}</span><p>{methodSummaryForScreen(action)}</p></div>
