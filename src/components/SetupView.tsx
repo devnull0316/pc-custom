@@ -5,6 +5,7 @@ import type {
   ActionPresentation,
   BootstrapStatus,
   DataMode,
+  DisplayRescueReport,
   InstallOutcome,
   SetupAppDto,
 } from "../model";
@@ -23,6 +24,8 @@ interface SetupViewProps {
   onPowerToysLaunch: () => void;
   actions: readonly ActionPresentation[];
   detectionPendingId: string | null;
+  displayRescue: DisplayRescueReport | null;
+  displayRescueError: string | null;
   previewPendingId: string | null;
   onDetect: (actionId: string) => void;
   onPreview: (action: ActionPresentation) => void;
@@ -54,6 +57,8 @@ export function SetupView({
   onPowerToysLaunch,
   actions,
   detectionPendingId,
+  displayRescue,
+  displayRescueError,
   previewPendingId,
   onDetect,
   onPreview,
@@ -197,6 +202,8 @@ export function SetupView({
           dataMode={dataMode}
           defaultAppsAction={actions.find((action) => action.id === "setup.default_apps")}
           detectingId={detectionPendingId}
+          displayRescue={displayRescue}
+          displayRescueError={displayRescueError}
           onDetect={onDetect}
           onError={onError}
           onNotice={onNotice}

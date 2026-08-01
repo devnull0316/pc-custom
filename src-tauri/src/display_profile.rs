@@ -70,6 +70,19 @@ pub struct DisplayProfile {
     pub paths: Vec<DisplayPathFacts>,
 }
 
+impl DisplayProfile {
+    /// 保存済みの配置をディスプレイ構成へ結び付けるために必要な最低条件。
+    /// 更新頻度は座標復元の安全性に影響しないため、ここでは分母を要件にしない。
+    pub fn has_usable_topology(&self) -> bool {
+        !self.paths.is_empty()
+            && self.paths.len() <= 64
+            && self
+                .paths
+                .iter()
+                .all(|path| path.width > 0 && path.height > 0)
+    }
+}
+
 /// 2つの構成を見比べた結果。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -150,6 +163,29 @@ pub fn compare_profiles(left: &DisplayProfile, right: &DisplayProfile) -> Profil
             changed_target_ids: changed,
         }
     }
+}
+
+/// ウィンドウ座標を戻せる同じデスクトップ構成かを比べる。
+///
+/// 更新頻度と可変更新頻度の状態はウィンドウ座標を変えないため比較対象外。
+/// 画面数、接続先、複製関係、向き、解像度、拡張デスクトップ上の位置が違えば
+/// 別構成として必ず停止する。
+pub fn compare_topology(left: &DisplayProfile, right: &DisplayProfile) -> Result<(), String> {
+    if !left.has_usable_topology() || !right.has_usable_topology() {
+        return Err("表示構成を安全に読み取れませんでした。".to_owned());
+    }
+    if left.paths.len() != right.paths.len() {
+        return Err("つながっている画面の数が保存時と違います。".to_owned());
+    }
+    if left
+        .paths
+        .iter()
+        .zip(right.paths.iter())
+        .any(|(saved, current)| !same_except_refresh(saved, current))
+    {
+        return Err("画面の接続先、並び、向き、または解像度が保存時と違います。".to_owned());
+    }
+    Ok(())
 }
 
 /// 表示のために頻度を Hz へ直す。割り切れないものは丸めない。
@@ -455,6 +491,18 @@ mod tests {
             compare_profiles(&ordered, &swapped),
             ProfileComparison::NotComparable { .. }
         ));
+    }
+
+    #[test]
+    fn topology_comparison_ignores_refresh_but_not_geometry() {
+        let saved = profile(vec![path(1, 60)]);
+        let mut faster = path(1, 144);
+        faster.boost_refresh_rate = true;
+        assert_eq!(compare_topology(&saved, &profile(vec![faster])), Ok(()));
+
+        let mut moved = path(1, 60);
+        moved.source_x = 1920;
+        assert!(compare_topology(&saved, &profile(vec![moved])).is_err());
     }
 
     #[test]

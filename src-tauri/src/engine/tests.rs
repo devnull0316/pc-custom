@@ -113,6 +113,7 @@ fn layout_snapshot(label: &str) -> WindowLayoutSnapshot {
     WindowLayoutSnapshot {
         snapshot_id: Uuid::new_v4(),
         captured_at_unix_ms: 1,
+        display_profile: None,
         entries: vec![SavedWindowPlacementEntry {
             entry_id: Uuid::new_v4(),
             process_file_identity: ProcessFileIdentity {
@@ -143,6 +144,7 @@ fn layout_snapshot(label: &str) -> WindowLayoutSnapshot {
         }],
         excluded_game_windows: 0,
         skipped_windows: 0,
+        exclusions: Vec::new(),
     }
 }
 

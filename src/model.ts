@@ -410,6 +410,44 @@ export interface WindowLayoutStatus {
   skippedWindows: number;
 }
 
+export type DisplayRescueState =
+  | "no_saved_layout"
+  | "saved_display_unknown"
+  | "display_topology_changed"
+  | "stable"
+  | "rescue_available"
+  | "targets_unavailable";
+
+export type WindowLayoutExclusionReason = "game" | "fullscreen" | "higher_integrity";
+
+export interface WindowLayoutExclusion {
+  applicationLabel: string;
+  reason: WindowLayoutExclusionReason;
+}
+
+export type WindowLayoutIssueReason =
+  | "not_running"
+  | "ambiguous_match"
+  | "game_excluded"
+  | "external_change"
+  | "verification_mismatch";
+
+export interface WindowLayoutIssue {
+  target: string;
+  reason: WindowLayoutIssueReason;
+}
+
+export interface DisplayRescueReport {
+  state: DisplayRescueState;
+  canRestore: boolean;
+  savedWindowCount: number;
+  matchedWindowCount: number;
+  driftedWindowCount: number;
+  message: string;
+  exclusions: readonly WindowLayoutExclusion[];
+  unavailableTargets: readonly WindowLayoutIssue[];
+}
+
 export type OffscreenWindowBlockReason =
   | "higher_integrity"
   | "not_responding"

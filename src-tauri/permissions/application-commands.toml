@@ -46,6 +46,7 @@ commands.allow = [
   "open_windows_settings",
   "get_window_layout_status",
   "save_window_layout",
+  "get_display_rescue_status",
   "list_offscreen_windows",
   "rescue_offscreen_window",
   "rollback_offscreen_window"

@@ -9,6 +9,7 @@ import type {
   CoreErrorShape,
   CreateProfileRequest,
   DetectionResponse,
+  DisplayRescueReport,
   HealthReport,
   HotCornerSetting,
   HotCornerState,
@@ -270,6 +271,10 @@ export function saveWindowLayout(
   return call<WindowLayoutStatus>("save_window_layout", {
     unregisteredGamesClosed,
   });
+}
+
+export function getDisplayRescueStatus(): Promise<DisplayRescueReport> {
+  return call<DisplayRescueReport>("get_display_rescue_status");
 }
 
 export function listOffscreenWindows(): Promise<OffscreenWindowScan> {

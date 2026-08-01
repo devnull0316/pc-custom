@@ -155,8 +155,23 @@ impl PcCustomEngine {
             )
         })?;
         let exclusions = profile_store.registered_game_file_identities()?;
-        let snapshot = crate::windows::capture_window_layout(&exclusions)
+        let display_before =
+            crate::display_profile::read_display_profile().map_err(display_rescue_windows_error)?;
+        let mut snapshot = crate::windows::capture_window_layout(&exclusions)
             .map_err(window_layout_windows_error)?;
+        let display_after =
+            crate::display_profile::read_display_profile().map_err(display_rescue_windows_error)?;
+        crate::display_profile::compare_topology(&display_before, &display_after).map_err(
+            |_| {
+                CoreError::new(
+                    "DISPLAY_CHANGED_DURING_CAPTURE",
+                    "WINDOW_LAYOUT",
+                    true,
+                    "保存中に表示構成が変わったため、配置を保存しませんでした。画面の接続が落ち着いてからやり直してください。",
+                )
+            },
+        )?;
+        snapshot.display_profile = Some(display_after);
         if profile_store.registered_game_file_identities()? != exclusions {
             return Err(CoreError::new(
                 "STALE_GAME_IDENTITY",
@@ -166,6 +181,42 @@ impl PcCustomEngine {
             ));
         }
         window_layout_store.replace(snapshot)
+    }
+
+    /// 保存済み配置との差を読むだけ。ウィンドウ移動は Action の明示的な commit だけが行う。
+    pub fn display_rescue_status(&self) -> CoreResult<crate::display_rescue::DisplayRescueReport> {
+        let store = self.window_layout_store.as_ref().ok_or_else(|| {
+            CoreError::recovery_required(
+                "ウィンドウ配置の保存領域を初期化できなかったため、確認を停止しました。",
+            )
+        })?;
+        let Some(snapshot) = store.snapshot_for_inspection() else {
+            return Ok(crate::display_rescue::DisplayRescueReport::no_saved_layout());
+        };
+        let Some(saved_display) = snapshot.display_profile.as_ref() else {
+            return Ok(
+                crate::display_rescue::DisplayRescueReport::saved_display_unknown(&snapshot),
+            );
+        };
+        let current_display =
+            crate::display_profile::read_display_profile().map_err(display_rescue_windows_error)?;
+        if let Err(reason) =
+            crate::display_profile::compare_topology(saved_display, &current_display)
+        {
+            return Ok(
+                crate::display_rescue::DisplayRescueReport::topology_changed(&snapshot, reason),
+            );
+        }
+        let exclusions = self
+            .runtime_profile_store()?
+            .registered_game_file_identities()?;
+        let inspection = crate::windows::inspect_window_layout(&snapshot, &exclusions)
+            .map_err(window_layout_windows_error)?;
+        Ok(crate::display_rescue::build_report(
+            &snapshot,
+            &current_display,
+            inspection,
+        ))
     }
 
     pub fn scan_offscreen_windows(
@@ -597,6 +648,25 @@ impl PcCustomEngine {
                     return Err(stale_window_layout_preview());
                 }
             }
+            let Some(saved_display) = invocation.desired.display_profile.as_ref() else {
+                return Err(CoreError::invalid_request(
+                    "保存時の表示構成が記録されていません。現在の正しい配置を保存し直してください。",
+                ));
+            };
+            let current_display = crate::display_profile::read_display_profile()
+                .map_err(display_rescue_windows_error)?;
+            if let Err(reason) =
+                crate::display_profile::compare_topology(saved_display, &current_display)
+            {
+                return Err(CoreError::new(
+                    "DISPLAY_TOPOLOGY_CHANGED",
+                    "VALIDATE",
+                    true,
+                    format!(
+                        "保存時と表示構成が違うため、ウィンドウは動かしません。{reason} 元の画面構成へ戻してから確認してください。"
+                    ),
+                ));
+            }
         }
         Ok(())
     }
@@ -819,6 +889,15 @@ fn window_layout_windows_error(error: crate::windows::WindowsError) -> CoreError
         "WINDOW_LAYOUT",
         retryable,
         "ウィンドウ配置を安全に確認できませんでした。対象は変更していません。",
+    )
+}
+
+fn display_rescue_windows_error(error: crate::windows::WindowsError) -> CoreError {
+    CoreError::new(
+        "DISPLAY_PROFILE_API_FAILURE",
+        "WINDOW_LAYOUT",
+        error.kind == crate::windows::WindowsErrorKind::ResourceLimit,
+        "現在の表示構成を安全に確認できませんでした。ウィンドウは動かしていません。",
     )
 }
 

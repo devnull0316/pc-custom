@@ -7,6 +7,7 @@ import {
   createProfile,
   deleteProfile,
   detectAction,
+  getDisplayRescueStatus,
   listProfiles,
   loadCoreSnapshot,
   previewActions,
@@ -37,6 +38,7 @@ import type {
   CategoryId,
   CreateProfileRequest,
   DataMode,
+  DisplayRescueReport,
   JsonValue,
   ModeRibbonColor,
   PreviewResponse,
@@ -177,6 +179,8 @@ export function App() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [uiError, setUiError] = useState<UiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [displayRescue, setDisplayRescue] = useState<DisplayRescueReport | null>(null);
+  const [displayRescueError, setDisplayRescueError] = useState<string | null>(null);
   // 直前に適用した項目。その場で戻せるようにするために持つ。
   // 以前は適用後にタイムラインへ強制移動しており、戻すのに画面移動と項目探しが必要だった。
   const [justApplied, setJustApplied] = useState<CommitItem[]>([]);
@@ -185,6 +189,7 @@ export function App() {
   const [trial, setTrial] = useState<{ transactionId: string; endsAt: number; saveable: boolean } | null>(null);
   const [trialLeft, setTrialLeft] = useState(0);
   const initialLoadStarted = useRef(false);
+  const rescueNoticeActive = useRef(false);
 
   const handleUiError = useCallback((error: unknown) => {
     setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -228,6 +233,45 @@ export function App() {
     void refreshSnapshot(true);
     void refreshProfiles();
   }, [refreshProfiles, refreshSnapshot]);
+
+  useEffect(() => {
+    if (dataMode !== "live") {
+      setDisplayRescue(null);
+      setDisplayRescueError(null);
+      rescueNoticeActive.current = false;
+      return;
+    }
+    let disposed = false;
+    let inFlight = false;
+    async function inspectSavedLayout() {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const report = await getDisplayRescueStatus();
+        if (disposed) return;
+        setDisplayRescue(report);
+        setDisplayRescueError(null);
+        const rescueAvailable = report.state === "rescue_available";
+        if (rescueAvailable && !rescueNoticeActive.current) {
+          setNotice(report.message);
+        }
+        rescueNoticeActive.current = rescueAvailable;
+      } catch (error: unknown) {
+        if (disposed) return;
+        setDisplayRescue(null);
+        setDisplayRescueError(publicErrorMessage(error));
+        rescueNoticeActive.current = false;
+      } finally {
+        inFlight = false;
+      }
+    }
+    void inspectSavedLayout();
+    const interval = window.setInterval(() => void inspectSavedLayout(), 3_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
+  }, [dataMode]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -635,6 +679,8 @@ export function App() {
               bootstrap={bootstrap}
               dataMode={dataMode}
               detectionPendingId={detectionPendingId}
+              displayRescue={displayRescue}
+              displayRescueError={displayRescueError}
               onDetect={(id) => void handleDetect(id)}
               onError={handleUiError}
               onNotice={setNotice}

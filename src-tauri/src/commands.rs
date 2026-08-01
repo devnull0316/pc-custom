@@ -67,6 +67,13 @@ pub fn save_window_layout(
 }
 
 #[tauri::command]
+pub fn get_display_rescue_status(
+    state: State<'_, ApplicationState>,
+) -> CoreResult<crate::display_rescue::DisplayRescueReport> {
+    state.engine()?.display_rescue_status()
+}
+
+#[tauri::command]
 pub fn list_offscreen_windows(
     app: tauri::AppHandle,
     state: State<'_, ApplicationState>,

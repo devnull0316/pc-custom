@@ -111,11 +111,11 @@ pub(crate) use window_placement::{
 };
 pub use window_placement::{
     capture_window_layout, capture_window_layout_originals, classify_window_layout_transaction,
-    observe_original_window_placements, observe_window_layout, restore_window_layout,
-    restore_window_placement_entries, verify_captured_window_layout_originals,
-    OffscreenWindowBlockReason, OffscreenWindowCandidate, OffscreenWindowRescueManager,
-    OffscreenWindowRescueOutcome, OffscreenWindowScan, OffscreenWindowUndo,
-    WindowLayoutTransactionState,
+    inspect_window_layout, observe_original_window_placements, observe_window_layout,
+    restore_window_layout, restore_window_placement_entries,
+    verify_captured_window_layout_originals, OffscreenWindowBlockReason, OffscreenWindowCandidate,
+    OffscreenWindowRescueManager, OffscreenWindowRescueOutcome, OffscreenWindowScan,
+    OffscreenWindowUndo, WindowLayoutTransactionState,
 };
 pub use wmi_process::wmi_process_ids;
 

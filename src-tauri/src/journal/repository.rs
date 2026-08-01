@@ -1037,6 +1037,7 @@ mod privacy_tests {
                 desired: WindowLayoutSnapshot {
                     snapshot_id: uuid::Uuid::new_v4(),
                     captured_at_unix_ms: 1,
+                    display_profile: None,
                     entries: vec![SavedWindowPlacementEntry {
                         entry_id: uuid::Uuid::new_v4(),
                         process_file_identity: ProcessFileIdentity {
@@ -1068,6 +1069,7 @@ mod privacy_tests {
                     }],
                     excluded_game_windows: 0,
                     skipped_windows: 0,
+                    exclusions: Vec::new(),
                 },
                 excluded_game_file_identities: Vec::new(),
             },

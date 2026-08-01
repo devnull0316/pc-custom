@@ -9,9 +9,11 @@ use crate::{
     backup::Fingerprint,
     window_layout::{
         OriginalWindowPlacementEntry, SavedWindowPlacement, SavedWindowPlacementEntry,
-        SensitiveWindowTitle, WindowLayoutIssue, WindowLayoutIssueReason, WindowLayoutObservation,
-        WindowLayoutSnapshot, WindowPoint, WindowRect, MAX_WINDOW_CLASS_CHARS,
-        MAX_WINDOW_LABEL_CHARS, MAX_WINDOW_LAYOUT_ENTRIES, MAX_WINDOW_TITLE_CHARS,
+        SensitiveWindowTitle, WindowLayoutExclusion, WindowLayoutExclusionReason,
+        WindowLayoutInspection, WindowLayoutIssue, WindowLayoutIssueReason,
+        WindowLayoutObservation, WindowLayoutSnapshot, WindowPoint, WindowRect,
+        MAX_WINDOW_CLASS_CHARS, MAX_WINDOW_LABEL_CHARS, MAX_WINDOW_LAYOUT_ENTRIES,
+        MAX_WINDOW_TITLE_CHARS,
     },
 };
 
@@ -75,6 +77,7 @@ struct WindowCandidate {
 
 struct CandidateReport {
     candidates: Vec<WindowCandidate>,
+    exclusions: Vec<WindowLayoutExclusion>,
     excluded_game_windows: u32,
     skipped_windows: u32,
 }
@@ -199,7 +202,7 @@ impl OffscreenWindowRescueManager {
 
         let work_areas = connected_monitor_work_areas()?;
         let target_work_area = work_area_for_window(anchor_window)?;
-        let report = enumerate_candidates(excluded_game_file_identities, false)?;
+        let report = enumerate_candidates(excluded_game_file_identities, false, false)?;
         let mut skipped_windows = report.skipped_windows;
         let mut labels = std::collections::HashMap::<String, u32>::new();
         let mut state = self.state.lock();
@@ -676,7 +679,7 @@ pub fn capture_window_layout(
     use std::time::{SystemTime, UNIX_EPOCH};
     use uuid::Uuid;
 
-    let report = enumerate_candidates(excluded_game_file_identities, false)?;
+    let report = enumerate_candidates(excluded_game_file_identities, false, true)?;
     let mut skipped_windows = report.skipped_windows;
     let mut labels = std::collections::HashMap::<String, u32>::new();
     let mut entries = Vec::with_capacity(report.candidates.len().min(MAX_WINDOW_LAYOUT_ENTRIES));
@@ -725,9 +728,11 @@ pub fn capture_window_layout(
     let snapshot = WindowLayoutSnapshot {
         snapshot_id: Uuid::new_v4(),
         captured_at_unix_ms: captured_at_unix_ms.max(1),
+        display_profile: None,
         entries,
         excluded_game_windows: report.excluded_game_windows,
         skipped_windows,
+        exclusions: report.exclusions,
     };
     snapshot.validate().map_err(|_| {
         WindowsError::new(
@@ -752,13 +757,26 @@ pub fn observe_window_layout(
     desired: &WindowLayoutSnapshot,
     excluded_game_file_identities: &[ProcessFileIdentity],
 ) -> WindowsResult<WindowLayoutObservation> {
+    Ok(inspect_window_layout(desired, excluded_game_file_identities)?.observation)
+}
+
+/// Read-only inspection used by display-change rescue. It returns the same exact saved-target
+/// comparison as the Action plus privacy-safe reasons for windows that were deliberately excluded.
+#[cfg(windows)]
+pub fn inspect_window_layout(
+    desired: &WindowLayoutSnapshot,
+    excluded_game_file_identities: &[ProcessFileIdentity],
+) -> WindowsResult<WindowLayoutInspection> {
     validate_snapshot(desired)?;
-    let report = enumerate_candidates(excluded_game_file_identities, false)?;
-    Ok(observe_entries(
-        &desired.entries,
-        &report.candidates,
-        excluded_game_file_identities,
-    ))
+    let report = enumerate_candidates(excluded_game_file_identities, false, true)?;
+    Ok(WindowLayoutInspection {
+        observation: observe_entries(
+            &desired.entries,
+            &report.candidates,
+            excluded_game_file_identities,
+        ),
+        exclusions: report.exclusions,
+    })
 }
 
 #[cfg(not(windows))]
@@ -767,6 +785,14 @@ pub fn observe_window_layout(
     _excluded_game_file_identities: &[ProcessFileIdentity],
 ) -> WindowsResult<WindowLayoutObservation> {
     Err(WindowsError::unsupported("observe window placement"))
+}
+
+#[cfg(not(windows))]
+pub fn inspect_window_layout(
+    _desired: &WindowLayoutSnapshot,
+    _excluded_game_file_identities: &[ProcessFileIdentity],
+) -> WindowsResult<WindowLayoutInspection> {
+    Err(WindowsError::unsupported("inspect window placement"))
 }
 
 /// Capture the exact pre-apply placement of each currently unambiguous saved target.
@@ -779,7 +805,7 @@ pub fn capture_window_layout_originals(
     excluded_game_file_identities: &[ProcessFileIdentity],
 ) -> WindowsResult<Vec<OriginalWindowPlacementEntry>> {
     validate_snapshot(desired)?;
-    let report = enumerate_candidates(excluded_game_file_identities, false)?;
+    let report = enumerate_candidates(excluded_game_file_identities, false, true)?;
     let mut originals = Vec::with_capacity(desired.entries.len());
     for (desired_index, entry) in desired.entries.iter().enumerate() {
         if excluded_game_file_identities.contains(&entry.process_file_identity) {
@@ -823,7 +849,7 @@ pub fn verify_captured_window_layout_originals(
 ) -> WindowsResult<bool> {
     validate_snapshot(desired)?;
     validate_originals(desired, originals)?;
-    let mut report = enumerate_candidates(excluded_game_file_identities, false)?;
+    let mut report = enumerate_candidates(excluded_game_file_identities, false, true)?;
     bind_original_window_markers(&mut report.candidates, originals);
 
     for (desired_index, desired_entry) in desired.entries.iter().enumerate() {
@@ -945,7 +971,7 @@ pub fn observe_original_window_placements(
     excluded_game_file_identities: &[ProcessFileIdentity],
 ) -> WindowsResult<WindowLayoutObservation> {
     validate_original_entries(originals)?;
-    let mut report = enumerate_candidates(excluded_game_file_identities, false)?;
+    let mut report = enumerate_candidates(excluded_game_file_identities, false, true)?;
     bind_original_window_markers(&mut report.candidates, originals);
     Ok(observe_original_entries(
         originals,
@@ -974,7 +1000,7 @@ pub fn classify_window_layout_transaction(
 ) -> WindowsResult<WindowLayoutTransactionState> {
     validate_snapshot(desired)?;
     validate_originals(desired, originals)?;
-    let mut report = enumerate_candidates(excluded_game_file_identities, false)?;
+    let mut report = enumerate_candidates(excluded_game_file_identities, false, true)?;
     bind_original_window_markers(&mut report.candidates, originals);
     Ok(classify_transaction_entries(
         desired,
@@ -1083,8 +1109,11 @@ fn mutate_transaction(
     direction: MutationDirection,
     include_own_process_for_test: bool,
 ) -> WindowsResult<WindowLayoutObservation> {
-    let mut report =
-        enumerate_candidates(excluded_game_file_identities, include_own_process_for_test)?;
+    let mut report = enumerate_candidates(
+        excluded_game_file_identities,
+        include_own_process_for_test,
+        true,
+    )?;
     bind_original_window_markers(&mut report.candidates, originals);
     let mut planned = Vec::with_capacity(originals.len());
 
@@ -1261,8 +1290,11 @@ fn mutate_transaction(
         );
     }
 
-    let mut final_report =
-        enumerate_candidates(excluded_game_file_identities, include_own_process_for_test)?;
+    let mut final_report = enumerate_candidates(
+        excluded_game_file_identities,
+        include_own_process_for_test,
+        true,
+    )?;
     bind_original_window_markers(&mut final_report.candidates, originals);
     let final_classification = classify_transaction_entries(
         desired,
@@ -1502,6 +1534,7 @@ fn candidate_matches_compensation_source(
 fn enumerate_candidates(
     excluded_game_file_identities: &[ProcessFileIdentity],
     include_own_process_for_test: bool,
+    exclude_higher_integrity: bool,
 ) -> WindowsResult<CandidateReport> {
     use std::collections::HashMap;
 
@@ -1519,6 +1552,7 @@ fn enumerate_candidates(
     let own_process_id = std::process::id();
     let mut result = CandidateReport {
         candidates: Vec::new(),
+        exclusions: Vec::new(),
         excluded_game_windows: 0,
         skipped_windows: 0,
     };
@@ -1530,10 +1564,18 @@ fn enumerate_candidates(
             excluded_game_file_identities,
             own_process_id,
             include_own_process_for_test,
+            exclude_higher_integrity,
         ) {
             CandidateRead::Included(candidate) => result.candidates.push(candidate),
-            CandidateRead::ExcludedGame => {
-                result.excluded_game_windows = result.excluded_game_windows.saturating_add(1);
+            CandidateRead::Excluded(exclusion) => {
+                if exclusion.reason == WindowLayoutExclusionReason::Game {
+                    result.excluded_game_windows = result.excluded_game_windows.saturating_add(1);
+                }
+                if result.exclusions.len() == MAX_WINDOW_LAYOUT_ENTRIES {
+                    result.skipped_windows = result.skipped_windows.saturating_add(1);
+                } else {
+                    result.exclusions.push(exclusion);
+                }
             }
             CandidateRead::Skipped => {
                 result.skipped_windows = result.skipped_windows.saturating_add(1);
@@ -1546,7 +1588,7 @@ fn enumerate_candidates(
 #[cfg(windows)]
 enum CandidateRead {
     Included(WindowCandidate),
-    ExcludedGame,
+    Excluded(WindowLayoutExclusion),
     Skipped,
 }
 
@@ -1557,6 +1599,7 @@ fn read_candidate(
     excluded_game_file_identities: &[ProcessFileIdentity],
     own_process_id: u32,
     include_own_process_for_test: bool,
+    exclude_higher_integrity: bool,
 ) -> CandidateRead {
     use std::path::Path;
     use windows::Win32::{
@@ -1616,17 +1659,6 @@ fn read_candidate(
     if !unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
         return CandidateRead::Skipped;
     }
-    // A documented maximized standard application legitimately fills its
-    // monitor and must remain capturable so showCmd=SW_SHOWMAXIMIZED can round
-    // trip. Other monitor-filling windows are conservatively excluded.
-    if exclude_monitor_filling_window(
-        placement.show_cmd,
-        observed_rect,
-        rect_from_win32(monitor_info.rcMonitor),
-    ) {
-        return CandidateRead::Skipped;
-    }
-
     let mut process_id = 0u32;
     if unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) } == 0
         || process_id == 0
@@ -1644,9 +1676,50 @@ fn read_candidate(
         // exclusion decision to the wrong process instance.
         return CandidateRead::Skipped;
     }
+    let Some(application_label) = Path::new(&identity.canonical_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| {
+            let length = name.chars().count();
+            length > 0 && length <= MAX_WINDOW_LABEL_CHARS && !name.chars().any(char::is_control)
+        })
+        .map(str::to_owned)
+    else {
+        return CandidateRead::Skipped;
+    };
+
+    // These decisions intentionally precede GetWindowTextW. The UI gets only
+    // the executable label and a coarse reason; the private title is never read.
     if excluded_game_file_identities.contains(&identity.file_identity) {
-        // This check intentionally precedes GetWindowTextW.
-        return CandidateRead::ExcludedGame;
+        return CandidateRead::Excluded(WindowLayoutExclusion {
+            application_label,
+            reason: WindowLayoutExclusionReason::Game,
+        });
+    }
+    // A documented maximized standard application legitimately fills its
+    // monitor and must remain capturable so showCmd=SW_SHOWMAXIMIZED can round
+    // trip. Other monitor-filling windows are conservatively excluded.
+    if exclude_monitor_filling_window(
+        placement.show_cmd,
+        observed_rect,
+        rect_from_win32(monitor_info.rcMonitor),
+    ) {
+        return CandidateRead::Excluded(WindowLayoutExclusion {
+            application_label,
+            reason: WindowLayoutExclusionReason::Fullscreen,
+        });
+    }
+    match process_is_elevated(process_id) {
+        Ok(true) => {
+            if exclude_higher_integrity {
+                return CandidateRead::Excluded(WindowLayoutExclusion {
+                    application_label,
+                    reason: WindowLayoutExclusionReason::HigherIntegrity,
+                });
+            }
+        }
+        Ok(false) => {}
+        Err(_) => return CandidateRead::Skipped,
     }
 
     let mut class_buffer = vec![0u16; MAX_WINDOW_CLASS_CHARS + 1];
@@ -1679,18 +1752,6 @@ fn read_candidate(
         return CandidateRead::Skipped;
     }
     let Some(title) = SensitiveWindowTitle::new(title_text) else {
-        return CandidateRead::Skipped;
-    };
-
-    let Some(application_label) = Path::new(&identity.canonical_path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| {
-            let length = name.chars().count();
-            length > 0 && length <= MAX_WINDOW_LABEL_CHARS && !name.chars().any(char::is_control)
-        })
-        .map(str::to_owned)
-    else {
         return CandidateRead::Skipped;
     };
 
@@ -1925,6 +1986,7 @@ fn refresh_marked_candidate(
         excluded_game_file_identities,
         std::process::id(),
         include_own_process_for_test,
+        true,
     );
     Ok(match current {
         CandidateRead::Included(mut value)
@@ -2492,7 +2554,7 @@ pub(crate) fn capture_window_entry_for_test(
     handle: isize,
     application_label: &str,
 ) -> WindowsResult<SavedWindowPlacementEntry> {
-    let report = enumerate_candidates(&[], true)?;
+    let report = enumerate_candidates(&[], true, true)?;
     let candidate = report
         .candidates
         .iter()
@@ -2515,7 +2577,7 @@ pub(crate) fn capture_window_entry_for_test(
 pub(crate) fn capture_window_layout_for_process_for_test(
     process_id: u32,
 ) -> WindowsResult<WindowLayoutSnapshot> {
-    let report = enumerate_candidates(&[], false)?;
+    let report = enumerate_candidates(&[], false, true)?;
     let entries = report
         .candidates
         .iter()
@@ -2542,9 +2604,11 @@ pub(crate) fn capture_window_layout_for_process_for_test(
     Ok(WindowLayoutSnapshot {
         snapshot_id: uuid::Uuid::new_v4(),
         captured_at_unix_ms: 1,
+        display_profile: None,
         entries,
         excluded_game_windows: 0,
         skipped_windows: 0,
+        exclusions: Vec::new(),
     })
 }
 
@@ -3278,9 +3342,11 @@ mod tests {
         let desired = WindowLayoutSnapshot {
             snapshot_id: Uuid::new_v4(),
             captured_at_unix_ms: 1,
+            display_profile: None,
             entries: vec![first_desired.clone(), second_desired.clone()],
             excluded_game_windows: 0,
             skipped_windows: 0,
+            exclusions: Vec::new(),
         };
         let mut first_original_entry = first_desired.clone();
         first_original_entry.placement = placement(1, 300);
@@ -3423,7 +3489,7 @@ mod tests {
         let private_title =
             windows::core::HSTRING::from(format!("totonoe-marker-reuse-{}", Uuid::new_v4()));
         let first = OwnedTestWindow::create(&private_title);
-        let first_candidate = enumerate_candidates(&[], false)
+        let first_candidate = enumerate_candidates(&[], false, true)
             .expect("enumerate first owned marker window")
             .candidates
             .into_iter()
@@ -3437,9 +3503,11 @@ mod tests {
         let desired = WindowLayoutSnapshot {
             snapshot_id: Uuid::new_v4(),
             captured_at_unix_ms: 1,
+            display_profile: None,
             entries: vec![desired_entry],
             excluded_game_windows: 0,
             skipped_windows: 0,
+            exclusions: Vec::new(),
         };
         let mut originals =
             capture_window_layout_originals(&desired, &[]).expect("mark the first exact HWND");
@@ -3494,7 +3562,7 @@ mod tests {
         let identities = HashMap::from([(process_id, &stale)]);
 
         assert!(matches!(
-            read_candidate(owned.handle(), &identities, &[], process_id, true),
+            read_candidate(owned.handle(), &identities, &[], process_id, true, true),
             CandidateRead::Skipped
         ));
     }
@@ -3661,7 +3729,7 @@ mod tests {
         let owned = OwnedTestWindow::create(&private_title);
         sleep(Duration::from_millis(150));
 
-        let report = enumerate_candidates(&[], true).expect("enumerate owned test window");
+        let report = enumerate_candidates(&[], true, true).expect("enumerate owned test window");
         let candidate = report
             .candidates
             .into_iter()
@@ -3672,9 +3740,11 @@ mod tests {
         let snapshot = WindowLayoutSnapshot {
             snapshot_id: Uuid::new_v4(),
             captured_at_unix_ms: 1,
+            display_profile: None,
             entries: vec![saved_entry],
             excluded_game_windows: 0,
             skipped_windows: 0,
+            exclusions: Vec::new(),
         };
         let directory = tempfile::tempdir().expect("private temporary layout directory");
         let store = crate::window_layout::WindowLayoutStore::open(
@@ -3715,7 +3785,8 @@ mod tests {
             "test window really moved"
         );
 
-        let moved_report = enumerate_candidates(&[], true).expect("enumerate moved owned window");
+        let moved_report =
+            enumerate_candidates(&[], true, true).expect("enumerate moved owned window");
         let moved_candidate = moved_report
             .candidates
             .into_iter()
@@ -3762,6 +3833,145 @@ mod tests {
             after_rect.width(),
             after_rect.height(),
             after_placement.show_cmd
+        );
+    }
+
+    /// Uses only a window created by this test. It models the collapse caused by a display
+    /// transition without disconnecting hardware or touching any existing user window.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "real-machine display rescue detection, restore, and exact rollback smoke"]
+    fn owned_window_display_rescue_has_before_collapse_restore_and_rollback_evidence() {
+        use std::{thread::sleep, time::Duration};
+        use windows::Win32::{
+            Foundation::HWND,
+            UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER},
+        };
+
+        let display = crate::display_profile::read_display_profile()
+            .expect("read display topology before owned-window test");
+        let Some(first) = display.paths.first() else {
+            println!("EVIDENCE: display_rescue measured=false reason=no_active_monitor");
+            return;
+        };
+        let second = display
+            .paths
+            .iter()
+            .find(|path| path.source_x != first.source_x || path.source_y != first.source_y);
+        let first_position = (first.source_x, first.source_y);
+        let topology_measured = second.is_some();
+        let saved_position = second
+            .map(|path| {
+                (
+                    path.source_x.saturating_add(120),
+                    path.source_y.saturating_add(120),
+                )
+            })
+            .unwrap_or((
+                first.source_x.saturating_add(420),
+                first.source_y.saturating_add(260),
+            ));
+
+        let _own_window_scope = allow_own_window_candidates_for_test();
+        let private_title =
+            windows::core::HSTRING::from(format!("totonoe-display-rescue-{}", Uuid::new_v4()));
+        let owned = OwnedTestWindow::create_at(&private_title, saved_position.0, saved_position.1);
+        sleep(Duration::from_millis(180));
+
+        let report =
+            enumerate_candidates(&[], false, true).expect("enumerate only test-owned target");
+        let candidate = report
+            .candidates
+            .into_iter()
+            .find(|candidate| candidate.handle == owned.handle())
+            .expect("owned display-rescue window is eligible");
+        let before = candidate.observed_rect;
+        let desired_entry = entry_from_candidate(
+            &candidate,
+            Uuid::new_v4(),
+            "owned-display-test.exe".to_owned(),
+        );
+        let snapshot = WindowLayoutSnapshot {
+            snapshot_id: Uuid::new_v4(),
+            captured_at_unix_ms: 1,
+            display_profile: Some(display),
+            entries: vec![desired_entry],
+            excluded_game_windows: 0,
+            skipped_windows: 0,
+            exclusions: Vec::new(),
+        };
+
+        unsafe {
+            SetWindowPos(
+                HWND(owned.handle() as *mut core::ffi::c_void),
+                HWND::default(),
+                first_position.0.saturating_add(160),
+                first_position.1.saturating_add(160),
+                before.width(),
+                before.height(),
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        }
+        .expect("collapse owned window onto the first display");
+        sleep(Duration::from_millis(180));
+        let (_, collapsed) =
+            read_placement_and_rect(owned.handle()).expect("GetWindowRect after collapse");
+        assert!(
+            !rect_matches(before, collapsed),
+            "test collapse must change coordinates"
+        );
+
+        let inspection = inspect_window_layout(&snapshot, &[])
+            .expect("compare saved and current owned-window placement");
+        assert_eq!(inspection.observation.matched_window_count, 1);
+        assert_eq!(inspection.observation.positioned_window_count, 0);
+        assert!(inspection
+            .observation
+            .issues
+            .iter()
+            .any(|issue| { issue.reason == WindowLayoutIssueReason::VerificationMismatch }));
+
+        let originals = capture_window_layout_originals(&snapshot, &[])
+            .expect("capture exact collapsed placement before explicit restore");
+        assert_eq!(originals.len(), 1);
+        let restored = restore_window_layout(&snapshot, &originals, &[])
+            .expect("explicitly restore only the owned test window");
+        assert_eq!(restored.positioned_window_count, 1);
+        let (_, after_restore) =
+            read_placement_and_rect(owned.handle()).expect("GetWindowRect after restore");
+        assert!(rect_matches(before, after_restore));
+
+        let rolled_back = restore_window_placement_entries(&snapshot, &originals, &[])
+            .expect("roll back only the owned test window to its collapsed placement");
+        assert_eq!(rolled_back.positioned_window_count, 1);
+        let (_, after_rollback) =
+            read_placement_and_rect(owned.handle()).expect("GetWindowRect after rollback");
+        assert!(rect_matches(collapsed, after_rollback));
+
+        println!(
+            "EVIDENCE: display_rescue measured={} reason={} before=({},{} {}x{}) collapsed=({},{} {}x{}) restored=({},{} {}x{}) rolled_back=({},{} {}x{}) source=get_window_rect own_window_only=true",
+            topology_measured,
+            if topology_measured {
+                "extended_desktop_available"
+            } else {
+                "single_or_cloned_monitor_topology_detach_not_measured"
+            },
+            before.left,
+            before.top,
+            before.width(),
+            before.height(),
+            collapsed.left,
+            collapsed.top,
+            collapsed.width(),
+            collapsed.height(),
+            after_restore.left,
+            after_restore.top,
+            after_restore.width(),
+            after_restore.height(),
+            after_rollback.left,
+            after_rollback.top,
+            after_rollback.width(),
+            after_rollback.height(),
         );
     }
 }

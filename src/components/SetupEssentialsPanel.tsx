@@ -10,6 +10,9 @@ import type {
   ActionPresentation,
   BootstrapStatus,
   DataMode,
+  DisplayRescueReport,
+  WindowLayoutExclusionReason,
+  WindowLayoutIssueReason,
   WindowLayoutStatus,
 } from "../model";
 import { riskLabel } from "../model";
@@ -22,6 +25,8 @@ interface SetupEssentialsPanelProps {
   defaultAppsAction: ActionPresentation | undefined;
   audioAction: ActionPresentation | undefined;
   windowLayoutAction: ActionPresentation | undefined;
+  displayRescue: DisplayRescueReport | null;
+  displayRescueError: string | null;
   detectingId: string | null;
   previewingId: string | null;
   onDetect: (actionId: string) => void;
@@ -56,6 +61,20 @@ function restartLabel(action: ActionPresentation | undefined): string {
   if (action.requiresRestart) return "再起動: OS";
   if (action.requiresExplorerRestart) return "再起動: Explorer";
   return "再起動: 不要";
+}
+
+function exclusionReasonLabel(reason: WindowLayoutExclusionReason): string {
+  if (reason === "game") return "ゲームのため対象外";
+  if (reason === "fullscreen") return "全画面表示のため対象外";
+  return "管理者権限で動作しているため対象外";
+}
+
+function unavailableReasonLabel(reason: WindowLayoutIssueReason): string {
+  if (reason === "not_running") return "現在は開いていません";
+  if (reason === "ambiguous_match") return "同じ候補が複数あり特定できません";
+  if (reason === "game_excluded") return "ゲームとして除外しました";
+  if (reason === "external_change") return "保存時から配置が変わっています";
+  return "復元結果を確認できませんでした";
 }
 
 function ActionMetadata({
@@ -96,6 +115,8 @@ export function SetupEssentialsPanel({
   defaultAppsAction,
   audioAction,
   windowLayoutAction,
+  displayRescue,
+  displayRescueError,
   detectingId,
   previewingId,
   onDetect,
@@ -331,6 +352,71 @@ export function SetupEssentialsPanel({
             </div>
           </div>
 
+          <div
+            className={`window-layout-status${
+              displayRescueError !== null ||
+              displayRescue?.state === "display_topology_changed" ||
+              displayRescue?.state === "rescue_available"
+                ? " window-layout-status--attention"
+                : ""
+            }`}
+            aria-live="polite"
+          >
+            <span className="window-layout-status__mark">
+              <Icon
+                name={
+                  displayRescueError !== null ||
+                  displayRescue?.state === "display_topology_changed" ||
+                  displayRescue?.state === "rescue_available"
+                    ? "warning"
+                    : "check"
+                }
+              />
+            </span>
+            <div>
+              <strong>
+                {displayRescueError !== null
+                  ? "配置の自動確認に失敗しました"
+                  : displayRescue?.state === "rescue_available"
+                    ? "崩れた配置を検出しました"
+                    : displayRescue?.state === "display_topology_changed"
+                      ? "保存時と表示構成が違います"
+                      : displayRescue?.state === "stable"
+                        ? "保存時の配置を保っています"
+                        : "保存済み配置との差を確認中"}
+              </strong>
+              <small>{displayRescueError ?? displayRescue?.message ?? "読み取りだけを行っています。ウィンドウは自動で動かしません。"}</small>
+            </div>
+          </div>
+
+          {displayRescue === null || displayRescue.exclusions.length === 0 ? null : (
+            <section className="window-layout-report" aria-labelledby="window-layout-exclusions-title">
+              <h4 id="window-layout-exclusions-title">対象外のウィンドウ</h4>
+              <ul>
+                {displayRescue.exclusions.map((entry, index) => (
+                  <li key={`${entry.applicationLabel}-${entry.reason}-${index}`}>
+                    <strong>{entry.applicationLabel}</strong>
+                    <span>{exclusionReasonLabel(entry.reason)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {displayRescue === null || displayRescue.unavailableTargets.length === 0 ? null : (
+            <section className="window-layout-report" aria-labelledby="window-layout-unavailable-title">
+              <h4 id="window-layout-unavailable-title">今回そのままにする保存対象</h4>
+              <ul>
+                {displayRescue.unavailableTargets.map((entry, index) => (
+                  <li key={`${entry.target}-${entry.reason}-${index}`}>
+                    <strong>{entry.target}</strong>
+                    <span>{unavailableReasonLabel(entry.reason)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <div className="window-layout-boundary" role="note">
             <Icon name="warning" size={16} />
             <p>
@@ -370,6 +456,7 @@ export function SetupEssentialsPanel({
                 !restoreAllowed ||
                 layoutBusy ||
                 layoutStatus?.saved !== true ||
+                displayRescue?.canRestore !== true ||
                 windowLayoutAction === undefined ||
                 layoutPreviewBusy
               }

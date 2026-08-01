@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     action::ProcessFileIdentity,
+    display_profile::DisplayProfile,
     error::{CoreError, CoreResult},
 };
 
@@ -220,9 +221,15 @@ impl OriginalWindowPlacementEntry {
 pub struct WindowLayoutSnapshot {
     pub snapshot_id: Uuid,
     pub captured_at_unix_ms: u64,
+    /// `None` はこの項目が無かった旧版ファイルだけに許す。旧版は復元前に再保存を求める。
+    #[serde(default)]
+    pub display_profile: Option<DisplayProfile>,
     pub entries: Vec<SavedWindowPlacementEntry>,
     pub excluded_game_windows: u32,
     pub skipped_windows: u32,
+    /// タイトルを含まない、保存時に対象外とした窓の説明。
+    #[serde(default)]
+    pub exclusions: Vec<WindowLayoutExclusion>,
 }
 
 impl fmt::Debug for WindowLayoutSnapshot {
@@ -231,9 +238,11 @@ impl fmt::Debug for WindowLayoutSnapshot {
             .debug_struct("WindowLayoutSnapshot")
             .field("snapshot_id", &self.snapshot_id)
             .field("captured_at_unix_ms", &self.captured_at_unix_ms)
+            .field("has_display_profile", &self.display_profile.is_some())
             .field("entry_count", &self.entries.len())
             .field("excluded_game_windows", &self.excluded_game_windows)
             .field("skipped_windows", &self.skipped_windows)
+            .field("exclusion_count", &self.exclusions.len())
             .finish()
     }
 }
@@ -245,6 +254,12 @@ impl WindowLayoutSnapshot {
             || self.entries.is_empty()
             || self.entries.len() > MAX_WINDOW_LAYOUT_ENTRIES
             || self.entries.iter().any(|entry| !entry.is_valid())
+            || self
+                .display_profile
+                .as_ref()
+                .is_some_and(|profile| !profile.has_usable_topology())
+            || self.exclusions.len() > MAX_WINDOW_LAYOUT_ENTRIES
+            || self.exclusions.iter().any(|entry| !entry.is_valid())
         {
             return Err(invalid_layout());
         }
@@ -257,6 +272,31 @@ impl WindowLayoutSnapshot {
             return Err(invalid_layout());
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowLayoutExclusionReason {
+    Game,
+    Fullscreen,
+    HigherIntegrity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WindowLayoutExclusion {
+    /// 実行ファイル名だけ。タイトル、パス、PID、HWND は含めない。
+    pub application_label: String,
+    pub reason: WindowLayoutExclusionReason,
+}
+
+impl WindowLayoutExclusion {
+    fn is_valid(&self) -> bool {
+        let length = self.application_label.chars().count();
+        length > 0
+            && length <= MAX_WINDOW_LABEL_CHARS
+            && !self.application_label.chars().any(char::is_control)
     }
 }
 
@@ -358,6 +398,12 @@ pub struct WindowLayoutObservation {
     /// rectangles. It is used by stale-preview and external-change checks but
     /// never rendered as a UI item.
     pub geometry_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowLayoutInspection {
+    pub observation: WindowLayoutObservation,
+    pub exclusions: Vec<WindowLayoutExclusion>,
 }
 
 impl WindowLayoutObservation {
@@ -464,6 +510,10 @@ impl WindowLayoutStore {
                     "保存済みの配置が更新されています。現在の配置を確認し直してください。",
                 )
             })
+    }
+
+    pub fn snapshot_for_inspection(&self) -> Option<WindowLayoutSnapshot> {
+        self.snapshot.lock().clone()
     }
 
     pub fn replace(&self, snapshot: WindowLayoutSnapshot) -> CoreResult<WindowLayoutStatus> {
@@ -597,9 +647,11 @@ mod tests {
         WindowLayoutSnapshot {
             snapshot_id: Uuid::new_v4(),
             captured_at_unix_ms: 1,
+            display_profile: None,
             entries: vec![entry(title)],
             excluded_game_windows: 1,
             skipped_windows: 2,
+            exclusions: Vec::new(),
         }
     }
 

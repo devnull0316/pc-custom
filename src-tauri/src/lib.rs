@@ -8,6 +8,7 @@ mod commands;
 pub mod compatibility;
 pub mod config_snapshot;
 pub mod display_profile;
+pub mod display_rescue;
 pub mod engine;
 pub mod error;
 pub mod game_profile;
@@ -98,6 +99,7 @@ pub fn run() {
             commands::open_windows_settings,
             commands::get_window_layout_status,
             commands::save_window_layout,
+            commands::get_display_rescue_status,
             commands::list_offscreen_windows,
             commands::rescue_offscreen_window,
             commands::rollback_offscreen_window,
