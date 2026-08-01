@@ -5,10 +5,11 @@ mod fingerprint;
 mod registry;
 
 pub use envelope::{
-    BackupDraft, BackupEnvelope, BackupPayload, CommsMicMuteBackup, CompositeBackup,
-    DefaultPrinterBackup, HighContrastBackup, KeyboardAccessibilitySettings, ObservationBackup,
-    PointerFeelBackup, PowerModeBackup, PowerSchemeBackup, PowerSchemeGuid, ProcessWatchBackup,
-    ShiftInterruptionGuardBackup, SleepLeaseBackup, TemporaryVpnBackup, BACKUP_CODEC_VERSION,
+    AppVolumeResetBackup, BackupDraft, BackupEnvelope, BackupPayload, CommsMicMuteBackup,
+    CompositeBackup, DefaultPrinterBackup, HighContrastBackup, KeyboardAccessibilitySettings,
+    ObservationBackup, PointerFeelBackup, PowerModeBackup, PowerSchemeBackup, PowerSchemeGuid,
+    ProcessWatchBackup, ShiftInterruptionGuardBackup, SleepLeaseBackup, TemporaryVpnBackup,
+    BACKUP_CODEC_VERSION,
 };
 pub use fingerprint::Fingerprint;
 pub use registry::{

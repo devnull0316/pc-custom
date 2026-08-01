@@ -318,6 +318,9 @@ pub enum ObservedValue {
         hex: String,
         opaque_blend: bool,
     },
+    AppVolumeSessions {
+        active_sessions: usize,
+    },
     NoOsChange,
 }
 

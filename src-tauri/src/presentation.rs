@@ -268,6 +268,13 @@ pub fn action_presentation(
             "復元は適用前に保存した同じ通話用入力だけを対象にし、既定端末が変わっても新しい端末は触りません。".to_owned(),
         ]);
     }
+    if metadata.id == ActionId::AudioAppVolumeReset {
+        detail_points.extend([
+            "対象は、その時点でCore Audioセッションを持つアプリごとの音量とミュート設定です。".to_owned(),
+            "システム音量（マスター）は変更せず、控えた後に起動した新しいアプリの音量は触りません。".to_owned(),
+            "控えた後に終了したアプリは復元対象外としてカウントし、残っているアプリだけを控えの数値へ戻します。".to_owned(),
+        ]);
+    }
     ActionPresentation {
         id: metadata.id.as_str().to_owned(),
         action_version: metadata.action_version,
@@ -469,6 +476,7 @@ pub fn default_parameters(action_id: ActionId) -> Option<ActionParameters> {
             acceleration: false,
         },
         ActionId::AudioCommsMicMute => ActionParameters::AudioCommsMicMute {},
+        ActionId::AudioAppVolumeReset => ActionParameters::AudioAppVolumeReset {},
         ActionId::ExplorerShowExtensions => ActionParameters::ExplorerShowExtensions { show: true },
         ActionId::ExplorerShowHidden => ActionParameters::ExplorerShowHidden { show: true },
         ActionId::ExplorerClockSeconds => ActionParameters::ExplorerClockSeconds { show: true },
@@ -703,7 +711,8 @@ fn category_for(action_id: ActionId) -> &'static str {
         | ActionId::InputAutoShift
         | ActionId::InputVoiceTypingKey
         | ActionId::InputMultilingualSuggestions
-        | ActionId::AudioCommsMicMute => "input",
+        | ActionId::AudioCommsMicMute
+        | ActionId::AudioAppVolumeReset => "input",
     }
 }
 
@@ -731,6 +740,9 @@ fn audience_for(action_id: ActionId) -> &'static str {
         }
         ActionId::AudioCommsMicMute => {
             "会議前にWindowsの既定の通話用入力1台をミュート設定にしたい人向け。別の入力端末を使うアプリには届きません"
+        }
+        ActionId::AudioAppVolumeReset => {
+            "配信・会議・ゲーム中にアプリごとにいじった音量を、終了後に調整前へ一括復元したい人向け"
         }
         ActionId::ExplorerShowExtensions => "ファイルの種類を見分け、誤操作を減らしたい人向け",
         ActionId::ExplorerShowHidden => "隠しファイルを扱う必要がある人向け",
@@ -836,6 +848,7 @@ fn desired_state(action_id: ActionId) -> &'static str {
         ActionId::PowerModeSwitch => "選択した電源モード（電源接続時と電池使用時の両方）",
         ActionId::InputPointerFeel => "選択したポインターの動き方",
         ActionId::AudioCommsMicMute => "既定の通話用入力デバイス1台をミュート設定にする",
+        ActionId::AudioAppVolumeReset => "控えを作成し、終了後にアプリ別音量を元へ戻す",
         ActionId::ExplorerShowExtensions => "拡張子を表示",
         ActionId::ExplorerShowHidden => "隠しファイルを表示",
         ActionId::ExplorerClockSeconds => "タスクバーの時計に秒を表示",
@@ -960,6 +973,9 @@ fn method_summary_for(action_id: ActionId, method: MethodClass) -> &'static str 
         }
         ActionId::AudioCommsMicMute => {
             "Windowsが公開している音声設定で、既定の通話用入力1台のミュート設定だけを変更"
+        }
+        ActionId::AudioAppVolumeReset => {
+            "Windows公開Core Audio ISimpleAudioVolume APIによるアプリごとの音量・ミュートの控えと復元"
         }
         ActionId::SessionDefaultPrinter => {
             "GetDefaultPrinter・EnumPrinters・SetDefaultPrinterによる明示切替。印刷ジョブは作りません"
@@ -1202,6 +1218,9 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             value.saved_window_count, value.matched_window_count, value.positioned_window_count
         ),
         ObservedValue::AccentColor { hex, .. } => format!("アクセントカラー {hex}"),
+        ObservedValue::AppVolumeSessions { active_sessions } => {
+            format!("アクティブアプリ音量セッション{active_sessions}件")
+        }
         ObservedValue::NoOsChange => "OS設定の変更なし".to_owned(),
     }
 }
@@ -1347,6 +1366,9 @@ fn observed_detail(value: &ObservedValue) -> String {
         ObservedValue::AccentColor { hex, opaque_blend } => format!(
             "Windowsが現在使っている色は {hex} です。透明の混ぜ方: {}。この値は読み取るだけで変更しません。",
             if *opaque_blend { "不透明" } else { "半透明" }
+        ),
+        ObservedValue::AppVolumeSessions { active_sessions } => format!(
+            "Core Audio APIでアクティブなアプリ別音量セッション{active_sessions}件を読み取りました。"
         ),
         ObservedValue::NoOsChange => "読み取り専用Actionです。".to_owned(),
     }
@@ -2239,7 +2261,7 @@ mod count_report {
             guided_settings,
             one_way
         );
-        assert_eq!(total, 74, "総数が変わったら README も直すこと");
+        assert_eq!(total, 75, "総数が変わったら README も直すこと");
         assert!(
             guided_candidate <= 39,
             "表示専用が増えている。確認していないものを足していないか"

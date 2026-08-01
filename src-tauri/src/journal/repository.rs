@@ -941,6 +941,7 @@ fn primitive_name(payload: &BackupPayload) -> &'static str {
         BackupPayload::DefaultPrinter(_) => "default_printer",
         BackupPayload::TemporaryVpn(_) => "temporary_vpn",
         BackupPayload::HighContrast(_) => "high_contrast",
+        BackupPayload::AppVolumeReset(_) => "app_volume_reset",
     }
 }
 

@@ -165,6 +165,8 @@ pub enum ActionParameters {
     InputPointerFeel { acceleration: bool },
     #[serde(rename = "audio.comms_mic_mute")]
     AudioCommsMicMute {},
+    #[serde(rename = "audio.app_volume_reset")]
+    AudioAppVolumeReset {},
     #[serde(rename = "explorer.show_extensions")]
     ExplorerShowExtensions { show: bool },
     #[serde(rename = "explorer.show_hidden")]
@@ -309,6 +311,7 @@ impl ActionParameters {
             Self::PowerModeSwitch { .. } => ActionId::PowerModeSwitch,
             Self::InputPointerFeel { .. } => ActionId::InputPointerFeel,
             Self::AudioCommsMicMute { .. } => ActionId::AudioCommsMicMute,
+            Self::AudioAppVolumeReset { .. } => ActionId::AudioAppVolumeReset,
             Self::ExplorerShowExtensions { .. } => ActionId::ExplorerShowExtensions,
             Self::ExplorerShowHidden { .. } => ActionId::ExplorerShowHidden,
             Self::ExplorerClockSeconds { .. } => ActionId::ExplorerClockSeconds,

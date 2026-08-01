@@ -158,6 +158,13 @@ pub enum BackupPayload {
     DefaultPrinter(DefaultPrinterBackup),
     TemporaryVpn(TemporaryVpnBackup),
     HighContrast(HighContrastBackup),
+    AppVolumeReset(AppVolumeResetBackup),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppVolumeResetBackup {
+    pub original_sessions: Vec<crate::windows::AppVolumeSessionState>,
 }
 
 /// ポインターの動き方の変更前状態。

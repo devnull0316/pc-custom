@@ -47,8 +47,9 @@ pub use app_launch::{
     resolve_powertoys_app_path, KnownApp,
 };
 pub use audio::{
-    read_audio_output_observation, read_comms_mic_mute_by_id, read_default_comms_mic_mute,
-    replace_comms_mic_mute_by_id, replace_default_comms_mic_mute, CommsMicMuteState,
+    read_app_volume_sessions, read_audio_output_observation, read_comms_mic_mute_by_id,
+    read_default_comms_mic_mute, replace_comms_mic_mute_by_id, replace_default_comms_mic_mute,
+    restore_app_volume_sessions, AppVolumeRestoreOutcome, AppVolumeSessionState, CommsMicMuteState,
 };
 pub use broadcast::{notify_explorer_settings_changed, notify_theme_changed, BroadcastReport};
 pub use execution_state::{sleep_lease_manager, SleepLeaseManager, SleepLeaseSnapshot};

@@ -41,6 +41,8 @@ pub enum ActionId {
     InputPointerFeel,
     #[serde(rename = "audio.comms_mic_mute", alias = "audio_comms_mic_mute")]
     AudioCommsMicMute,
+    #[serde(rename = "audio.app_volume_reset", alias = "audio_app_volume_reset")]
+    AudioAppVolumeReset,
     #[serde(
         rename = "explorer.show_extensions",
         alias = "explorer_show_extensions"
@@ -243,7 +245,7 @@ pub enum ActionId {
 }
 
 impl ActionId {
-    pub const ALL: [Self; 74] = [
+    pub const ALL: [Self; 75] = [
         Self::SessionPreventSleep,
         Self::SessionDefaultPrinter,
         Self::SessionTemporaryVpn,
@@ -253,6 +255,7 @@ impl ActionId {
         Self::PowerModeSwitch,
         Self::InputPointerFeel,
         Self::AudioCommsMicMute,
+        Self::AudioAppVolumeReset,
         Self::ExplorerShowExtensions,
         Self::ExplorerShowHidden,
         Self::ExplorerClockSeconds,
@@ -331,6 +334,7 @@ impl ActionId {
             Self::PowerModeSwitch => "power.mode_switch",
             Self::InputPointerFeel => "input.pointer_feel",
             Self::AudioCommsMicMute => "audio.comms_mic_mute",
+            Self::AudioAppVolumeReset => "audio.app_volume_reset",
             Self::ExplorerShowExtensions => "explorer.show_extensions",
             Self::ExplorerShowHidden => "explorer.show_hidden",
             Self::ExplorerClockSeconds => "explorer.clock_seconds",
@@ -431,6 +435,7 @@ impl FromStr for ActionId {
             "power.mode_switch" => Ok(Self::PowerModeSwitch),
             "input.pointer_feel" => Ok(Self::InputPointerFeel),
             "audio.comms_mic_mute" => Ok(Self::AudioCommsMicMute),
+            "audio.app_volume_reset" => Ok(Self::AudioAppVolumeReset),
             "explorer.show_extensions" => Ok(Self::ExplorerShowExtensions),
             "explorer.show_hidden" => Ok(Self::ExplorerShowHidden),
             "explorer.clock_seconds" => Ok(Self::ExplorerClockSeconds),

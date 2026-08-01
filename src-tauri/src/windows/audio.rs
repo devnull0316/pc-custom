@@ -587,6 +587,316 @@ pub fn read_audio_output_observation() -> WindowsResult<AudioOutputObservation> 
     ))
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppVolumeSessionState {
+    pub device_id: Vec<u16>,
+    pub session_instance_id: Vec<u16>,
+    pub volume: f32,
+    pub muted: bool,
+}
+
+impl AppVolumeSessionState {
+    pub fn fingerprint(&self) -> crate::backup::Fingerprint {
+        let mut bytes =
+            Vec::with_capacity(self.device_id.len() * 2 + self.session_instance_id.len() * 2 + 5);
+        for code_unit in &self.device_id {
+            bytes.extend_from_slice(&code_unit.to_le_bytes());
+        }
+        for code_unit in &self.session_instance_id {
+            bytes.extend_from_slice(&code_unit.to_le_bytes());
+        }
+        bytes.extend_from_slice(&self.volume.to_le_bytes());
+        bytes.push(u8::from(self.muted));
+        crate::backup::Fingerprint::of_bytes(&bytes)
+    }
+}
+
+impl Eq for AppVolumeSessionState {}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AppVolumeRestoreOutcome {
+    pub success_count: usize,
+    pub missing_count: usize,
+}
+
+#[cfg(windows)]
+fn ensure_active_render_endpoint(
+    endpoint: &windows::Win32::Media::Audio::IMMDevice,
+) -> WindowsResult<()> {
+    use windows::Win32::Media::Audio::DEVICE_STATE_ACTIVE;
+
+    let state = unsafe { endpoint.GetState() }
+        .map_err(|error| api_error("IMMDevice GetState for render endpoint", error))?;
+    if state != DEVICE_STATE_ACTIVE {
+        return Err(WindowsError::new(
+            WindowsErrorKind::InvalidData,
+            "render endpoint is not active",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn read_endpoint_sessions(
+    endpoint: &windows::Win32::Media::Audio::IMMDevice,
+) -> WindowsResult<Vec<AppVolumeSessionState>> {
+    use windows::{
+        core::Interface,
+        Win32::{
+            Media::Audio::{
+                IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
+                IAudioSessionManager2, ISimpleAudioVolume,
+            },
+            System::Com::{CoTaskMemFree, CLSCTX_ALL},
+        },
+    };
+
+    ensure_active_render_endpoint(endpoint)?;
+    let device_id = read_endpoint_id(endpoint)?;
+    let manager: IAudioSessionManager2 = unsafe { endpoint.Activate(CLSCTX_ALL, None) }
+        .map_err(|error| api_error("IMMDevice Activate IAudioSessionManager2", error))?;
+    let enumerator: IAudioSessionEnumerator = unsafe { manager.GetSessionEnumerator() }
+        .map_err(|error| api_error("IAudioSessionManager2 GetSessionEnumerator", error))?;
+
+    let count = unsafe { enumerator.GetCount() }
+        .map_err(|error| api_error("IAudioSessionEnumerator GetCount", error))?;
+
+    let mut sessions = Vec::new();
+    for index in 0..count {
+        let control: IAudioSessionControl = match unsafe { enumerator.GetSession(index) } {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let control2: IAudioSessionControl2 = match control.cast() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        if unsafe { control2.IsSystemSoundsSession() } == windows::core::HRESULT(0) {
+            continue;
+        }
+
+        let instance_id_pwstr = match unsafe { control2.GetSessionInstanceIdentifier() } {
+            Ok(pwstr) => pwstr,
+            Err(_) => continue,
+        };
+
+        if instance_id_pwstr.is_null() {
+            continue;
+        }
+
+        struct PWStrGuard(windows::core::PWSTR);
+        impl Drop for PWStrGuard {
+            fn drop(&mut self) {
+                if !self.0.is_null() {
+                    unsafe { CoTaskMemFree(Some(self.0.as_ptr().cast())) };
+                }
+            }
+        }
+        let guard = PWStrGuard(instance_id_pwstr);
+
+        let mut instance_id = Vec::new();
+        for idx in 0..MAX_ENDPOINT_ID_UTF16 {
+            let code_unit = unsafe { *guard.0.as_ptr().add(idx) };
+            if code_unit == 0 {
+                break;
+            }
+            instance_id.push(code_unit);
+        }
+
+        if instance_id.is_empty() {
+            continue;
+        }
+
+        let simple_volume: ISimpleAudioVolume = match control.cast() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let volume = unsafe { simple_volume.GetMasterVolume() }
+            .map_err(|error| api_error("ISimpleAudioVolume GetMasterVolume", error))?;
+
+        let muted = unsafe { simple_volume.GetMute() }
+            .map_err(|error| api_error("ISimpleAudioVolume GetMute", error))?
+            .as_bool();
+
+        sessions.push(AppVolumeSessionState {
+            device_id: device_id.clone(),
+            session_instance_id: instance_id,
+            volume,
+            muted,
+        });
+    }
+
+    Ok(sessions)
+}
+
+/// Reads the active app volume mixer sessions across all active render endpoints.
+#[cfg(windows)]
+pub fn read_app_volume_sessions() -> WindowsResult<Vec<AppVolumeSessionState>> {
+    run_on_audio_com_thread(
+        "totonoe-app-volume-read",
+        "join Core Audio app volume read thread",
+        || {
+            let enumerator = audio_enumerator()?;
+            let endpoints = enumerate_active_render_endpoints(&enumerator)?;
+            let mut all_sessions = Vec::new();
+            for raw_endpoint in endpoints {
+                if let Ok(endpoint) = endpoint_by_id(&enumerator, &raw_endpoint.endpoint_id) {
+                    if let Ok(mut sessions) = read_endpoint_sessions(&endpoint) {
+                        all_sessions.append(&mut sessions);
+                    }
+                }
+            }
+            Ok(all_sessions)
+        },
+    )
+}
+
+/// Restores saved app volume session states.
+#[cfg(windows)]
+pub fn restore_app_volume_sessions(
+    expected: &[AppVolumeSessionState],
+) -> WindowsResult<AppVolumeRestoreOutcome> {
+    let expected = expected.to_vec();
+    run_on_audio_com_thread(
+        "totonoe-app-volume-write",
+        "join Core Audio app volume write thread",
+        move || {
+            use windows::{
+                core::Interface,
+                Win32::{
+                    Foundation::BOOL,
+                    Media::Audio::{
+                        IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
+                        IAudioSessionManager2, ISimpleAudioVolume,
+                    },
+                    System::Com::{CoTaskMemFree, CLSCTX_ALL},
+                },
+            };
+
+            let enumerator = audio_enumerator()?;
+            let raw_endpoints = enumerate_active_render_endpoints(&enumerator)?;
+
+            let mut success_count = 0;
+            let mut missing_count = 0;
+
+            for exp in &expected {
+                let mut found = false;
+                for raw_ep in &raw_endpoints {
+                    if raw_ep.endpoint_id == exp.device_id {
+                        if let Ok(endpoint) = endpoint_by_id(&enumerator, &raw_ep.endpoint_id) {
+                            let manager: IAudioSessionManager2 =
+                                match unsafe { endpoint.Activate(CLSCTX_ALL, None) } {
+                                    Ok(m) => m,
+                                    Err(_) => continue,
+                                };
+                            let enum_mgr: IAudioSessionEnumerator =
+                                match unsafe { manager.GetSessionEnumerator() } {
+                                    Ok(e) => e,
+                                    Err(_) => continue,
+                                };
+                            let count = match unsafe { enum_mgr.GetCount() } {
+                                Ok(c) => c,
+                                Err(_) => continue,
+                            };
+
+                            for i in 0..count {
+                                let control: IAudioSessionControl =
+                                    match unsafe { enum_mgr.GetSession(i) } {
+                                        Ok(c) => c,
+                                        Err(_) => continue,
+                                    };
+                                let control2: IAudioSessionControl2 = match control.cast() {
+                                    Ok(c) => c,
+                                    Err(_) => continue,
+                                };
+                                let pwstr = match unsafe { control2.GetSessionInstanceIdentifier() }
+                                {
+                                    Ok(p) => p,
+                                    Err(_) => continue,
+                                };
+                                if pwstr.is_null() {
+                                    continue;
+                                }
+                                struct PWStrGuard(windows::core::PWSTR);
+                                impl Drop for PWStrGuard {
+                                    fn drop(&mut self) {
+                                        if !self.0.is_null() {
+                                            unsafe { CoTaskMemFree(Some(self.0.as_ptr().cast())) };
+                                        }
+                                    }
+                                }
+                                let _guard = PWStrGuard(pwstr);
+                                let mut instance_id = Vec::new();
+                                for idx in 0..MAX_ENDPOINT_ID_UTF16 {
+                                    let code_unit = unsafe { *pwstr.as_ptr().add(idx) };
+                                    if code_unit == 0 {
+                                        break;
+                                    }
+                                    instance_id.push(code_unit);
+                                }
+
+                                if instance_id == exp.session_instance_id {
+                                    found = true;
+                                    let simple_vol: ISimpleAudioVolume = match control.cast() {
+                                        Ok(v) => v,
+                                        Err(_) => continue,
+                                    };
+                                    unsafe {
+                                        simple_vol.SetMasterVolume(exp.volume, std::ptr::null())
+                                    }
+                                    .map_err(|err| {
+                                        api_error("ISimpleAudioVolume SetMasterVolume", err)
+                                    })?;
+
+                                    unsafe {
+                                        simple_vol.SetMute(BOOL::from(exp.muted), std::ptr::null())
+                                    }
+                                    .map_err(|err| api_error("ISimpleAudioVolume SetMute", err))?;
+
+                                    success_count += 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if found {
+                        break;
+                    }
+                }
+                if !found {
+                    missing_count += 1;
+                }
+            }
+
+            Ok(AppVolumeRestoreOutcome {
+                success_count,
+                missing_count,
+            })
+        },
+    )
+}
+
+#[cfg(not(windows))]
+pub fn read_app_volume_sessions() -> WindowsResult<Vec<AppVolumeSessionState>> {
+    Err(WindowsError::unsupported(
+        "read Core Audio app volume sessions",
+    ))
+}
+
+#[cfg(not(windows))]
+pub fn restore_app_volume_sessions(
+    _expected: &[AppVolumeSessionState],
+) -> WindowsResult<AppVolumeRestoreOutcome> {
+    Err(WindowsError::unsupported(
+        "restore Core Audio app volume sessions",
+    ))
+}
+
 #[cfg(not(windows))]
 pub fn read_audio_output_observation() -> WindowsResult<AudioOutputObservation> {
     Err(WindowsError::unsupported(
@@ -800,6 +1110,95 @@ mod tests {
             "audio_output_count={} default_exists={}",
             observation.endpoints.len(),
             default_exists
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "実機のアプリ別音量ミキサーを読む/変更する"]
+    fn real_machine_app_volume_mixer_smoke() {
+        let sessions = match read_app_volume_sessions() {
+            Ok(s) => s,
+            Err(e) => {
+                println!(
+                    "EVIDENCE: app_volume_mixer measured=false reason=\"Core Audio読み取り失敗: {:?}\"",
+                    e
+                );
+                return;
+            }
+        };
+
+        let count = sessions.len();
+        if count == 0 {
+            println!("EVIDENCE: app_volume_mixer measured=false reason=\"アクティブなアプリ音声セッションが0件\"");
+            return;
+        }
+
+        let target_original = sessions[0].clone();
+        let original_vol = target_original.volume;
+
+        struct RestoreGuard {
+            session: Option<AppVolumeSessionState>,
+        }
+        impl Drop for RestoreGuard {
+            fn drop(&mut self) {
+                if let Some(session) = self.session.take() {
+                    let _ = restore_app_volume_sessions(&[session]);
+                }
+            }
+        }
+
+        let mut guard = RestoreGuard {
+            session: Some(target_original.clone()),
+        };
+
+        let new_vol = if original_vol > 0.5 {
+            (original_vol - 0.2).max(0.0)
+        } else {
+            (original_vol + 0.2).min(1.0)
+        };
+        assert_ne!(new_vol, original_vol, "変更前後の音量が同じになっている");
+
+        let mut changed_session = target_original.clone();
+        changed_session.volume = new_vol;
+
+        restore_app_volume_sessions(&[changed_session]).expect("一時変更書き込み");
+
+        let after_change_sessions = read_app_volume_sessions().expect("変更後の読み直し");
+        let changed_vol = after_change_sessions
+            .iter()
+            .find(|s| {
+                s.device_id == target_original.device_id
+                    && s.session_instance_id == target_original.session_instance_id
+            })
+            .map(|s| s.volume)
+            .expect("対象セッションが存在すること");
+
+        let restore_target = guard.session.take().unwrap();
+        restore_app_volume_sessions(&[restore_target]).expect("復元書き出し");
+
+        let after_restore_sessions = read_app_volume_sessions().expect("復元後の読み直し");
+        let restored_vol = after_restore_sessions
+            .iter()
+            .find(|s| {
+                s.device_id == target_original.device_id
+                    && s.session_instance_id == target_original.session_instance_id
+            })
+            .map(|s| s.volume)
+            .expect("対象セッションが存在すること");
+
+        println!(
+            "EVIDENCE: app_volume_mixer count={} before={:.2} changed={:.2} restored={:.2}",
+            count, original_vol, changed_vol, restored_vol
+        );
+
+        assert!(
+            (changed_vol - new_vol).abs() < 0.05,
+            "変更後の音量が反映されていない"
+        );
+        assert!(
+            (restored_vol - original_vol).abs() < 0.05,
+            "復元後の音量が元に戻っていない"
         );
     }
 }

@@ -98,6 +98,7 @@ function parametersForAction(actionId: string): Record<string, JsonValue> {
   if (actionId === "power.mode_switch") return { mode: "balanced" };
   if (actionId === "input.pointer_feel") return { acceleration: false };
   if (actionId === "audio.comms_mic_mute") return {};
+  if (actionId === "audio.app_volume_reset") return {};
   if (actionId === "games.process_watch") return {};
   if (actionId === "games.readiness_check") return {};
   if (actionId === "taskbar.search_mode") return { mode: "search_box" };

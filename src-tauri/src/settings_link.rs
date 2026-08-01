@@ -58,7 +58,9 @@ pub const fn settings_page_for(action: ActionId) -> Option<&'static str> {
         ActionId::GamesGameMode => "ms-settings:gaming-gamemode",
         ActionId::GamesControllerGameBar => "ms-settings:gaming-gamebar",
         ActionId::DevicesAutoplay => "ms-settings:autoplay",
-        ActionId::SetupAudioOutput | ActionId::AudioCommsMicMute => "ms-settings:sound",
+        ActionId::SetupAudioOutput
+        | ActionId::AudioCommsMicMute
+        | ActionId::AudioAppVolumeReset => "ms-settings:sound",
         ActionId::SessionDefaultPrinter => "ms-settings:printers",
         ActionId::SessionTemporaryVpn => "ms-settings:network-vpn",
         // 電源・ストレージ
