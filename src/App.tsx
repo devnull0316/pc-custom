@@ -25,11 +25,13 @@ import { appearanceSceneRequest } from "./appearanceScenes";
 import { STATIC_ACTIONS } from "./catalog";
 import {
   LatestRequestGuard,
+  canRunLiveMutation,
   failedRead,
   loadingRead,
   successfulRead,
   trialConfirmationSucceeded,
-  withoutCommitItem,
+  updateErrorState,
+  updateJustApplied,
 } from "./frontendLogic";
 import { ActionBrowser } from "./components/ActionBrowser";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette";
@@ -203,9 +205,17 @@ export function App() {
   const rescueNoticeActive = useRef(false);
   const previewRequests = useRef(new LatestRequestGuard());
 
-  const handleUiError = useCallback((error: unknown) => {
-    setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+  const clearUiError = useCallback(() => {
+    setUiError((current) => updateErrorState(current, { kind: "clear" }));
   }, []);
+
+  const showUiError = useCallback((error: UiError) => {
+    setUiError((current) => updateErrorState(current, { kind: "show", error }));
+  }, []);
+
+  const handleUiError = useCallback((error: unknown) => {
+    showUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+  }, [showUiError]);
 
   const refreshSnapshot = useCallback(async (showLoading: boolean) => {
     if (showLoading) setDataMode("loading");
@@ -323,7 +333,7 @@ export function App() {
   }, []);
 
   const handleDetect = useCallback(async (actionId: string) => {
-    if (dataMode !== "live") return;
+    if (!canRunLiveMutation(dataMode)) return;
     if (actionId === "games.process_watch") return;
     setDetectionPendingId(actionId);
     setUiError(null);
@@ -387,7 +397,7 @@ export function App() {
     pendingId: string,
     request: PreviewActionsRequest,
   ) {
-    if (dataMode !== "live") return;
+    if (!canRunLiveMutation(dataMode)) return;
     const generation = previewRequests.current.begin();
     setPreviewPendingId(pendingId);
     setUiError(null);
@@ -442,7 +452,10 @@ export function App() {
       if (result.status === "succeeded") {
         setNotice(commitNotice(result.message, result.details));
         // 戻す手段をその場に置く。画面は動かさない。
-        setJustApplied(result.items ?? []);
+        setJustApplied((current) => updateJustApplied(current, {
+          kind: "replace",
+          items: result.items ?? [],
+        }));
         setTrial({
           transactionId: result.transactionId,
           endsAt: Date.now() + HOLD_SECONDS * 1000,
@@ -451,7 +464,7 @@ export function App() {
         setTrialLeft(HOLD_SECONDS);
       } else {
         setUiError({ message: result.message, code: result.status.toLocaleUpperCase("en-US") });
-        setJustApplied([]);
+        setJustApplied((current) => updateJustApplied(current, { kind: "clear" }));
       }
       setPreview(null);
       setPreviewConfirmed(false);
@@ -507,7 +520,10 @@ export function App() {
           setUiError({ message: result.message, code: "RECOVERY_REQUIRED" });
           return;
         }
-        setJustApplied((current) => withoutCommitItem(current, item.itemId));
+        setJustApplied((current) => updateJustApplied(current, {
+          kind: "remove",
+          itemId: item.itemId,
+        }));
       }
       setNotice("元へ戻しました。");
       setJustApplied([]);
@@ -562,7 +578,7 @@ export function App() {
   }
 
   async function runReconcile() {
-    if (dataMode !== "live") return;
+    if (!canRunLiveMutation(dataMode)) return;
     setRecoveryBusy(true);
     setUiError(null);
     try {
@@ -697,7 +713,7 @@ export function App() {
           <div className="error-banner" role="alert"><Icon name="warning" /><div><strong>{dataMode === "catalog" ? "閲覧モードで開いています" : "処理を完了できませんでした"}</strong><span>{uiError.message}</span>
             {/* エラーコードは記録と問い合わせのためのもので、利用者が読む情報ではない。
                 いきなり見せず、必要な人だけ開けるようにする。 */}
-            <details className="error-banner__code"><summary>問い合わせ用の情報</summary><code>{uiError.code}</code></details></div><button aria-label="エラーを閉じる" onClick={() => setUiError(null)} type="button"><Icon name="close" /></button></div>
+            <details className="error-banner__code"><summary>問い合わせ用の情報</summary><code>{uiError.code}</code></details></div><button aria-label="エラーを閉じる" onClick={clearUiError} type="button"><Icon name="close" /></button></div>
         )}
         <main aria-busy={dataMode === "loading"} id="main-content">
           {view === "home" ? (
@@ -822,7 +838,7 @@ export function App() {
           <button className="secondary-button" disabled={undoPending} onClick={() => void undoJustApplied()} type="button">
             {undoPending ? <Icon className="spin" name="spinner" /> : <Icon name="undo" />}元に戻す
           </button>
-          <button aria-label="この案内を閉じる" className="icon-button" onClick={() => setJustApplied([])} type="button">
+          <button aria-label="この案内を閉じる" className="icon-button" onClick={() => setJustApplied((current) => updateJustApplied(current, { kind: "clear" }))} type="button">
             <Icon name="close" size={15} />
           </button>
         </div>

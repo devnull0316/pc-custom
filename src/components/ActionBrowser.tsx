@@ -1,8 +1,8 @@
 import { openWindowsSettings } from "../backend";
-import { useState, type KeyboardEvent } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 
 import { CATEGORIES } from "../catalog";
-import { selectDisplayedAction } from "../frontendLogic";
+import { deriveActionBrowserState } from "../frontendLogic";
 import type {
   ActionPresentation,
   BootstrapStatus,
@@ -104,28 +104,21 @@ export function ActionBrowser({
 }: ActionBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
-  const categoryActions = actions.filter((action) => action.category === selectedCategory);
-
-  const trimmedQuery = searchQuery.trim().toLowerCase();
-  const isSearching = trimmedQuery.length > 0;
-
-  const displayedActions = isSearching
-    ? actions.filter((action) => {
-        const categoryObj = CATEGORIES.find((c) => c.id === action.category);
-        const categoryLabel = categoryObj?.label.toLowerCase() ?? "";
-        const categoryDesc = categoryObj?.description.toLowerCase() ?? "";
-        const nameMatch = action.name.toLowerCase().includes(trimmedQuery);
-        const descMatch = action.description.toLowerCase().includes(trimmedQuery)
-          || screenText(action.description, "").toLowerCase().includes(trimmedQuery);
-        const tagMatch = action.tags.some((tag) => tag.toLowerCase().includes(trimmedQuery));
-        const categoryMatch = action.category.toLowerCase().includes(trimmedQuery)
-          || categoryLabel.includes(trimmedQuery)
-          || categoryDesc.includes(trimmedQuery);
-        return nameMatch || descMatch || tagMatch || categoryMatch;
-      })
-    : categoryActions;
-
-  const selected = selectDisplayedAction(displayedActions, selectedActionId);
+  const {
+    categoryActions,
+    displayedActions,
+    isSearching,
+    selectedAction: selected,
+  } = useMemo(
+    () => deriveActionBrowserState(
+      actions,
+      selectedCategory,
+      selectedActionId,
+      searchQuery,
+      CATEGORIES,
+    ),
+    [actions, searchQuery, selectedActionId, selectedCategory],
+  );
 
   return (
     <div className="view action-view">

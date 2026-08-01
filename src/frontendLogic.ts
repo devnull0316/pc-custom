@@ -1,4 +1,11 @@
-import type { ActionPresentation, CommitItem, DataMode } from "./model";
+import type {
+  ActionPresentation,
+  CategoryId,
+  CategoryPresentation,
+  CommitItem,
+  DataMode,
+} from "./model";
+import { screenText } from "./publicCopy";
 
 /**
  * 非同期読み取りのうち、最後に開始した要求だけが画面を更新できるようにする。
@@ -62,11 +69,80 @@ export function canRunLiveMutation(dataMode: DataMode): boolean {
   return dataMode === "live";
 }
 
+export type ErrorStateUpdate<T> =
+  | { readonly kind: "clear" }
+  | { readonly kind: "show"; readonly error: T };
+
+/** エラーは新しい失敗で上書きし、明示的に閉じたときだけ消す。 */
+export function updateErrorState<T>(
+  _current: T | null,
+  update: ErrorStateUpdate<T>,
+): T | null {
+  if (update.kind === "clear") return null;
+  return update.error;
+}
+
+export interface ActionBrowserState {
+  readonly categoryActions: readonly ActionPresentation[];
+  readonly displayedActions: readonly ActionPresentation[];
+  readonly isSearching: boolean;
+  readonly selectedAction: ActionPresentation | undefined;
+}
+
+/** 絞り込み後の一覧と詳細選択を同じスナップショットから決める。 */
+export function deriveActionBrowserState(
+  actions: readonly ActionPresentation[],
+  selectedCategory: CategoryId,
+  selectedActionId: string | null,
+  searchQuery: string,
+  categories: readonly CategoryPresentation[],
+): ActionBrowserState {
+  const categoryActions = actions.filter((action) => action.category === selectedCategory);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const isSearching = normalizedQuery.length > 0;
+  const displayedActions = isSearching
+    ? actions.filter((action) => {
+        const category = categories.find((candidate) => candidate.id === action.category);
+        const categoryLabel = category?.label.toLowerCase() ?? "";
+        const categoryDescription = category?.description.toLowerCase() ?? "";
+        return action.name.toLowerCase().includes(normalizedQuery)
+          || action.description.toLowerCase().includes(normalizedQuery)
+          || screenText(action.description, "").toLowerCase().includes(normalizedQuery)
+          || action.tags.some((tag) => tag.toLowerCase().includes(normalizedQuery))
+          || action.category.toLowerCase().includes(normalizedQuery)
+          || categoryLabel.includes(normalizedQuery)
+          || categoryDescription.includes(normalizedQuery);
+      })
+    : categoryActions;
+
+  return {
+    categoryActions,
+    displayedActions,
+    isSearching,
+    selectedAction: selectDisplayedAction(displayedActions, selectedActionId),
+  };
+}
+
 export function withoutCommitItem(
   items: readonly CommitItem[],
   completedItemId: string,
 ): CommitItem[] {
   return items.filter((item) => item.itemId !== completedItemId);
+}
+
+export type JustAppliedUpdate =
+  | { readonly kind: "replace"; readonly items: readonly CommitItem[] }
+  | { readonly kind: "remove"; readonly itemId: string }
+  | { readonly kind: "clear" };
+
+/** 直前適用バーの増減を、適用結果とrollback結果だけから決める。 */
+export function updateJustApplied(
+  current: readonly CommitItem[],
+  update: JustAppliedUpdate,
+): CommitItem[] {
+  if (update.kind === "clear") return [];
+  if (update.kind === "remove") return withoutCommitItem(current, update.itemId);
+  return [...update.items];
 }
 
 export function trialConfirmationSucceeded(result: boolean): boolean {
