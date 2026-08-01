@@ -13,6 +13,7 @@ use crate::{
         TroubleshootingStep, ValidationReport, Verification, WindowsReleaseFamily,
     },
     backup::{BackupDraft, BackupEnvelope, BackupPayload, Fingerprint},
+    display_profile::{compare_topology, read_display_profile, DisplayProfile},
     window_layout::{WindowLayoutBackup, WindowLayoutInvocation, WindowLayoutObservation},
     windows::{
         capture_window_layout_originals, classify_window_layout_transaction,
@@ -254,6 +255,90 @@ impl WindowLayoutAction {
         )
     }
 
+    fn with_matching_display_topology<T>(
+        desired: &crate::window_layout::WindowLayoutSnapshot,
+        read_current_display: impl FnOnce() -> ActionResult<DisplayProfile>,
+        write: impl FnOnce() -> T,
+    ) -> ActionResult<T> {
+        let Some(saved_display) = desired.display_profile.as_ref() else {
+            // Legacy snapshots cannot prove which desktop their coordinates belong to.
+            // Fail closed and require a fresh explicit save; silently accepting them
+            // would preserve the off-screen-window failure this guard is meant to stop.
+            return Err(ActionError::new(
+                ActionErrorCode::SavedDisplayTopologyMissing,
+                ActionStage::Apply,
+                false,
+                "action.window_layout.saved_display_topology_missing",
+            ));
+        };
+        let current_display = read_current_display()?;
+        compare_topology(saved_display, &current_display).map_err(|reason| {
+            ActionError::new(
+                ActionErrorCode::DisplayTopologyChanged,
+                ActionStage::Apply,
+                true,
+                "action.window_layout.display_topology_changed",
+            )
+            .with_safe_detail(reason)
+        })?;
+        Ok(write())
+    }
+
+    fn apply_with_display_reader(
+        &self,
+        context: &ActionContext<'_>,
+        parameters: &ActionParameters,
+        envelope: &BackupEnvelope,
+        read_current_display: impl FnOnce() -> ActionResult<DisplayProfile>,
+    ) -> ActionResult<AppliedEvidence> {
+        self.validate(context, parameters)?;
+        validate_backup_for_apply(&METADATA, context, envelope)?;
+        let invocation = Self::invocation(parameters)?;
+        let payload = Self::payload(invocation, envelope, ActionStage::Apply)?;
+        let exclusions = Self::effective_exclusions(invocation, payload, ActionStage::Apply)?;
+        let before = Self::observe(context, invocation, ActionStage::Apply)?;
+        if fingerprint_state(&before, ActionStage::Apply)? != envelope.precondition_fingerprint {
+            return Err(Self::external_change(ActionStage::Apply));
+        }
+
+        let restore_result =
+            Self::with_matching_display_topology(&payload.desired, read_current_display, || {
+                restore_window_layout(&payload.desired, &payload.original_entries, &exclusions)
+            })?;
+        let observation = match restore_result {
+            Ok(observation) => observation,
+            Err(error) => {
+                if error.kind == WindowsErrorKind::RecoveryRequired {
+                    return Err(ActionError::recovery_required(
+                        ActionStage::Apply,
+                        "action.window_layout.compensation_failed",
+                    ));
+                }
+                return Err(map_windows_error(
+                    ActionStage::Apply,
+                    "action.window_layout.apply_failed",
+                    error,
+                ));
+            }
+        };
+        if observation.has_verification_mismatch()
+            || observation.positioned_window_count != observation.matched_window_count
+        {
+            Self::compensate(payload, &exclusions)?;
+            return Err(ActionError::new(
+                ActionErrorCode::StateUnknown,
+                ActionStage::Apply,
+                false,
+                "action.window_layout.apply_verification_mismatch",
+            ));
+        }
+        let state = Self::state(context, observation);
+        Ok(AppliedEvidence {
+            applied_fingerprint: fingerprint_state(&state, ActionStage::Apply)?,
+            state,
+        })
+    }
+
     fn transaction_state(
         payload: &WindowLayoutBackup,
         excluded_game_file_identities: &[crate::action::ProcessFileIdentity],
@@ -366,48 +451,14 @@ impl Action for WindowLayoutAction {
         parameters: &ActionParameters,
         envelope: &BackupEnvelope,
     ) -> ActionResult<AppliedEvidence> {
-        self.validate(context, parameters)?;
-        validate_backup_for_apply(&METADATA, context, envelope)?;
-        let invocation = Self::invocation(parameters)?;
-        let payload = Self::payload(invocation, envelope, ActionStage::Apply)?;
-        let exclusions = Self::effective_exclusions(invocation, payload, ActionStage::Apply)?;
-        let before = Self::observe(context, invocation, ActionStage::Apply)?;
-        if fingerprint_state(&before, ActionStage::Apply)? != envelope.precondition_fingerprint {
-            return Err(Self::external_change(ActionStage::Apply));
-        }
-
-        let observation =
-            match restore_window_layout(&payload.desired, &payload.original_entries, &exclusions) {
-                Ok(observation) => observation,
-                Err(error) => {
-                    if error.kind == WindowsErrorKind::RecoveryRequired {
-                        return Err(ActionError::recovery_required(
-                            ActionStage::Apply,
-                            "action.window_layout.compensation_failed",
-                        ));
-                    }
-                    return Err(map_windows_error(
-                        ActionStage::Apply,
-                        "action.window_layout.apply_failed",
-                        error,
-                    ));
-                }
-            };
-        if observation.has_verification_mismatch()
-            || observation.positioned_window_count != observation.matched_window_count
-        {
-            Self::compensate(payload, &exclusions)?;
-            return Err(ActionError::new(
-                ActionErrorCode::StateUnknown,
-                ActionStage::Apply,
-                false,
-                "action.window_layout.apply_verification_mismatch",
-            ));
-        }
-        let state = Self::state(context, observation);
-        Ok(AppliedEvidence {
-            applied_fingerprint: fingerprint_state(&state, ActionStage::Apply)?,
-            state,
+        self.apply_with_display_reader(context, parameters, envelope, || {
+            read_display_profile().map_err(|error| {
+                map_windows_error(
+                    ActionStage::Apply,
+                    "action.window_layout.display_topology_read_failed",
+                    error,
+                )
+            })
         })
     }
 
@@ -552,6 +603,7 @@ mod tests {
     use crate::{
         action::ProcessFileIdentity,
         compatibility::OsIdentity,
+        display_profile::DisplayPathFacts,
         window_layout::{
             SavedWindowPlacement, SavedWindowPlacementEntry, SensitiveWindowTitle,
             WindowLayoutSnapshot, WindowPoint, WindowRect,
@@ -572,12 +624,39 @@ mod tests {
         }
     }
 
+    fn display_path(target_id: u32, source_x: i32, width: u32, height: u32) -> DisplayPathFacts {
+        DisplayPathFacts {
+            target_id,
+            source_id: target_id,
+            clone_group: 0,
+            adapter_id_low: 1,
+            adapter_id_high: 0,
+            source_x,
+            source_y: 0,
+            width,
+            height,
+            pixel_format: 1,
+            rotation: 1,
+            scaling: 1,
+            output_technology: 5,
+            refresh_numerator: 60,
+            refresh_denominator: 1,
+            boost_refresh_rate: false,
+        }
+    }
+
+    fn fixed_display_profile() -> DisplayProfile {
+        DisplayProfile {
+            paths: vec![display_path(1, 0, 1920, 1080)],
+        }
+    }
+
     fn missing_invocation(private_title: &str) -> WindowLayoutInvocation {
         WindowLayoutInvocation {
             desired: WindowLayoutSnapshot {
                 snapshot_id: Uuid::new_v4(),
                 captured_at_unix_ms: 1,
-                display_profile: None,
+                display_profile: Some(fixed_display_profile()),
                 entries: vec![SavedWindowPlacementEntry {
                     entry_id: Uuid::new_v4(),
                     process_file_identity: ProcessFileIdentity {
@@ -643,7 +722,9 @@ mod tests {
             os.base_build,
         );
         let applied = WINDOW_LAYOUT_ACTION
-            .apply(&context, &parameters, &envelope)
+            .apply_with_display_reader(&context, &parameters, &envelope, || {
+                Ok(fixed_display_profile())
+            })
             .expect("missing target is a structured nonfatal result");
         envelope.record_applied(applied.applied_fingerprint);
         assert!(
@@ -676,6 +757,116 @@ mod tests {
         METADATA
             .validate_static_contract()
             .expect("valid window layout metadata");
+    }
+
+    #[test]
+    fn matching_display_topology_allows_the_coordinate_write() {
+        let snapshot = missing_invocation("matching topology").desired;
+        let writes = std::cell::Cell::new(0);
+
+        let result = WindowLayoutAction::with_matching_display_topology(
+            &snapshot,
+            || Ok(fixed_display_profile()),
+            || writes.set(writes.get() + 1),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(writes.get(), 1);
+    }
+
+    #[test]
+    fn changed_display_count_resolution_or_position_blocks_every_coordinate_write() {
+        let mut snapshot = missing_invocation("changed topology").desired;
+        snapshot.display_profile = Some(DisplayProfile {
+            paths: vec![
+                display_path(1, 0, 1920, 1080),
+                display_path(2, 1920, 2560, 1440),
+            ],
+        });
+        let cases = [
+            (
+                "count",
+                DisplayProfile {
+                    paths: vec![display_path(1, 0, 1920, 1080)],
+                },
+            ),
+            (
+                "resolution",
+                DisplayProfile {
+                    paths: vec![
+                        display_path(1, 0, 1920, 1080),
+                        display_path(2, 1920, 1920, 1080),
+                    ],
+                },
+            ),
+            (
+                "position",
+                DisplayProfile {
+                    paths: vec![
+                        display_path(1, 0, 1920, 1080),
+                        display_path(2, -2560, 2560, 1440),
+                    ],
+                },
+            ),
+        ];
+
+        for (case, current) in cases {
+            let writes = std::cell::Cell::new(0);
+            let error = WindowLayoutAction::with_matching_display_topology(
+                &snapshot,
+                || Ok(current),
+                || writes.set(writes.get() + 1),
+            )
+            .expect_err(case);
+
+            assert_eq!(
+                error.code,
+                ActionErrorCode::DisplayTopologyChanged,
+                "{case}"
+            );
+            assert_ne!(error.code, ActionErrorCode::ExternalConflict, "{case}");
+            assert_eq!(writes.get(), 0, "{case}");
+            assert!(error.safe_detail.is_some(), "{case}");
+            let outward: crate::error::CoreError = error.into();
+            assert_eq!(outward.code, "DISPLAY_TOPOLOGY_CHANGED", "{case}");
+            assert_eq!(
+                outward.user_message,
+                "画面の構成が保存したときと違います。ウィンドウは動かしていません。",
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_layout_without_display_topology_requires_resave_and_writes_nothing() {
+        let mut snapshot = missing_invocation("legacy topology").desired;
+        snapshot.display_profile = None;
+        let reads = std::cell::Cell::new(0);
+        let writes = std::cell::Cell::new(0);
+
+        let error = WindowLayoutAction::with_matching_display_topology(
+            &snapshot,
+            || {
+                reads.set(reads.get() + 1);
+                Ok(fixed_display_profile())
+            },
+            || writes.set(writes.get() + 1),
+        )
+        .expect_err("legacy snapshots must fail closed");
+
+        assert_eq!(error.code, ActionErrorCode::SavedDisplayTopologyMissing);
+        assert_eq!(
+            error.user_message_key,
+            "action.window_layout.saved_display_topology_missing"
+        );
+        assert_eq!(reads.get(), 0);
+        assert_eq!(writes.get(), 0);
+        let outward: crate::error::CoreError = error.into();
+        assert_eq!(outward.code, "SAVED_DISPLAY_TOPOLOGY_MISSING");
+        assert_eq!(
+            outward.user_message,
+            "保存時の画面構成が記録されていません。現在の正しい配置を保存し直してください。ウィンドウは動かしていません。"
+        );
     }
 
     struct OwnedActionTestWindow(windows::Win32::Foundation::HWND);
@@ -745,7 +936,9 @@ mod tests {
                 desired: WindowLayoutSnapshot {
                     snapshot_id: Uuid::new_v4(),
                     captured_at_unix_ms: 1,
-                    display_profile: None,
+                    display_profile: Some(
+                        read_display_profile().expect("read current display topology"),
+                    ),
                     entries: vec![desired_entry],
                     excluded_game_windows: 0,
                     skipped_windows: 0,
