@@ -584,6 +584,100 @@ pub fn disconnect_owned_vpn(
 }
 
 #[cfg(all(test, windows))]
+pub(crate) struct TestVpnEntryGuard {
+    name: VpnEntryName,
+    deleted: bool,
+}
+
+#[cfg(all(test, windows))]
+impl TestVpnEntryGuard {
+    pub(crate) fn create_unreachable(suffix: &str) -> WindowsResult<Self> {
+        use std::mem::size_of;
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::ERROR_SUCCESS,
+                NetworkManagement::Rras::{RASET_Vpn, RasSetEntryPropertiesW, RASENTRYW},
+            },
+        };
+
+        let name_str = format!("pc-custom-test-{suffix}");
+        let name = VpnEntryName::new(name_str)?;
+        let encoded_name = wide_name(&name);
+
+        let mut entry = RASENTRYW {
+            dwSize: size_of::<RASENTRYW>() as u32,
+            dwType: RASET_Vpn,
+            ..Default::default()
+        };
+
+        let address = wide_string("198.51.100.1");
+        let len = address.len().min(entry.szLocalPhoneNumber.len());
+        entry.szLocalPhoneNumber[..len].copy_from_slice(&address[..len]);
+
+        let dev_type = wide_string("VPN");
+        let dev_len = dev_type.len().min(entry.szDeviceType.len());
+        entry.szDeviceType[..dev_len].copy_from_slice(&dev_type[..dev_len]);
+
+        let code = unsafe {
+            RasSetEntryPropertiesW(
+                PCWSTR::null(),
+                PCWSTR(encoded_name.as_ptr()),
+                &entry as *const RASENTRYW,
+                size_of::<RASENTRYW>() as u32,
+                None,
+                0,
+            )
+        };
+        if code != ERROR_SUCCESS.0 {
+            return Err(api_error("create test VPN entry", code));
+        }
+
+        Ok(Self {
+            name,
+            deleted: false,
+        })
+    }
+
+    pub(crate) fn name(&self) -> &VpnEntryName {
+        &self.name
+    }
+
+    pub(crate) fn cleanup(&mut self) -> WindowsResult<()> {
+        if self.deleted {
+            return Ok(());
+        }
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::ERROR_SUCCESS,
+                NetworkManagement::Rras::{RasDeleteEntryW, ERROR_CANNOT_FIND_PHONEBOOK_ENTRY},
+            },
+        };
+        let encoded_name = wide_name(&self.name);
+        let code = unsafe { RasDeleteEntryW(PCWSTR::null(), PCWSTR(encoded_name.as_ptr())) };
+        self.deleted = true;
+        if code == ERROR_SUCCESS.0 || code == ERROR_CANNOT_FIND_PHONEBOOK_ENTRY {
+            Ok(())
+        } else {
+            Err(api_error("delete test VPN entry", code))
+        }
+    }
+}
+
+#[cfg(all(test, windows))]
+impl Drop for TestVpnEntryGuard {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
+    }
+}
+
+#[cfg(all(test, windows))]
+fn wide_string(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(all(test, windows))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct VpnProbe {
     pub registered_count: usize,

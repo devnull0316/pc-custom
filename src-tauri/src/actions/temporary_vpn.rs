@@ -711,4 +711,72 @@ mod tests {
         );
         cleanup.armed = false;
     }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "実機で到達不能なテスト用VPNエントリを作成し失敗経路と削除後始末を検証"]
+    fn real_machine_unreachable_vpn_failure_and_cleanup() {
+        use crate::windows::{acquire_core_mutation_lock, TestVpnEntryGuard};
+
+        let _mutation_lock = acquire_core_mutation_lock().expect("exclusive core mutation lock");
+        let before_inventory = read_vpn_inventory().expect("read initial VPN inventory");
+        let before_count = before_inventory.entries.len();
+
+        let mut guard = TestVpnEntryGuard::create_unreachable("unreachable-fail")
+            .expect("create test VPN entry with unreachable IP");
+
+        let created_inventory = read_vpn_inventory().expect("read VPN inventory after creation");
+        let created_count = created_inventory.entries.len();
+        let appeared_in_list = created_inventory.contains(guard.name());
+
+        assert_eq!(
+            created_count,
+            before_count + 1,
+            "registered_count must increase by 1"
+        );
+        assert!(appeared_in_list, "test VPN entry must appear in inventory");
+
+        let connect_result = connect_registered_vpn(guard.name());
+        assert!(
+            connect_result.is_err(),
+            "unreachable IP connection without credentials must fail"
+        );
+
+        let independent_after_fail = crate::windows::read_vpn_probe_in_child()
+            .expect("independent probe readback after failure");
+        let guard_hash = guard.name().fingerprint();
+        let handle_left = independent_after_fail
+            .connected_hashes
+            .contains(&guard_hash);
+        assert!(
+            !handle_left,
+            "no connection handle must remain after failure"
+        );
+
+        guard
+            .cleanup()
+            .expect("delete test VPN entry via RasDeleteEntryW");
+
+        let after_cleanup_inventory =
+            read_vpn_inventory().expect("read VPN inventory after cleanup");
+        let after_cleanup_count = after_cleanup_inventory.entries.len();
+        let exists_after_cleanup = after_cleanup_inventory.contains(guard.name());
+
+        assert!(
+            !exists_after_cleanup,
+            "test VPN entry must not exist after cleanup"
+        );
+        assert_eq!(
+            after_cleanup_count, before_count,
+            "registered_count must return to initial count"
+        );
+
+        println!(
+            "EVIDENCE: vpn_unreachable_failure registered_before={} registered_with_test={} connect_failed={} active_handles_left=false deleted_cleanly={}",
+            before_count,
+            created_count,
+            connect_result.is_err(),
+            !exists_after_cleanup && after_cleanup_count == before_count
+        );
+    }
 }

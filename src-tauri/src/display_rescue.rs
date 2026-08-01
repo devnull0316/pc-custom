@@ -235,4 +235,126 @@ mod tests {
         assert_eq!(report.drifted_window_count, 1);
         assert!(report.unavailable_targets.is_empty());
     }
+
+    fn path_facts(target_id: u32, source_x: i32, width: u32, height: u32) -> DisplayPathFacts {
+        DisplayPathFacts {
+            target_id,
+            source_id: target_id,
+            clone_group: 0,
+            adapter_id_low: 1,
+            adapter_id_high: 0,
+            source_x,
+            source_y: 0,
+            width,
+            height,
+            pixel_format: 1,
+            rotation: 1,
+            scaling: 1,
+            output_technology: 5,
+            refresh_numerator: 60,
+            refresh_denominator: 1,
+            boost_refresh_rate: false,
+        }
+    }
+
+    #[test]
+    fn saved_two_displays_current_one_display_detected_as_topology_changed() {
+        let saved = DisplayProfile {
+            paths: vec![
+                path_facts(1, 0, 1920, 1080),
+                path_facts(2, 1920, 1920, 1080),
+            ],
+        };
+        let current = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let report = build_report(&snapshot(saved), &current, inspection(0, Vec::new()));
+        assert_eq!(report.state, DisplayRescueState::DisplayTopologyChanged);
+        assert!(!report.can_restore);
+        assert_eq!(report.drifted_window_count, 0);
+    }
+
+    #[test]
+    fn saved_one_display_current_two_displays_detected_as_topology_changed() {
+        let saved = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let current = DisplayProfile {
+            paths: vec![
+                path_facts(1, 0, 1920, 1080),
+                path_facts(2, 1920, 1920, 1080),
+            ],
+        };
+        let report = build_report(&snapshot(saved), &current, inspection(0, Vec::new()));
+        assert_eq!(report.state, DisplayRescueState::DisplayTopologyChanged);
+        assert!(!report.can_restore);
+        assert_eq!(report.drifted_window_count, 0);
+    }
+
+    #[test]
+    fn same_display_count_different_resolution_detected_as_topology_changed() {
+        let saved = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let current = DisplayProfile {
+            paths: vec![path_facts(1, 0, 2560, 1440)],
+        };
+        let report = build_report(&snapshot(saved), &current, inspection(0, Vec::new()));
+        assert_eq!(report.state, DisplayRescueState::DisplayTopologyChanged);
+        assert!(!report.can_restore);
+        assert_eq!(report.drifted_window_count, 0);
+    }
+
+    #[test]
+    fn same_display_count_different_position_detected_as_topology_changed() {
+        let saved = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let current = DisplayProfile {
+            paths: vec![path_facts(1, 1920, 1920, 1080)],
+        };
+        let report = build_report(&snapshot(saved), &current, inspection(0, Vec::new()));
+        assert_eq!(report.state, DisplayRescueState::DisplayTopologyChanged);
+        assert!(!report.can_restore);
+        assert_eq!(report.drifted_window_count, 0);
+    }
+
+    #[test]
+    fn identical_topology_does_not_say_topology_changed() {
+        let saved = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let current = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let report = build_report(&snapshot(saved), &current, inspection(1, Vec::new()));
+        assert_ne!(report.state, DisplayRescueState::DisplayTopologyChanged);
+        assert_eq!(report.state, DisplayRescueState::Stable);
+        assert!(!report.can_restore);
+    }
+
+    #[test]
+    fn saved_window_not_in_any_work_area_handled_safely_when_unmatched() {
+        let saved = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let current = DisplayProfile {
+            paths: vec![path_facts(1, 0, 1920, 1080)],
+        };
+        let issue = WindowLayoutIssue {
+            target: "unmatched-app.exe".to_owned(),
+            reason: WindowLayoutIssueReason::NotRunning,
+        };
+        let mut insp = inspection(0, vec![issue.clone()]);
+        insp.observation.matched_window_count = 0;
+
+        let report = build_report(&snapshot(saved), &current, insp);
+        assert_eq!(report.state, DisplayRescueState::TargetsUnavailable);
+        assert!(!report.can_restore);
+        assert_eq!(report.unavailable_targets.len(), 1);
+        assert_eq!(
+            report.unavailable_targets[0].reason,
+            WindowLayoutIssueReason::NotRunning
+        );
+    }
 }
