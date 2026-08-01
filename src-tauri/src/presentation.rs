@@ -42,6 +42,10 @@ pub struct UiActionState {
     pub kind: String,
     pub label: String,
     pub detail: String,
+    /// 表示文言ではなく、構造化された観測値から作るカード照合用のキー。
+    /// 通常のAction一覧には出さず、設定カードを作る処理だけが参照する。
+    #[serde(skip_serializing)]
+    pub comparison_key: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -334,6 +338,9 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
                     .map(|value| format!("HKCU保存値: DWORD {value}"))
                     .unwrap_or_else(|| "HKCU保存値: 未設定".to_owned()),
                 detail: "固定位置の保存値だけを読み取りました。Windows UIの有効状態を示すものではありません。".to_owned(),
+                comparison_key: comparison_key_for(&ObservedValue::RegistryDword {
+                    configured: *configured,
+                }),
                 items: Vec::new(),
                 observed_at: Some(format_timestamp(evidence.observed_at_unix_ms)),
                 integration: None,
@@ -345,6 +352,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             kind: "known".to_owned(),
             label: observed_label(action_id, &value),
             detail: observed_detail(&value),
+            comparison_key: comparison_key_for(&value),
             items: observed_items(&value),
             observed_at: Some(format_timestamp(evidence.observed_at_unix_ms)),
             integration: integration_state(&value),
@@ -353,6 +361,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             kind: "known".to_owned(),
             label: observed_label(action_id, &value),
             detail: "設定値は確認できました。反映にはアプリ側の再読込が必要です。".to_owned(),
+            comparison_key: comparison_key_for(&value),
             items: observed_items(&value),
             observed_at: Some(format_timestamp(evidence.observed_at_unix_ms)),
             integration: integration_state(&value),
@@ -361,6 +370,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             kind: "unknown".to_owned(),
             label: "確認できません".to_owned(),
             detail: bounded(reason),
+            comparison_key: None,
             items: Vec::new(),
             observed_at: None,
             integration: None,
@@ -369,6 +379,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             kind: "unsupported".to_owned(),
             label: "この環境では利用できません".to_owned(),
             detail: bounded(reason),
+            comparison_key: None,
             items: Vec::new(),
             observed_at: None,
             integration: None,
@@ -379,6 +390,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             detail: authority
                 .map(bounded)
                 .unwrap_or_else(|| "PCカスタムからは上書きしません。".to_owned()),
+            comparison_key: None,
             items: Vec::new(),
             observed_at: None,
             integration: None,
@@ -387,6 +399,7 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             kind: "unknown".to_owned(),
             label: "別の変更を検出しました".to_owned(),
             detail: "保存した適用値と現在値が異なるため、自動操作を止めています。".to_owned(),
+            comparison_key: None,
             items: Vec::new(),
             observed_at: None,
             integration: None,
@@ -395,11 +408,18 @@ pub fn state_to_ui(metadata: &ActionMetadata, state: DetectedState) -> UiActionS
             kind: "error".to_owned(),
             label: "状態確認に失敗しました".to_owned(),
             detail: format!("{} ({})", bounded(reason), bounded(code)),
+            comparison_key: None,
             items: Vec::new(),
             observed_at: None,
             integration: None,
         },
     }
+}
+
+fn comparison_key_for(value: &ObservedValue) -> Option<String> {
+    serde_json::to_vec(value)
+        .ok()
+        .map(|bytes| crate::backup::Fingerprint::of_bytes(&bytes).to_hex())
 }
 
 fn integration_state(value: &ObservedValue) -> Option<UiIntegrationState> {
@@ -1218,9 +1238,10 @@ fn observed_label(action_id: ActionId, value: &ObservedValue) -> String {
             value.saved_window_count, value.matched_window_count, value.positioned_window_count
         ),
         ObservedValue::AccentColor { hex, .. } => format!("アクセントカラー {hex}"),
-        ObservedValue::AppVolumeSessions { active_sessions } => {
-            format!("アクティブアプリ音量セッション{active_sessions}件")
-        }
+        ObservedValue::AppVolumeSessions {
+            active_sessions,
+            unavailable_saved_sessions,
+        } => format!("アクティブ{active_sessions}件・終了済み{unavailable_saved_sessions}件"),
         ObservedValue::NoOsChange => "OS設定の変更なし".to_owned(),
     }
 }
@@ -1367,8 +1388,11 @@ fn observed_detail(value: &ObservedValue) -> String {
             "Windowsが現在使っている色は {hex} です。透明の混ぜ方: {}。この値は読み取るだけで変更しません。",
             if *opaque_blend { "不透明" } else { "半透明" }
         ),
-        ObservedValue::AppVolumeSessions { active_sessions } => format!(
-            "Core Audio APIでアクティブなアプリ別音量セッション{active_sessions}件を読み取りました。"
+        ObservedValue::AppVolumeSessions {
+            active_sessions,
+            unavailable_saved_sessions,
+        } => format!(
+            "Core Audio APIでアクティブなアプリ別音量セッション{active_sessions}件を読み取りました。控えた後に終了して復元対象が無くなったセッションは{unavailable_saved_sessions}件です。"
         ),
         ObservedValue::NoOsChange => "読み取り専用Actionです。".to_owned(),
     }
@@ -1718,7 +1742,7 @@ mod tests {
         PowerToysInstallationObservation, PrimaryRefreshRateObservation, StartupInventoryEntry,
         StateEvidence, SystemDriveSpaceObservation, ACTION_REGISTRY,
     };
-    use crate::actions::START_LAYOUT_ACTION;
+    use crate::actions::{HIGH_CONTRAST_ACTION, START_LAYOUT_ACTION};
     use crate::compatibility::CompatibilityCatalog;
 
     #[test]
@@ -1730,6 +1754,50 @@ mod tests {
         assert_eq!(
             shift_trigger_state(true, false),
             "確認なしで補助機能が始まる"
+        );
+    }
+
+    #[test]
+    fn comparison_key_preserves_structured_differences_hidden_by_the_label() {
+        let evidence = StateEvidence {
+            source: "test".to_owned(),
+            observed_at_unix_ms: 1,
+            os_build: 26_100,
+        };
+        let first = state_to_ui(
+            HIGH_CONTRAST_ACTION.metadata(),
+            DetectedState::Known {
+                value: ObservedValue::HighContrast {
+                    enabled: true,
+                    structure_size: 16,
+                    flags: 1,
+                    scheme: Some("A".to_owned()),
+                },
+                evidence: evidence.clone(),
+            },
+        );
+        let second = state_to_ui(
+            HIGH_CONTRAST_ACTION.metadata(),
+            DetectedState::Known {
+                value: ObservedValue::HighContrast {
+                    enabled: true,
+                    structure_size: 16,
+                    flags: 3,
+                    scheme: Some("B".to_owned()),
+                },
+                evidence,
+            },
+        );
+
+        assert_eq!(first.label, second.label);
+        assert_ne!(first.comparison_key, second.comparison_key);
+        assert!(first.comparison_key.is_some());
+        assert!(
+            serde_json::to_value(&first)
+                .expect("serialize UI state")
+                .get("comparisonKey")
+                .is_none(),
+            "internal comparison key must not be exposed in the normal action listing"
         );
     }
 

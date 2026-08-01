@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{
     action::{
         Action, ActionContext, ActionError, ActionErrorCode, ActionId, ActionKind, ActionMetadata,
@@ -6,7 +8,10 @@ use crate::{
         TroubleshootingStep, ValidationReport, Verification, WindowsReleaseFamily,
     },
     backup::{AppVolumeResetBackup, BackupDraft, BackupEnvelope, BackupPayload, Fingerprint},
-    windows::{read_app_volume_sessions, restore_app_volume_sessions, AppVolumeSessionState},
+    windows::{
+        read_app_volume_sessions, restore_app_volume_sessions, AppVolumeRestoreOutcome,
+        AppVolumeSessionState,
+    },
 };
 
 use super::common::{
@@ -15,6 +20,81 @@ use super::common::{
 
 pub struct AppVolumeResetAction;
 pub static APP_VOLUME_RESET_ACTION: AppVolumeResetAction = AppVolumeResetAction;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SessionComparison {
+    matching_count: usize,
+    missing_count: usize,
+    mismatched_count: usize,
+}
+
+fn session_identity(session: &AppVolumeSessionState) -> (&[u16], &[u16]) {
+    (&session.device_id, &session.session_instance_id)
+}
+
+fn ensure_unique_session_identities(
+    sessions: &[AppVolumeSessionState],
+    stage: ActionStage,
+) -> ActionResult<()> {
+    let mut identities = HashSet::new();
+    if sessions
+        .iter()
+        .any(|session| !identities.insert(session_identity(session)))
+    {
+        return Err(ActionError::new(
+            if stage == ActionStage::Apply {
+                ActionErrorCode::ExternalConflict
+            } else {
+                ActionErrorCode::RecoveryRequired
+            },
+            stage,
+            false,
+            "action.app_volume_reset.ambiguous_session_identity",
+        ));
+    }
+    Ok(())
+}
+
+fn compare_saved_sessions(
+    saved: &[AppVolumeSessionState],
+    current: &[AppVolumeSessionState],
+    stage: ActionStage,
+) -> ActionResult<SessionComparison> {
+    ensure_unique_session_identities(saved, stage)?;
+    ensure_unique_session_identities(current, stage)?;
+
+    let mut comparison = SessionComparison {
+        matching_count: 0,
+        missing_count: 0,
+        mismatched_count: 0,
+    };
+    for expected in saved {
+        match current
+            .iter()
+            .find(|candidate| session_identity(candidate) == session_identity(expected))
+        {
+            Some(candidate)
+                if candidate.volume == expected.volume && candidate.muted == expected.muted =>
+            {
+                comparison.matching_count += 1;
+            }
+            Some(_) => comparison.mismatched_count += 1,
+            None => comparison.missing_count += 1,
+        }
+    }
+    Ok(comparison)
+}
+
+fn restore_outcome_matches(
+    saved_count: usize,
+    outcome: &AppVolumeRestoreOutcome,
+    comparison: SessionComparison,
+) -> bool {
+    outcome.success_count == comparison.matching_count
+        && outcome.missing_count == comparison.missing_count
+        && comparison.mismatched_count == 0
+        && outcome.success_count + outcome.missing_count == saved_count
+}
 
 static METADATA: ActionMetadata = ActionMetadata {
     id: ActionId::AudioAppVolumeReset,
@@ -64,17 +144,24 @@ impl AppVolumeResetAction {
     }
 
     fn read_sessions(stage: ActionStage) -> ActionResult<Vec<AppVolumeSessionState>> {
-        read_app_volume_sessions()
-            .map_err(|error| map_windows_error(stage, "action.app_volume_reset.read_failed", error))
+        let sessions = read_app_volume_sessions().map_err(|error| {
+            map_windows_error(stage, "action.app_volume_reset.read_failed", error)
+        })?;
+        ensure_unique_session_identities(&sessions, stage)?;
+        Ok(sessions)
     }
 
     fn calculate_fingerprint(sessions: &[AppVolumeSessionState]) -> Fingerprint {
-        let mut bytes = Vec::new();
-        for session in sessions {
-            let fp = session.fingerprint();
-            bytes.extend_from_slice(&fp.0);
-        }
-        Fingerprint::of_bytes(&bytes)
+        let mut fingerprints: Vec<_> = sessions
+            .iter()
+            .map(AppVolumeSessionState::fingerprint)
+            .collect();
+        fingerprints.sort_by_key(|fingerprint| fingerprint.0);
+        Fingerprint::of_parts(
+            fingerprints
+                .iter()
+                .map(|fingerprint| fingerprint.0.as_slice()),
+        )
     }
 
     fn payload(
@@ -93,10 +180,12 @@ impl AppVolumeResetAction {
     fn observed_state(
         context: &ActionContext<'_>,
         sessions: &[AppVolumeSessionState],
+        unavailable_saved_sessions: usize,
     ) -> DetectedState {
         DetectedState::Known {
             value: ObservedValue::AppVolumeSessions {
                 active_sessions: sessions.len(),
+                unavailable_saved_sessions,
             },
             evidence: evidence(context, "Core Audio ISimpleAudioVolume session enumerator"),
         }
@@ -116,7 +205,7 @@ impl Action for AppVolumeResetAction {
         validate_base(&METADATA, context, parameters, false, ActionStage::Detect)?;
         Self::validate_parameters(parameters, ActionStage::Detect)?;
         let sessions = Self::read_sessions(ActionStage::Detect)?;
-        Ok(Self::observed_state(context, &sessions))
+        Ok(Self::observed_state(context, &sessions, 0))
     }
 
     fn validate(
@@ -160,24 +249,23 @@ impl Action for AppVolumeResetAction {
         let payload = Self::payload(envelope, ActionStage::Apply)?;
         let current_sessions = Self::read_sessions(ActionStage::Apply)?;
 
-        for orig in &payload.original_sessions {
-            if let Some(curr) = current_sessions.iter().find(|s| {
-                s.device_id == orig.device_id && s.session_instance_id == orig.session_instance_id
-            }) {
-                if curr.volume != orig.volume || curr.muted != orig.muted {
-                    return Err(ActionError::new(
-                        ActionErrorCode::ExternalConflict,
-                        ActionStage::Apply,
-                        false,
-                        "action.app_volume_reset.external_conflict",
-                    ));
-                }
-            }
+        let comparison = compare_saved_sessions(
+            &payload.original_sessions,
+            &current_sessions,
+            ActionStage::Apply,
+        )?;
+        if comparison.missing_count != 0 || comparison.mismatched_count != 0 {
+            return Err(ActionError::new(
+                ActionErrorCode::ExternalConflict,
+                ActionStage::Apply,
+                false,
+                "action.app_volume_reset.external_conflict",
+            ));
         }
 
         let fp = Self::calculate_fingerprint(&current_sessions);
         Ok(AppliedEvidence {
-            state: Self::observed_state(context, &current_sessions),
+            state: Self::observed_state(context, &current_sessions, 0),
             applied_fingerprint: fp,
         })
     }
@@ -193,7 +281,7 @@ impl Action for AppVolumeResetAction {
         let sessions = Self::read_sessions(ActionStage::VerifyApplied)?;
         Ok(Verification {
             verified: true,
-            observed: Self::observed_state(context, &sessions),
+            observed: Self::observed_state(context, &sessions, 0),
         })
     }
 
@@ -208,20 +296,30 @@ impl Action for AppVolumeResetAction {
         validate_backup(&METADATA, context, envelope, ActionStage::Rollback)?;
         let payload = Self::payload(envelope, ActionStage::Rollback)?;
 
-        let _outcome =
-            restore_app_volume_sessions(&payload.original_sessions).map_err(|error| {
-                map_windows_error(
-                    ActionStage::Rollback,
-                    "action.app_volume_reset.rollback_failed",
-                    error,
-                )
-            })?;
+        let outcome = restore_app_volume_sessions(&payload.original_sessions).map_err(|error| {
+            map_windows_error(
+                ActionStage::Rollback,
+                "action.app_volume_reset.rollback_failed",
+                error,
+            )
+        })?;
 
         let current_sessions = Self::read_sessions(ActionStage::Rollback)?;
+        let comparison = compare_saved_sessions(
+            &payload.original_sessions,
+            &current_sessions,
+            ActionStage::Rollback,
+        )?;
+        if !restore_outcome_matches(payload.original_sessions.len(), &outcome, comparison) {
+            return Err(ActionError::recovery_required(
+                ActionStage::Rollback,
+                "action.app_volume_reset.rollback_unverified",
+            ));
+        }
         let fp = Self::calculate_fingerprint(&current_sessions);
 
         Ok(RollbackEvidence {
-            state: Self::observed_state(context, &current_sessions),
+            state: Self::observed_state(context, &current_sessions, outcome.missing_count),
             restored_fingerprint: fp,
         })
     }
@@ -234,10 +332,16 @@ impl Action for AppVolumeResetAction {
     ) -> ActionResult<Verification> {
         validate_backup(&METADATA, context, envelope, ActionStage::VerifyRolledBack)?;
         Self::validate_parameters(parameters, ActionStage::VerifyRolledBack)?;
+        let payload = Self::payload(envelope, ActionStage::VerifyRolledBack)?;
         let sessions = Self::read_sessions(ActionStage::VerifyRolledBack)?;
+        let comparison = compare_saved_sessions(
+            &payload.original_sessions,
+            &sessions,
+            ActionStage::VerifyRolledBack,
+        )?;
         Ok(Verification {
-            verified: true,
-            observed: Self::observed_state(context, &sessions),
+            verified: comparison.mismatched_count == 0,
+            observed: Self::observed_state(context, &sessions, comparison.missing_count),
         })
     }
 
@@ -260,5 +364,92 @@ impl Action for AppVolumeResetAction {
             message_key: "action.app_volume_reset.check_mixer",
             opens_official_settings: true,
         }]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(
+        device_id: u16,
+        instance_id: u16,
+        volume: f32,
+        muted: bool,
+    ) -> AppVolumeSessionState {
+        AppVolumeSessionState {
+            device_id: vec![device_id],
+            session_instance_id: vec![instance_id],
+            volume,
+            muted,
+        }
+    }
+
+    #[test]
+    fn saved_sessions_match_by_endpoint_and_session_identity() {
+        let saved = vec![session(1, 10, 0.25, false)];
+        let wrong_endpoint = vec![session(2, 10, 0.25, false)];
+
+        let comparison =
+            compare_saved_sessions(&saved, &wrong_endpoint, ActionStage::VerifyRolledBack)
+                .expect("unambiguous comparison");
+
+        assert_eq!(comparison.matching_count, 0);
+        assert_eq!(comparison.missing_count, 1);
+        assert_eq!(comparison.mismatched_count, 0);
+    }
+
+    #[test]
+    fn duplicate_session_identity_is_rejected_as_ambiguous() {
+        let saved = vec![session(1, 10, 0.25, false)];
+        let current = vec![session(1, 10, 0.25, false), session(1, 10, 0.50, true)];
+
+        let error = compare_saved_sessions(&saved, &current, ActionStage::VerifyRolledBack)
+            .expect_err("duplicate identities must not be matched with find()");
+
+        assert_eq!(error.code, ActionErrorCode::RecoveryRequired);
+    }
+
+    #[test]
+    fn missing_restore_count_must_agree_with_the_read_back() {
+        let comparison = SessionComparison {
+            matching_count: 1,
+            missing_count: 1,
+            mismatched_count: 0,
+        };
+
+        assert!(restore_outcome_matches(
+            2,
+            &AppVolumeRestoreOutcome {
+                success_count: 1,
+                missing_count: 1,
+            },
+            comparison,
+        ));
+        assert!(!restore_outcome_matches(
+            2,
+            &AppVolumeRestoreOutcome {
+                success_count: 1,
+                missing_count: 0,
+            },
+            comparison,
+        ));
+    }
+
+    #[test]
+    fn session_fingerprint_is_order_independent_but_value_sensitive() {
+        let first = session(1, 10, 0.25, false);
+        let second = session(2, 20, 0.75, true);
+        assert_eq!(
+            AppVolumeResetAction::calculate_fingerprint(&[first.clone(), second.clone()]),
+            AppVolumeResetAction::calculate_fingerprint(&[second.clone(), first.clone()])
+        );
+
+        let mut changed = second.clone();
+        changed.volume = 0.5;
+        assert_ne!(
+            AppVolumeResetAction::calculate_fingerprint(&[first.clone(), changed]),
+            AppVolumeResetAction::calculate_fingerprint(&[first, second])
+        );
     }
 }

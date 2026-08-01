@@ -30,6 +30,9 @@ pub struct SettingsSnapshotEntry {
     pub state_kind: String,
     pub state_label: String,
     pub state_detail: String,
+    /// 構造化された観測値から作った照合キー。表示文言は比較に使わない。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_comparison_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,18 +81,21 @@ pub fn build_settings_snapshot(
     let entries: Vec<SettingsSnapshotEntry> = actions
         .iter()
         .map(|action| {
-            let (state_kind, state_label, state_detail) = match &action.current_state {
-                Some(state) => (
-                    state.kind.clone(),
-                    state.label.clone(),
-                    state.detail.clone(),
-                ),
-                None => (
-                    "not_detected".to_owned(),
-                    "未取得".to_owned(),
-                    "この控えを作った時点では状態を取得していません。".to_owned(),
-                ),
-            };
+            let (state_kind, state_label, state_detail, state_comparison_key) =
+                match &action.current_state {
+                    Some(state) => (
+                        state.kind.clone(),
+                        state.label.clone(),
+                        state.detail.clone(),
+                        state.comparison_key.clone(),
+                    ),
+                    None => (
+                        "not_detected".to_owned(),
+                        "未取得".to_owned(),
+                        "この控えを作った時点では状態を取得していません。".to_owned(),
+                        None,
+                    ),
+                };
             SettingsSnapshotEntry {
                 action_id: action.id.clone(),
                 name: action.name.clone(),
@@ -99,6 +105,7 @@ pub fn build_settings_snapshot(
                 state_kind,
                 state_label,
                 state_detail,
+                state_comparison_key,
             }
         })
         .collect();
@@ -127,9 +134,32 @@ pub fn inspect_custom_card(
     let snapshot: SettingsSnapshot = serde_json::from_str(card_json)
         .map_err(|_| CoreError::invalid_request("カスタムカードの形式が正しくありません。"))?;
 
+    if snapshot.version != SETTINGS_SNAPSHOT_VERSION {
+        return Err(CoreError::invalid_request(
+            "この版のカスタムカードには対応していません。",
+        ));
+    }
+
     if snapshot.entries.len() > MAX_CUSTOM_CARD_ENTRIES {
         return Err(CoreError::invalid_request(
             "カスタムカードに含まれる項目数が多すぎます。",
+        ));
+    }
+
+    if snapshot.entry_count != snapshot.entries.len() {
+        return Err(CoreError::invalid_request(
+            "カスタムカードの項目数が一致しません。",
+        ));
+    }
+
+    let mut card_action_ids = HashSet::new();
+    if snapshot
+        .entries
+        .iter()
+        .any(|entry| !card_action_ids.insert(entry.action_id.as_str()))
+    {
+        return Err(CoreError::invalid_request(
+            "カスタムカードに同じ項目が複数含まれています。",
         ));
     }
 
@@ -171,17 +201,11 @@ pub fn inspect_custom_card(
             Some(curr_action) => {
                 let curr_state = &curr_action.current_state;
 
-                let is_card_unknown = card_entry.state_kind == "not_detected"
-                    || card_entry.state_kind == "unknown"
-                    || card_entry.state_kind == "unconfigured";
-                let is_curr_unknown = match curr_state {
-                    None => true,
-                    Some(st) => {
-                        st.kind == "not_detected"
-                            || st.kind == "unknown"
-                            || st.kind == "unconfigured"
-                    }
-                };
+                let is_card_unknown =
+                    card_entry.state_kind != "known" || card_entry.state_comparison_key.is_none();
+                let is_curr_unknown = curr_state
+                    .as_ref()
+                    .is_none_or(|state| state.kind != "known" || state.comparison_key.is_none());
 
                 if is_card_unknown || is_curr_unknown {
                     unknown.push(CustomCardEntry {
@@ -194,7 +218,10 @@ pub fn inspect_custom_card(
                     });
                 } else {
                     let curr_label = curr_state.as_ref().map(|s| s.label.as_str()).unwrap_or("");
-                    if card_entry.state_label == curr_label {
+                    let curr_comparison_key = curr_state
+                        .as_ref()
+                        .and_then(|state| state.comparison_key.as_deref());
+                    if card_entry.state_comparison_key.as_deref() == curr_comparison_key {
                         matching.push(CustomCardEntry {
                             action_id: card_entry.action_id.clone(),
                             name: curr_action.name.clone(),
@@ -297,10 +324,15 @@ mod tests {
     }
 
     fn state(kind: &str, label: &str) -> UiActionState {
+        state_with_key(kind, label, &format!("{kind}:{label}"))
+    }
+
+    fn state_with_key(kind: &str, label: &str, comparison_key: &str) -> UiActionState {
         UiActionState {
             kind: kind.to_owned(),
             label: label.to_owned(),
             detail: "現在の値".to_owned(),
+            comparison_key: Some(comparison_key.to_owned()),
             items: vec![],
             observed_at: Some("2026-07-25T00:00:00Z".to_owned()),
             integration: None,
@@ -432,6 +464,155 @@ mod tests {
         assert_eq!(report.unknown[0].action_id, "action.undetected");
         assert!(report.matching.is_empty());
         assert!(report.changed.is_empty());
+    }
+
+    #[test]
+    fn comparison_uses_structured_state_key_and_never_the_label() {
+        let card_actions = vec![
+            presentation(
+                "action.same_label",
+                "persistent",
+                "mutable",
+                Some(state_with_key("known", "同じ要約", "structured-value-a")),
+            ),
+            presentation(
+                "action.different_label",
+                "persistent",
+                "mutable",
+                Some(state_with_key("known", "古い表示", "structured-value-c")),
+            ),
+        ];
+        let card_json = serde_json::to_string(&build_settings_snapshot(
+            &card_actions,
+            Some(26_100),
+            "2026-08-01T12:00:00Z".to_owned(),
+        ))
+        .unwrap();
+        let current_actions = vec![
+            presentation(
+                "action.same_label",
+                "persistent",
+                "mutable",
+                Some(state_with_key("known", "同じ要約", "structured-value-b")),
+            ),
+            presentation(
+                "action.different_label",
+                "persistent",
+                "mutable",
+                Some(state_with_key("known", "新しい表示", "structured-value-c")),
+            ),
+        ];
+
+        let report = inspect_custom_card(&card_json, &current_actions, Some(26_100)).unwrap();
+
+        assert_eq!(report.changed.len(), 1);
+        assert_eq!(report.changed[0].action_id, "action.same_label");
+        assert_eq!(report.matching.len(), 1);
+        assert_eq!(report.matching[0].action_id, "action.different_label");
+    }
+
+    #[test]
+    fn unsupported_policy_managed_and_error_are_not_comparable() {
+        let kinds = ["unsupported", "policy_managed", "error"];
+        let unavailable_actions: Vec<_> = kinds
+            .iter()
+            .map(|kind| {
+                presentation(
+                    &format!("action.{kind}"),
+                    "persistent",
+                    "mutable",
+                    Some(state_with_key(kind, "同じ表示", "forged-comparison-key")),
+                )
+            })
+            .collect();
+        let card_json = serde_json::to_string(&build_settings_snapshot(
+            &unavailable_actions,
+            Some(26_100),
+            "2026-08-01T12:00:00Z".to_owned(),
+        ))
+        .unwrap();
+        let current_actions: Vec<_> = kinds
+            .iter()
+            .map(|kind| {
+                presentation(
+                    &format!("action.{kind}"),
+                    "persistent",
+                    "mutable",
+                    Some(state_with_key("known", "同じ表示", "forged-comparison-key")),
+                )
+            })
+            .collect();
+
+        let report = inspect_custom_card(&card_json, &current_actions, Some(26_100)).unwrap();
+
+        assert_eq!(report.unknown.len(), kinds.len());
+        assert!(report.matching.is_empty());
+        assert!(report.changed.is_empty());
+
+        let known_card_actions: Vec<_> = kinds
+            .iter()
+            .map(|kind| {
+                presentation(
+                    &format!("action.{kind}"),
+                    "persistent",
+                    "mutable",
+                    Some(state_with_key("known", "同じ表示", "forged-comparison-key")),
+                )
+            })
+            .collect();
+        let known_card_json = serde_json::to_string(&build_settings_snapshot(
+            &known_card_actions,
+            Some(26_100),
+            "2026-08-01T12:00:00Z".to_owned(),
+        ))
+        .unwrap();
+        let reverse_report =
+            inspect_custom_card(&known_card_json, &unavailable_actions, Some(26_100)).unwrap();
+
+        assert_eq!(reverse_report.unknown.len(), kinds.len());
+        assert!(reverse_report.matching.is_empty());
+        assert!(reverse_report.changed.is_empty());
+    }
+
+    #[test]
+    fn duplicate_card_action_ids_are_rejected() {
+        let actions = vec![presentation(
+            "action.duplicate",
+            "persistent",
+            "mutable",
+            Some(state("known", "オン")),
+        )];
+        let mut snapshot =
+            build_settings_snapshot(&actions, Some(26_100), "2026-08-01T12:00:00Z".to_owned());
+        snapshot.entries.push(snapshot.entries[0].clone());
+        snapshot.entry_count = snapshot.entries.len();
+        let card_json = serde_json::to_string(&snapshot).unwrap();
+
+        let error = inspect_custom_card(&card_json, &actions, Some(26_100))
+            .expect_err("duplicate action IDs must be rejected");
+
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.user_message.contains("同じ項目"));
+    }
+
+    #[test]
+    fn unknown_card_version_is_rejected() {
+        let actions = vec![presentation(
+            "action.versioned",
+            "persistent",
+            "mutable",
+            Some(state("known", "オン")),
+        )];
+        let mut snapshot =
+            build_settings_snapshot(&actions, Some(26_100), "2026-08-01T12:00:00Z".to_owned());
+        snapshot.version = SETTINGS_SNAPSHOT_VERSION + 1;
+        let card_json = serde_json::to_string(&snapshot).unwrap();
+
+        let error = inspect_custom_card(&card_json, &actions, Some(26_100))
+            .expect_err("unknown card versions must be rejected");
+
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.user_message.contains("版"));
     }
 
     #[test]

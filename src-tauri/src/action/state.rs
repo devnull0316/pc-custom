@@ -320,6 +320,8 @@ pub enum ObservedValue {
     },
     AppVolumeSessions {
         active_sessions: usize,
+        #[serde(default)]
+        unavailable_saved_sessions: usize,
     },
     NoOsChange,
 }

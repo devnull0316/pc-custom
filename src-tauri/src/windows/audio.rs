@@ -598,17 +598,24 @@ pub struct AppVolumeSessionState {
 
 impl AppVolumeSessionState {
     pub fn fingerprint(&self) -> crate::backup::Fingerprint {
-        let mut bytes =
-            Vec::with_capacity(self.device_id.len() * 2 + self.session_instance_id.len() * 2 + 5);
-        for code_unit in &self.device_id {
-            bytes.extend_from_slice(&code_unit.to_le_bytes());
-        }
-        for code_unit in &self.session_instance_id {
-            bytes.extend_from_slice(&code_unit.to_le_bytes());
-        }
-        bytes.extend_from_slice(&self.volume.to_le_bytes());
-        bytes.push(u8::from(self.muted));
-        crate::backup::Fingerprint::of_bytes(&bytes)
+        let device_id: Vec<_> = self
+            .device_id
+            .iter()
+            .flat_map(|code_unit| code_unit.to_le_bytes())
+            .collect();
+        let session_instance_id: Vec<_> = self
+            .session_instance_id
+            .iter()
+            .flat_map(|code_unit| code_unit.to_le_bytes())
+            .collect();
+        let volume = self.volume.to_le_bytes();
+        let muted = [u8::from(self.muted)];
+        crate::backup::Fingerprint::of_parts([
+            device_id.as_slice(),
+            session_instance_id.as_slice(),
+            volume.as_slice(),
+            muted.as_slice(),
+        ])
     }
 }
 
@@ -618,6 +625,16 @@ impl Eq for AppVolumeSessionState {}
 pub struct AppVolumeRestoreOutcome {
     pub success_count: usize,
     pub missing_count: usize,
+}
+
+fn merge_endpoint_session_reads(
+    reads: impl IntoIterator<Item = WindowsResult<Vec<AppVolumeSessionState>>>,
+) -> WindowsResult<Vec<AppVolumeSessionState>> {
+    let mut all_sessions = Vec::new();
+    for read in reads {
+        all_sessions.extend(read?);
+    }
+    Ok(all_sessions)
 }
 
 #[cfg(windows)]
@@ -743,15 +760,10 @@ pub fn read_app_volume_sessions() -> WindowsResult<Vec<AppVolumeSessionState>> {
         || {
             let enumerator = audio_enumerator()?;
             let endpoints = enumerate_active_render_endpoints(&enumerator)?;
-            let mut all_sessions = Vec::new();
-            for raw_endpoint in endpoints {
-                if let Ok(endpoint) = endpoint_by_id(&enumerator, &raw_endpoint.endpoint_id) {
-                    if let Ok(mut sessions) = read_endpoint_sessions(&endpoint) {
-                        all_sessions.append(&mut sessions);
-                    }
-                }
-            }
-            Ok(all_sessions)
+            merge_endpoint_session_reads(endpoints.into_iter().map(|raw_endpoint| {
+                let endpoint = endpoint_by_id(&enumerator, &raw_endpoint.endpoint_id)?;
+                read_endpoint_sessions(&endpoint)
+            }))
         },
     )
 }
@@ -1019,6 +1031,33 @@ mod tests {
             .collect();
         let error = build_observation(endpoints, None).expect_err("over limit must fail");
         assert_eq!(error.kind, WindowsErrorKind::ResourceLimit);
+    }
+
+    #[test]
+    fn endpoint_session_read_failure_is_not_reported_as_zero_sessions() {
+        let empty = merge_endpoint_session_reads(std::iter::empty())
+            .expect("a completed read of zero endpoints is a valid empty result");
+        assert!(empty.is_empty());
+
+        let failure = WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "injected endpoint session read failure",
+            Some(1),
+        );
+        let result = merge_endpoint_session_reads([
+            Ok(Vec::new()),
+            Err(failure),
+            Ok(vec![AppVolumeSessionState {
+                device_id: vec![1],
+                session_instance_id: vec![2],
+                volume: 0.5,
+                muted: false,
+            }]),
+        ]);
+
+        let error = result.expect_err("an incomplete read must remain an error");
+        assert_eq!(error.kind, WindowsErrorKind::ApiFailure);
+        assert_eq!(error.operation, "injected endpoint session read failure");
     }
 
     #[test]
