@@ -312,6 +312,18 @@ pub fn config_snapshot_export(state: State<'_, ApplicationState>) -> CoreResult<
     serde_json::to_string_pretty(&snapshot).map_err(|_| CoreError::storage())
 }
 
+/// カスタムカード(JSON)を読み込み、現在のPC状態と照合する（read-only）。
+/// Windowsの状態は一切変更しない。適用も行わない。
+#[tauri::command]
+pub fn custom_card_inspect(
+    state: State<'_, ApplicationState>,
+    card_json: String,
+) -> CoreResult<crate::config_snapshot::CustomCardReport> {
+    let bootstrap = state.bootstrap_status();
+    let actions = state.engine()?.list_actions();
+    crate::config_snapshot::inspect_custom_card(&card_json, &actions, bootstrap.build)
+}
+
 /// 削除候補の一覧（read-only）。適用前に必ずこれを見せる。
 #[tauri::command]
 pub fn storage_temp_cleanup_plan(

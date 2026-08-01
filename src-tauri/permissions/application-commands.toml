@@ -36,6 +36,7 @@ commands.allow = [
   "setup_app_catalog",
   "setup_app_install",
   "config_snapshot_export",
+  "custom_card_inspect",
   "theme_schedule_get",
   "theme_schedule_set",
   "storage_temp_cleanup_plan",

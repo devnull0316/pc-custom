@@ -8,6 +8,7 @@ import type {
   CommitResult,
   CoreErrorShape,
   CreateProfileRequest,
+  CustomCardReport,
   DetectionResponse,
   DisplayRescueReport,
   HealthReport,
@@ -255,6 +256,12 @@ export function storageHistoryClear(): Promise<number> {
 
 export function configSnapshotExport(): Promise<string> {
   return call<string>("config_snapshot_export");
+}
+
+export function customCardInspect(
+  cardJson: string,
+): Promise<CustomCardReport> {
+  return call<CustomCardReport>("custom_card_inspect", { cardJson });
 }
 
 export function openWindowsSettings(actionId: string): Promise<string> {

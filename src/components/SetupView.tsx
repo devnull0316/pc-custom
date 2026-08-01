@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
-import { configSnapshotExport, publicErrorMessage, setupCatalog, setupInstall } from "../backend";
+import {
+  configSnapshotExport,
+  customCardInspect,
+  publicErrorMessage,
+  setupCatalog,
+  setupInstall,
+} from "../backend";
 import type {
   ActionPresentation,
   BootstrapStatus,
+  CustomCardReport,
   DataMode,
   DisplayRescueReport,
   InstallOutcome,
@@ -73,17 +80,37 @@ export function SetupView({
   const [message, setMessage] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [snapshotBusy, setSnapshotBusy] = useState(false);
+  const [cardInputJson, setCardInputJson] = useState("");
+  const [cardReport, setCardReport] = useState<CustomCardReport | null>(null);
+  const [cardInspectBusy, setCardInspectBusy] = useState(false);
 
   async function captureSnapshot() {
     if (!live) return;
     setSnapshotBusy(true);
     setMessage(null);
     try {
-      setSnapshot(await configSnapshotExport());
+      const res = await configSnapshotExport();
+      setSnapshot(res);
+      setCardInputJson(res);
     } catch (error: unknown) {
       setMessage(publicErrorMessage(error));
     } finally {
       setSnapshotBusy(false);
+    }
+  }
+
+  async function inspectCard() {
+    if (!cardInputJson.trim()) return;
+    setCardInspectBusy(true);
+    setMessage(null);
+    try {
+      const report = await customCardInspect(cardInputJson);
+      setCardReport(report);
+    } catch (error: unknown) {
+      setCardReport(null);
+      setMessage(publicErrorMessage(error));
+    } finally {
+      setCardInspectBusy(false);
     }
   }
 
@@ -319,6 +346,110 @@ export function SetupView({
             />
           )}
         </div>
+      </div>
+
+      <div className="setup-group">
+        <h2>マイPCカスタムカードを照合する</h2>
+        <p className="muted small">
+          保存したカード(JSON)を読み込んで、現在のPC状態と照合します。
+          読み込んでもWindowsの設定変更は一切行われません。
+        </p>
+        <div className="config-io__row">
+          <textarea
+            aria-label="カスタムカードJSONの入力"
+            className="config-io__text"
+            onChange={(e) => setCardInputJson(e.target.value)}
+            placeholder="カードのJSONを貼り付けてください"
+            rows={5}
+            value={cardInputJson}
+          />
+          <button
+            className="secondary-button"
+            disabled={!live || cardInspectBusy || !cardInputJson.trim()}
+            onClick={() => void inspectCard()}
+            type="button"
+          >
+            {cardInspectBusy ? <Icon className="spin" name="spinner" /> : <Icon name="search" />}
+            カードと照合する
+          </button>
+        </div>
+
+        {cardReport === null ? null : (
+          <div className="custom-card-report">
+            <p className="summary-text">{cardReport.summary}</p>
+            {cardReport.osBuildNote === null ? null : (
+              <div className="inline-note" role="note">
+                <Icon name="info" />
+                <span>{cardReport.osBuildNote}</span>
+              </div>
+            )}
+            
+            {cardReport.changed.length === 0 ? null : (
+              <div className="report-section">
+                <h3>状態が異なる項目 ({cardReport.changed.length}件)</h3>
+                <ul>
+                  {cardReport.changed.map((item) => (
+                    <li key={item.actionId}>
+                      <strong>{item.name}</strong>: {item.note}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {cardReport.unknown.length === 0 ? null : (
+              <div className="report-section">
+                <h3>確認できなかった項目 ({cardReport.unknown.length}件)</h3>
+                <ul>
+                  {cardReport.unknown.map((item) => (
+                    <li key={item.actionId}>
+                      <strong>{item.name}</strong>: {item.note}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {cardReport.missingInCurrent.length === 0 ? null : (
+              <div className="report-section">
+                <h3>現在のPCに無い項目 ({cardReport.missingInCurrent.length}件)</h3>
+                <ul>
+                  {cardReport.missingInCurrent.map((item) => (
+                    <li key={item.actionId}>
+                      <strong>{item.name}</strong>: {item.note}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {cardReport.missingInCard.length === 0 ? null : (
+              <div className="report-section">
+                <h3>カードに記録されていない項目 ({cardReport.missingInCard.length}件)</h3>
+                <ul>
+                  {cardReport.missingInCard.map((item) => (
+                    <li key={item.actionId}>
+                      <strong>{item.name}</strong>: {item.note}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {cardReport.matching.length === 0 ? null : (
+              <div className="report-section">
+                <h3>同じ状態の項目 ({cardReport.matching.length}件)</h3>
+                <ul>
+                  {cardReport.matching.map((item) => (
+                    <li key={item.actionId}>
+                      <strong>{item.name}</strong>: {item.note}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <p className="muted small">

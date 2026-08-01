@@ -550,3 +550,23 @@ export interface TaskbarAutoHideState {
   notApplicable: boolean;
   lastError: string | null;
 }
+
+export interface CustomCardEntry {
+  actionId: string;
+  name: string;
+  category: string;
+  note: string;
+  cardStateLabel: string | null;
+  currentStateLabel: string | null;
+}
+
+export interface CustomCardReport {
+  capturedAt: string;
+  osBuildNote: string | null;
+  matching: readonly CustomCardEntry[];
+  changed: readonly CustomCardEntry[];
+  missingInCurrent: readonly CustomCardEntry[];
+  missingInCard: readonly CustomCardEntry[];
+  unknown: readonly CustomCardEntry[];
+  summary: string;
+}

@@ -89,6 +89,7 @@ pub fn run() {
             commands::setup_app_catalog,
             commands::setup_app_install,
             commands::config_snapshot_export,
+            commands::custom_card_inspect,
             commands::theme_schedule_get,
             commands::theme_schedule_set,
             commands::storage_temp_cleanup_plan,
