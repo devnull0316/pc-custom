@@ -13,6 +13,15 @@
 
 use super::{WindowsError, WindowsErrorKind, WindowsResult};
 
+fn convert_then_release<T, E>(
+    convert: impl FnOnce() -> Result<T, E>,
+    release: impl FnOnce(),
+) -> Result<T, E> {
+    let converted = convert();
+    release();
+    converted
+}
+
 #[cfg(windows)]
 pub fn pick_executable() -> WindowsResult<Option<String>> {
     use windows::Win32::{
@@ -78,15 +87,21 @@ pub fn pick_executable() -> WindowsResult<Option<String>> {
             None,
         )
     })?;
-    let path = unsafe { raw.to_string() }.map_err(|_| {
-        WindowsError::new(
-            WindowsErrorKind::InvalidData,
-            "selected path is not UTF-16",
-            None,
-        )
-    })?;
-    // GetDisplayName が確保した領域は呼び出し側が解放する。
-    unsafe { CoTaskMemFree(Some(raw.as_ptr() as *const core::ffi::c_void)) };
+    let path = convert_then_release(
+        || {
+            unsafe { raw.to_string() }.map_err(|_| {
+                WindowsError::new(
+                    WindowsErrorKind::InvalidData,
+                    "selected path is not UTF-16",
+                    None,
+                )
+            })
+        },
+        || {
+            // GetDisplayName が確保した領域は呼び出し側が解放する。
+            unsafe { CoTaskMemFree(Some(raw.as_ptr() as *const core::ffi::c_void)) };
+        },
+    )?;
 
     Ok(Some(path))
 }
@@ -98,4 +113,23 @@ pub fn pick_executable() -> WindowsResult<Option<String>> {
         "pick executable",
         None,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::convert_then_release;
+
+    #[test]
+    fn failed_utf16_conversion_still_releases_the_shell_allocation() {
+        let released = std::cell::Cell::new(false);
+        let result: Result<String, ()> = convert_then_release(
+            || Err(()),
+            || {
+                released.set(true);
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(released.get());
+    }
 }

@@ -764,72 +764,101 @@ impl JournalDatabase {
                  LIMIT ?1",
             )?;
             let raw_rows = statement
-                .query_map([i64::from(limit.min(500))], |row| {
-                    Ok((
-                        parse_uuid(row.get::<_, String>(0)?, 0)?,
-                        parse_uuid(row.get::<_, String>(1)?, 1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, i64>(6)? != 0,
-                        row.get::<_, Option<String>>(7)?
-                            .map(|value| parse_uuid(value, 7))
-                            .transpose()?,
-                    ))
-                })?
+                .query_map([i64::from(limit.min(500))], timeline_raw_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-
-            let mut result = Vec::with_capacity(raw_rows.len());
-            for (
-                item_id,
-                transaction_id,
-                action_id,
-                item_state,
-                transaction_state,
-                started_ms,
-                retryable,
-                diagnostic_id,
-            ) in raw_rows
-            {
-                let mut stage_statement = database.prepare(
-                    "SELECT stage, outcome FROM stage_events
-                     WHERE item_id = ?1 ORDER BY event_id ASC",
-                )?;
-                let stages = stage_statement
-                    .query_map([item_id.to_string()], |row| {
-                        let outcome: String = row.get(1)?;
-                        let status = match outcome.as_str() {
-                            "complete" => "complete",
-                            "failed" => "failed",
-                            _ => "pending",
-                        };
-                        Ok(TimelineStage {
-                            name: row.get(0)?,
-                            status: status.to_owned(),
-                        })
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                let status = timeline_status(&item_state, &transaction_state);
-                result.push(TimelineItem {
-                    item_id,
-                    transaction_id,
-                    action_id: action_id.clone(),
-                    title: action_id,
-                    summary: "変更前状態と適用結果を耐久記録で保持しています。".to_owned(),
-                    status: status.to_owned(),
-                    started_at: format_timestamp(started_ms),
-                    before: "変更直前の状態（保存済み）".to_owned(),
-                    after: "適用後の検証状態".to_owned(),
-                    rollback_available: item_state == "APPLIED" && transaction_state == "SUCCEEDED",
-                    retry_available: retryable,
-                    stages,
-                    diagnostic_id,
-                });
-            }
-            Ok(result)
+            hydrate_timeline(database, raw_rows)
         })
     }
+
+    /// One transaction's complete item set, independent of the UI timeline cap.
+    pub fn transaction_timeline(&self, transaction_id: Uuid) -> CoreResult<Vec<TimelineItem>> {
+        self.with_connection(|database| {
+            let mut statement = database.prepare(
+                "SELECT i.item_id, i.transaction_id, i.action_id, i.state,
+                        t.state, t.started_at_unix_ms, i.error_retryable,
+                        i.diagnostic_id
+                 FROM transaction_items i
+                 JOIN transactions t ON t.transaction_id = i.transaction_id
+                 WHERE i.transaction_id = ?1
+                 ORDER BY i.ordinal DESC",
+            )?;
+            let raw_rows = statement
+                .query_map([transaction_id.to_string()], timeline_raw_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            hydrate_timeline(database, raw_rows)
+        })
+    }
+}
+
+type TimelineRawRow = (Uuid, Uuid, String, String, String, i64, bool, Option<Uuid>);
+
+fn timeline_raw_row(row: &Row<'_>) -> rusqlite::Result<TimelineRawRow> {
+    Ok((
+        parse_uuid(row.get::<_, String>(0)?, 0)?,
+        parse_uuid(row.get::<_, String>(1)?, 1)?,
+        row.get::<_, String>(2)?,
+        row.get::<_, String>(3)?,
+        row.get::<_, String>(4)?,
+        row.get::<_, i64>(5)?,
+        row.get::<_, i64>(6)? != 0,
+        row.get::<_, Option<String>>(7)?
+            .map(|value| parse_uuid(value, 7))
+            .transpose()?,
+    ))
+}
+
+fn hydrate_timeline(
+    database: &rusqlite::Connection,
+    raw_rows: Vec<TimelineRawRow>,
+) -> rusqlite::Result<Vec<TimelineItem>> {
+    let mut result = Vec::with_capacity(raw_rows.len());
+    for (
+        item_id,
+        transaction_id,
+        action_id,
+        item_state,
+        transaction_state,
+        started_ms,
+        retryable,
+        diagnostic_id,
+    ) in raw_rows
+    {
+        let mut stage_statement = database.prepare(
+            "SELECT stage, outcome FROM stage_events
+             WHERE item_id = ?1 ORDER BY event_id ASC",
+        )?;
+        let stages = stage_statement
+            .query_map([item_id.to_string()], |row| {
+                let outcome: String = row.get(1)?;
+                let status = match outcome.as_str() {
+                    "complete" => "complete",
+                    "failed" => "failed",
+                    _ => "pending",
+                };
+                Ok(TimelineStage {
+                    name: row.get(0)?,
+                    status: status.to_owned(),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let status = timeline_status(&item_state, &transaction_state);
+        result.push(TimelineItem {
+            item_id,
+            transaction_id,
+            action_id: action_id.clone(),
+            title: action_id,
+            summary: "変更前状態と適用結果を耐久記録で保持しています。".to_owned(),
+            status: status.to_owned(),
+            started_at: format_timestamp(started_ms),
+            before: "変更直前の状態（保存済み）".to_owned(),
+            after: "適用後の検証状態".to_owned(),
+            rollback_available: item_state == "APPLIED" && transaction_state == "SUCCEEDED",
+            retry_available: retryable,
+            stages,
+            diagnostic_id,
+        });
+    }
+    Ok(result)
 }
 
 fn insert_backup(

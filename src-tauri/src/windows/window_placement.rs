@@ -1290,11 +1290,18 @@ fn mutate_transaction(
         );
     }
 
-    let mut final_report = enumerate_candidates(
+    let final_enumeration = enumerate_candidates(
         excluded_game_file_identities,
         include_own_process_for_test,
         true,
-    )?;
+    );
+    let mut final_report = final_enumeration_or_compensate(final_enumeration, || {
+        compensate_dispatched(
+            &dispatched,
+            excluded_game_file_identities,
+            include_own_process_for_test,
+        )
+    })?;
     bind_original_window_markers(&mut final_report.candidates, originals);
     let final_classification = classify_transaction_entries(
         desired,
@@ -1340,6 +1347,22 @@ fn mutate_transaction(
             excluded_game_file_identities,
         ),
     })
+}
+
+#[cfg(windows)]
+fn final_enumeration_or_compensate<T>(
+    result: WindowsResult<T>,
+    compensate: impl FnOnce() -> bool,
+) -> WindowsResult<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) if compensate() => Err(error),
+        Err(error) => Err(WindowsError::new(
+            WindowsErrorKind::RecoveryRequired,
+            "compensate window placement after final enumeration failure",
+            error.os_code,
+        )),
+    }
 }
 
 #[cfg(windows)]
@@ -3432,6 +3455,24 @@ mod tests {
             &desired_candidate,
             &mutation
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn final_enumeration_failure_enters_the_compensation_path() {
+        let compensation_called = std::cell::Cell::new(false);
+        let error = WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "injected final window enumeration failure",
+            Some(321),
+        );
+        let result: WindowsResult<()> = final_enumeration_or_compensate(Err(error), || {
+            compensation_called.set(true);
+            true
+        });
+
+        assert!(result.is_err());
+        assert!(compensation_called.get());
     }
 
     #[cfg(windows)]

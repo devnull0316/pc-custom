@@ -161,6 +161,21 @@ mod imp {
         raw
     }
 
+    pub(super) fn register_callback_context<T, R, E>(
+        context: Box<T>,
+        register: impl FnOnce(*const T) -> Result<R, E>,
+    ) -> Result<(R, Box<T>), E> {
+        match register(&*context) {
+            Ok(registration) => Ok((registration, context)),
+            Err(error) => {
+                // A racing callback may still arrive even though registration failed.
+                // There is no handle to unregister, so freeing this context would be a UAF.
+                let _ = Box::leak(context);
+                Err(error)
+            }
+        }
+    }
+
     /// 実効モードを1回だけ読む。
     ///
     /// この API は購読型で、登録した直後に現在値で1回呼ばれる。
@@ -187,22 +202,23 @@ mod imp {
         let (sender, receiver) = channel::<i32>();
         // 登録が生きている間だけ有効なアドレスを渡す。解除まで動かさない。
         let boxed = Box::new(sender);
-        let context: *const c_void = (&*boxed as *const Sender<i32>).cast();
         let mut registration: *mut c_void = std::ptr::null_mut();
-        unsafe {
-            PowerRegisterForEffectivePowerModeNotifications(
-                EFFECTIVE_POWER_MODE_V2,
-                Some(on_mode),
-                Some(context),
-                &mut registration,
-            )
-        }
-        .map_err(|error| {
-            WindowsError::new(
-                WindowsErrorKind::ApiFailure,
-                "PowerRegisterForEffectivePowerModeNotifications",
-                Some(i64::from(error.code().0)),
-            )
+        let ((), boxed) = register_callback_context(boxed, |context| {
+            unsafe {
+                PowerRegisterForEffectivePowerModeNotifications(
+                    EFFECTIVE_POWER_MODE_V2,
+                    Some(on_mode),
+                    Some(context.cast()),
+                    &mut registration,
+                )
+            }
+            .map_err(|error| {
+                WindowsError::new(
+                    WindowsErrorKind::ApiFailure,
+                    "PowerRegisterForEffectivePowerModeNotifications",
+                    Some(i64::from(error.code().0)),
+                )
+            })
         })?;
 
         let received = match receiver.recv_timeout(Duration::from_millis(1_500)) {
@@ -407,6 +423,33 @@ mod tests {
         let mut raw = [0u8; 16];
         raw[0] = 0x99;
         assert_eq!(PowerMode::from_bytes(raw), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_effective_mode_registration_does_not_free_callback_context() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        struct DropMarker(Arc<AtomicBool>);
+        impl Drop for DropMarker {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let result: Result<((), Box<DropMarker>), ()> =
+            imp::register_callback_context(Box::new(DropMarker(dropped.clone())), |_context| {
+                Err(())
+            });
+        assert!(result.is_err());
+        assert!(
+            !dropped.load(Ordering::SeqCst),
+            "Windows may still invoke a callback after registration reports failure"
+        );
     }
 
     /// 実機で1往復させる。

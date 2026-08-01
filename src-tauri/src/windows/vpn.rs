@@ -429,6 +429,35 @@ fn abandon_dial_attempt(name: &VpnEntryName, handle: VpnConnectionHandle) -> Win
 }
 
 #[cfg(windows)]
+fn validate_connected_attempt(
+    verification: WindowsResult<bool>,
+    cleanup: impl FnOnce() -> WindowsResult<()>,
+) -> WindowsResult<()> {
+    match verification {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            cleanup()?;
+            Err(WindowsError::new(
+                WindowsErrorKind::RecoveryRequired,
+                "verify registered VPN connection after apply",
+                None,
+            ))
+        }
+        Err(error) => {
+            if cleanup().is_ok() {
+                Err(error)
+            } else {
+                Err(WindowsError::new(
+                    WindowsErrorKind::RecoveryRequired,
+                    "cancel VPN after post-connect verification failure",
+                    error.os_code,
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
 pub fn read_vpn_inventory() -> WindowsResult<VpnInventory> {
     let active = enumerate_active_connections()?;
     let mut entries = Vec::new();
@@ -507,21 +536,16 @@ pub fn connect_registered_vpn(name: &VpnEntryName) -> WindowsResult<VpnConnectio
             code,
         ));
     }
-    let hash = name.fingerprint();
-    let active = enumerate_active_connections()?;
-    if handle.0 == 0
-        || handle_state(handle)? != HandleState::Connected
-        || !active
-            .iter()
-            .any(|connection| connection.handle == handle && connection.name_hash == hash)
-    {
-        abandon_dial_attempt(name, handle)?;
-        return Err(WindowsError::new(
-            WindowsErrorKind::RecoveryRequired,
-            "verify registered VPN connection after apply",
-            None,
-        ));
-    }
+    let verification = (|| {
+        let hash = name.fingerprint();
+        let active = enumerate_active_connections()?;
+        Ok(handle.0 != 0
+            && handle_state(handle)? == HandleState::Connected
+            && active
+                .iter()
+                .any(|connection| connection.handle == handle && connection.name_hash == hash))
+    })();
+    validate_connected_attempt(verification, || abandon_dial_attempt(name, handle))?;
     Ok(handle)
 }
 
@@ -799,6 +823,28 @@ mod tests {
         assert_ne!(
             inventory(false).selected_fingerprint(&name),
             inventory(true).selected_fingerprint(&name)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verification_error_after_vpn_dial_still_abandons_the_owned_handle() {
+        let cleanup_called = std::cell::Cell::new(false);
+        let verification_error = WindowsError::new(
+            WindowsErrorKind::ApiFailure,
+            "injected post-connect verification failure",
+            Some(123),
+        );
+
+        let error = validate_connected_attempt(Err(verification_error), || {
+            cleanup_called.set(true);
+            Ok(())
+        })
+        .expect_err("verification failure must still be returned");
+        assert!(cleanup_called.get());
+        assert_eq!(
+            error.operation,
+            "injected post-connect verification failure"
         );
     }
 

@@ -107,21 +107,46 @@ fn identity_of(bytes: &[u8]) -> String {
     })
 }
 
+const MAX_PIDL_ALLOCATION_BYTES: usize = 64 * 1024;
+
+fn pidl_len_within_allocation(bytes: &[u8]) -> Option<usize> {
+    let mut total = 0usize;
+    loop {
+        if total.checked_add(2)? > bytes.len() {
+            return None;
+        }
+        let size = u16::from_le_bytes([bytes[total], bytes[total + 1]]) as usize;
+        if size == 0 {
+            return total.checked_add(2);
+        }
+        if size < 2 || size > bytes.len().saturating_sub(total) {
+            return None;
+        }
+        total = total.checked_add(size)?;
+        if total > MAX_PIDL_ALLOCATION_BYTES {
+            return None;
+        }
+    }
+}
+
 #[cfg(windows)]
 mod imp {
-    use super::{identity_of, DesktopIcon, DesktopIconLayout, WindowsError, WindowsErrorKind};
+    use super::{
+        identity_of, pidl_len_within_allocation, DesktopIcon, DesktopIconLayout, WindowsError,
+        WindowsErrorKind, MAX_PIDL_ALLOCATION_BYTES,
+    };
     use crate::windows::WindowsResult;
     use windows::{
         core::Interface,
         Win32::{
             Foundation::POINT,
             System::Com::{
-                CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, IServiceProvider,
-                CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+                CoCreateInstance, CoGetMalloc, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+                IServiceProvider, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
             },
             UI::Shell::{
-                Common::ITEMIDLIST, IFolderView, IShellBrowser, IShellView, IShellWindows,
-                ShellWindows, SVGIO_ALLVIEW, SWC_DESKTOP, SWFO_NEEDDISPATCH,
+                IFolderView, IShellBrowser, IShellView, IShellWindows, ShellWindows, SVGIO_ALLVIEW,
+                SWC_DESKTOP, SWFO_NEEDDISPATCH,
             },
         },
     };
@@ -136,6 +161,27 @@ mod imp {
             operation,
             Some(i64::from(error.code().0)),
         )
+    }
+
+    pub(super) fn auto_arrange_from_hresult(status: windows::core::HRESULT) -> WindowsResult<bool> {
+        use windows::Win32::Foundation::{S_FALSE, S_OK};
+
+        if status == S_OK {
+            Ok(true)
+        } else if status == S_FALSE {
+            Ok(false)
+        } else if status.is_err() {
+            Err(com_error(
+                "IFolderView::GetAutoArrange",
+                windows::core::Error::from(status),
+            ))
+        } else {
+            Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "IFolderView::GetAutoArrange returned an unknown success status",
+                Some(i64::from(status.0)),
+            ))
+        }
     }
 
     /// Shell の COM は STA を要求する。専用スレッドで初期化して、そこで完結させる。
@@ -193,33 +239,18 @@ mod imp {
             .map_err(|error| com_error("IShellView to IFolderView", error))
     }
 
-    /// PIDL の長さを数える。末尾は長さ 0 の要素で終わる。
-    ///
-    /// 識別子はこのバイト列から作るので、**長さを間違えると別物が同じ識別子になる。**
-    fn pidl_len(pidl: *const ITEMIDLIST) -> usize {
-        let mut cursor = pidl.cast::<u8>();
-        let mut total = 0usize;
-        loop {
-            // 先頭 2 バイトがその要素の長さ（自身を含む）。
-            let size = unsafe { u16::from_le_bytes([*cursor, *cursor.add(1)]) } as usize;
-            if size == 0 {
-                // 終端の 2 バイトも識別子に含める。
-                return total + 2;
-            }
-            total += size;
-            cursor = unsafe { cursor.add(size) };
-            // 壊れた PIDL で無限に歩かない。
-            if total > 64 * 1024 {
-                return total;
-            }
-        }
-    }
-
     fn read_layout() -> WindowsResult<DesktopIconLayout> {
         let view = folder_view()?;
 
         // `GetAutoArrange` は有効なら S_OK、無効なら S_FALSE。エラーではない。
-        let auto_arrange = unsafe { view.GetAutoArrange() }.is_ok();
+        let auto_arrange_status = unsafe {
+            (windows::core::Interface::vtable(&view).GetAutoArrange)(
+                windows::core::Interface::as_raw(&view),
+            )
+        };
+        let auto_arrange = auto_arrange_from_hresult(auto_arrange_status)?;
+        let allocator = unsafe { CoGetMalloc(1) }
+            .map_err(|error| com_error("CoGetMalloc for desktop icon PIDLs", error))?;
 
         let mut spacing = POINT::default();
         let _ = unsafe { view.GetSpacing(&mut spacing) };
@@ -238,8 +269,20 @@ mod imp {
                 unreadable += 1;
                 continue;
             }
-            let length = pidl_len(pidl);
-            let bytes = unsafe { std::slice::from_raw_parts(pidl.cast::<u8>(), length) };
+            let allocation_len = unsafe { allocator.GetSize(Some(pidl.cast())) };
+            if !(2..=MAX_PIDL_ALLOCATION_BYTES).contains(&allocation_len) {
+                unsafe { CoTaskMemFree(Some(pidl.cast())) };
+                unreadable += 1;
+                continue;
+            }
+            let allocation =
+                unsafe { std::slice::from_raw_parts(pidl.cast::<u8>(), allocation_len) };
+            let Some(length) = pidl_len_within_allocation(allocation) else {
+                unsafe { CoTaskMemFree(Some(pidl.cast())) };
+                unreadable += 1;
+                continue;
+            };
+            let bytes = &allocation[..length];
             let identity = identity_of(bytes);
             let position = unsafe { view.GetItemPosition(pidl) };
             // Shell が確保した PIDL は必ず解放する。
@@ -314,6 +357,23 @@ mod tests {
         let mut altered = raw.to_vec();
         altered[0] ^= 0x01;
         assert_ne!(identity, identity_of(&altered));
+    }
+
+    #[test]
+    fn pidl_length_never_crosses_the_actual_com_allocation() {
+        let corrupt = [8u8, 0, 1, 2];
+        assert_eq!(pidl_len_within_allocation(&corrupt), None);
+        let valid = [4u8, 0, 1, 2, 0, 0];
+        assert_eq!(pidl_len_within_allocation(&valid), Some(valid.len()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_false_means_auto_arrange_is_disabled() {
+        use windows::Win32::Foundation::{S_FALSE, S_OK};
+
+        assert!(imp::auto_arrange_from_hresult(S_OK).unwrap());
+        assert!(!imp::auto_arrange_from_hresult(S_FALSE).unwrap());
     }
 
     #[test]

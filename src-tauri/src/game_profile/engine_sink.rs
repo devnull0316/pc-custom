@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::engine::PcCustomEngine;
 use crate::error::CoreError;
+use crate::journal::TimelineItem;
 use crate::presentation::{PreviewActionRequest, PreviewActionsRequest};
 
 use super::{AppliedAction, PlannedAction, ProfileActionSink, ProfileError, ProfileSessionId};
@@ -55,7 +56,7 @@ impl ProfileActionSink for EngineProfileSink {
         }
 
         // commit したトランザクションの各 item id を journal から引く。
-        let timeline = self.engine.list_timeline(256).map_err(sink_error)?;
+        let timeline = committed_transaction_items(&self.engine, commit.transaction_id)?;
         let mut applied = Vec::with_capacity(actions.len());
         for action in actions {
             let item = timeline
@@ -88,8 +89,86 @@ impl ProfileActionSink for EngineProfileSink {
     }
 }
 
+fn committed_transaction_items(
+    engine: &PcCustomEngine,
+    transaction_id: uuid::Uuid,
+) -> Result<Vec<TimelineItem>, ProfileError> {
+    engine
+        .transaction_timeline(transaction_id)
+        .map_err(sink_error)
+}
+
 fn sink_error(error: CoreError) -> ProfileError {
     ProfileError::Sink(error.user_message)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::{
+        action::{ActionId, ActionParameters},
+        backup::{BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, ObservationBackup},
+        compatibility::OsIdentity,
+        journal::{JournalDatabase, PreparedItem},
+    };
+
+    fn observation_items(transaction_id: Uuid, count: usize) -> Vec<PreparedItem> {
+        (0..count)
+            .map(|ordinal| {
+                let item_id = Uuid::new_v4();
+                let before = Fingerprint::of_bytes(format!("before-{ordinal}").as_bytes());
+                PreparedItem {
+                    item_id,
+                    ordinal: u32::try_from(ordinal).expect("bounded test ordinal"),
+                    action_id: ActionId::PowerActiveSchemeCheck,
+                    action_version: 1,
+                    parameters: ActionParameters::PowerActiveSchemeCheck {},
+                    resource_keys: vec![format!("sink-cap-{ordinal}")],
+                    backup: BackupEnvelope::from_draft(
+                        BackupDraft {
+                            precondition_fingerprint: before,
+                            intended_fingerprint: before,
+                            payload: BackupPayload::Observation(ObservationBackup {
+                                source: "engine sink cap regression".to_owned(),
+                            }),
+                        },
+                        transaction_id,
+                        item_id,
+                        ActionId::PowerActiveSchemeCheck,
+                        1,
+                        1,
+                        26_200,
+                    ),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn engine_sink_reads_all_257_transaction_items_past_the_old_256_cap() {
+        let journal = Arc::new(JournalDatabase::open_in_memory().unwrap());
+        let transaction_id = Uuid::new_v4();
+        let items = observation_items(transaction_id, 257);
+        journal
+            .record_prepared_transaction(
+                transaction_id,
+                "engine-sink-cap-regression",
+                "test",
+                "test-os",
+                &items,
+                1,
+            )
+            .unwrap();
+        let engine =
+            PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).unwrap();
+
+        let loaded = committed_transaction_items(&engine, transaction_id).unwrap();
+        assert_eq!(loaded.len(), 257);
+    }
 }
 
 /// 実機スモーク: 実 HKCU の HideFileExt に対して apply→rollback を通し、正確に原状復帰するか確認する。

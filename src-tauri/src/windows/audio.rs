@@ -637,6 +637,37 @@ fn merge_endpoint_session_reads(
     Ok(all_sessions)
 }
 
+fn write_volume_then_mute_with_compensation(
+    original_volume: f32,
+    original_muted: bool,
+    target_volume: f32,
+    target_muted: bool,
+    mut read: impl FnMut() -> WindowsResult<(f32, bool)>,
+    mut set_volume: impl FnMut(f32) -> WindowsResult<()>,
+    mut set_mute: impl FnMut(bool) -> WindowsResult<()>,
+) -> WindowsResult<()> {
+    set_volume(target_volume)?;
+    if let Err(mute_error) = set_mute(target_muted) {
+        // A failed COM setter is not proof that nothing changed. Restore both
+        // values, including the failed field, and accept the original error only
+        // after an independent read observes the exact pre-write pair.
+        let _ = set_volume(original_volume);
+        let _ = set_mute(original_muted);
+        let restored = read().is_ok_and(|(volume, muted)| {
+            (volume - original_volume).abs() <= f32::EPSILON && muted == original_muted
+        });
+        if !restored {
+            return Err(WindowsError::new(
+                WindowsErrorKind::RecoveryRequired,
+                "verify app volume compensation after mute write failure",
+                mute_error.os_code,
+            ));
+        }
+        return Err(mute_error);
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn ensure_active_render_endpoint(
     endpoint: &windows::Win32::Media::Audio::IMMDevice,
@@ -858,17 +889,58 @@ pub fn restore_app_volume_sessions(
                                         Ok(v) => v,
                                         Err(_) => continue,
                                     };
-                                    unsafe {
-                                        simple_vol.SetMasterVolume(exp.volume, std::ptr::null())
-                                    }
-                                    .map_err(|err| {
-                                        api_error("ISimpleAudioVolume SetMasterVolume", err)
+                                    let original_volume = unsafe { simple_vol.GetMasterVolume() }
+                                        .map_err(|err| {
+                                        api_error("ISimpleAudioVolume GetMasterVolume", err)
                                     })?;
-
-                                    unsafe {
-                                        simple_vol.SetMute(BOOL::from(exp.muted), std::ptr::null())
-                                    }
-                                    .map_err(|err| api_error("ISimpleAudioVolume SetMute", err))?;
+                                    let original_muted = unsafe { simple_vol.GetMute() }
+                                        .map_err(|err| {
+                                            api_error("ISimpleAudioVolume GetMute", err)
+                                        })?
+                                        .as_bool();
+                                    write_volume_then_mute_with_compensation(
+                                        original_volume,
+                                        original_muted,
+                                        exp.volume,
+                                        exp.muted,
+                                        || {
+                                            let volume = unsafe { simple_vol.GetMasterVolume() }
+                                                .map_err(|err| {
+                                                    api_error(
+                                                        "ISimpleAudioVolume GetMasterVolume",
+                                                        err,
+                                                    )
+                                                })?;
+                                            let muted = unsafe { simple_vol.GetMute() }
+                                                .map_err(|err| {
+                                                    api_error("ISimpleAudioVolume GetMute", err)
+                                                })?
+                                                .as_bool();
+                                            Ok((volume, muted))
+                                        },
+                                        |volume| {
+                                            unsafe {
+                                                simple_vol.SetMasterVolume(volume, std::ptr::null())
+                                            }
+                                            .map_err(
+                                                |err| {
+                                                    api_error(
+                                                        "ISimpleAudioVolume SetMasterVolume",
+                                                        err,
+                                                    )
+                                                },
+                                            )
+                                        },
+                                        |muted| {
+                                            unsafe {
+                                                simple_vol
+                                                    .SetMute(BOOL::from(muted), std::ptr::null())
+                                            }
+                                            .map_err(
+                                                |err| api_error("ISimpleAudioVolume SetMute", err),
+                                            )
+                                        },
+                                    )?;
 
                                     success_count += 1;
                                     break;
@@ -1058,6 +1130,50 @@ mod tests {
         let error = result.expect_err("an incomplete read must remain an error");
         assert_eq!(error.kind, WindowsErrorKind::ApiFailure);
         assert_eq!(error.operation, "injected endpoint session read failure");
+    }
+
+    #[test]
+    fn mute_failure_restores_the_volume_written_immediately_before_it() {
+        let state = std::rc::Rc::new(std::cell::RefCell::new((0.25, false)));
+        let volume_writes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mute_writes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let read_state = std::rc::Rc::clone(&state);
+        let volume_state = std::rc::Rc::clone(&state);
+        let volume_calls = std::rc::Rc::clone(&volume_writes);
+        let mute_state = std::rc::Rc::clone(&state);
+        let mute_calls = std::rc::Rc::clone(&mute_writes);
+        let error = write_volume_then_mute_with_compensation(
+            0.25,
+            false,
+            0.75,
+            true,
+            move || Ok(*read_state.borrow()),
+            move |volume| {
+                volume_calls.borrow_mut().push(volume);
+                volume_state.borrow_mut().0 = volume;
+                Ok(())
+            },
+            move |muted| {
+                let mut calls = mute_calls.borrow_mut();
+                calls.push(muted);
+                mute_state.borrow_mut().1 = muted;
+                if calls.len() == 1 {
+                    Err(WindowsError::new(
+                        WindowsErrorKind::ApiFailure,
+                        "injected mute write failure",
+                        Some(456),
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .expect_err("mute write is injected to fail");
+
+        assert_eq!(error.operation, "injected mute write failure");
+        assert_eq!(*state.borrow(), (0.25, false));
+        assert_eq!(*volume_writes.borrow(), vec![0.75, 0.25]);
+        assert_eq!(*mute_writes.borrow(), vec![true, false]);
     }
 
     #[test]

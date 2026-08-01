@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::{
     engine::PcCustomEngine,
     error::{CoreError, CoreResult},
+    journal::TimelineItem,
     presentation::{PreviewActionRequest, PreviewActionsRequest},
 };
 
@@ -93,18 +94,14 @@ pub fn run_manual_profile(
 
     // list_timeline returns transaction items in reverse durable ordinal, which is
     // exactly the rollback order. Persist that order rather than the profile UI order.
-    let timeline = engine.list_timeline(128)?;
-    let transaction_items = timeline
-        .iter()
-        .filter(|item| item.transaction_id == commit.transaction_id)
-        .collect::<Vec<_>>();
+    let transaction_items = manual_transaction_items(&engine, commit.transaction_id)?;
     if transaction_items.len() != profile.actions.len() {
         return Err(CoreError::recovery_required(
             "手動モードの変更記録が不足しています。",
         ));
     }
     let reversible_item_ids = transaction_items
-        .into_iter()
+        .iter()
         .filter(|item| item.rollback_available)
         .map(|item| item.item_id.to_string())
         .collect::<Vec<_>>();
@@ -115,7 +112,7 @@ pub fn run_manual_profile(
         };
         if let Err(persist_error) = store.set_active_run(id, record) {
             let mut rollback_failed = false;
-            for item_id in reversible_item_ids.iter().rev() {
+            for item_id in compensation_order(&reversible_item_ids) {
                 match Uuid::parse_str(item_id)
                     .ok()
                     .and_then(|item| engine.rollback_item(item).ok())
@@ -176,7 +173,7 @@ pub fn restore_manual_profile(
         }
         details.extend(result.details);
         remaining.remove(0);
-        store.update_active_run_items(id, &run.transaction_id, remaining.clone())?;
+        store.acknowledge_rolled_back_items(id, &run.transaction_id, remaining.clone())?;
     }
     Ok(ManualProfileResult {
         transaction_id: run.transaction_id,
@@ -196,16 +193,94 @@ pub fn restore_manual_profile(
     })
 }
 
+fn manual_transaction_items(
+    engine: &PcCustomEngine,
+    transaction_id: Uuid,
+) -> CoreResult<Vec<TimelineItem>> {
+    engine.transaction_timeline(transaction_id)
+}
+
+fn compensation_order(item_ids: &[String]) -> impl Iterator<Item = &String> {
+    item_ids.iter()
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use crate::{
+        action::{ActionId, ActionParameters},
+        backup::{BackupDraft, BackupEnvelope, BackupPayload, Fingerprint, ObservationBackup},
         compatibility::OsIdentity,
         game_profile::{CreateProfileRequest, StoredProfileAction},
-        journal::JournalDatabase,
+        journal::{JournalDatabase, PreparedItem},
         window_layout::{WindowLayoutStore, WindowRect},
     };
     use serde::{Deserialize, Serialize};
+
+    fn observation_items(transaction_id: Uuid, count: usize) -> Vec<PreparedItem> {
+        (0..count)
+            .map(|ordinal| {
+                let item_id = Uuid::new_v4();
+                let before = Fingerprint::of_bytes(format!("before-{ordinal}").as_bytes());
+                let backup = BackupEnvelope::from_draft(
+                    BackupDraft {
+                        precondition_fingerprint: before,
+                        intended_fingerprint: before,
+                        payload: BackupPayload::Observation(ObservationBackup {
+                            source: "manual cap regression".to_owned(),
+                        }),
+                    },
+                    transaction_id,
+                    item_id,
+                    ActionId::PowerActiveSchemeCheck,
+                    1,
+                    1,
+                    26_200,
+                );
+                PreparedItem {
+                    item_id,
+                    ordinal: u32::try_from(ordinal).expect("bounded test ordinal"),
+                    action_id: ActionId::PowerActiveSchemeCheck,
+                    action_version: 1,
+                    parameters: ActionParameters::PowerActiveSchemeCheck {},
+                    resource_keys: vec![format!("manual-cap-{ordinal}")],
+                    backup,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn manual_run_reads_all_129_transaction_items_past_the_old_128_cap() {
+        let journal = Arc::new(JournalDatabase::open_in_memory().unwrap());
+        let transaction_id = Uuid::new_v4();
+        let items = observation_items(transaction_id, 129);
+        journal
+            .record_prepared_transaction(
+                transaction_id,
+                "manual-cap-regression",
+                "test",
+                "test-os",
+                &items,
+                1,
+            )
+            .unwrap();
+        let engine =
+            PcCustomEngine::new(journal, Some(OsIdentity::from_test_build(26_200))).unwrap();
+
+        let loaded = manual_transaction_items(&engine, transaction_id).unwrap();
+        assert_eq!(loaded.len(), 129);
+    }
+
+    #[test]
+    fn failed_manual_run_persistence_compensates_in_saved_rollback_order() {
+        let ids = vec!["second-applied".to_owned(), "first-applied".to_owned()];
+        assert_eq!(
+            compensation_order(&ids).cloned().collect::<Vec<_>>(),
+            ids,
+            "timeline already stores reverse durable ordinal, the rollback order"
+        );
+    }
 
     #[test]
     fn manual_profile_uses_engine_journal_and_restores_its_items() {

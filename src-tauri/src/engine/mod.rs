@@ -491,7 +491,21 @@ impl PcCustomEngine {
 
     pub fn list_timeline(&self, limit: u32) -> CoreResult<Vec<TimelineItem>> {
         let mut timeline = self.journal.list_timeline(limit)?;
-        for item in &mut timeline {
+        self.enrich_timeline(&mut timeline);
+        Ok(timeline)
+    }
+
+    pub(crate) fn transaction_timeline(
+        &self,
+        transaction_id: Uuid,
+    ) -> CoreResult<Vec<TimelineItem>> {
+        let mut timeline = self.journal.transaction_timeline(transaction_id)?;
+        self.enrich_timeline(&mut timeline);
+        Ok(timeline)
+    }
+
+    fn enrich_timeline(&self, timeline: &mut [TimelineItem]) {
+        for item in timeline {
             if let Ok(action_id) = item.action_id.parse::<ActionId>() {
                 if let Some(action) = ACTION_REGISTRY.get(action_id) {
                     item.title = action.metadata().name.to_owned();
@@ -505,7 +519,6 @@ impl PcCustomEngine {
                 }
             }
         }
-        Ok(timeline)
     }
 
     pub(crate) fn journal_item_identity(

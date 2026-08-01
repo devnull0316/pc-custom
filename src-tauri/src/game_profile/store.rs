@@ -487,6 +487,45 @@ impl ProfileStore {
         *guard = next;
         Ok(())
     }
+
+    pub fn acknowledge_rolled_back_items(
+        &self,
+        id: &str,
+        transaction_id: &str,
+        item_ids: Vec<String>,
+    ) -> CoreResult<()> {
+        let mut guard = self.profiles.lock();
+        let index = guard
+            .iter()
+            .position(|profile| profile.id == id)
+            .ok_or_else(|| CoreError::invalid_request("対象のプロファイルがありません。"))?;
+        let Some(active) = guard[index].active_run.as_ref() else {
+            return Err(CoreError::invalid_request(
+                "この手動モードは実行中ではありません。",
+            ));
+        };
+        if active.transaction_id != transaction_id {
+            return Err(CoreError::recovery_required(
+                "手動モードの復元記録が一致しません。",
+            ));
+        }
+        let mut next = guard.clone();
+        next[index].active_run = (!item_ids.is_empty()).then(|| ManualRunRecord {
+            transaction_id: transaction_id.to_owned(),
+            reversible_item_ids: item_ids,
+        });
+        if Self::persist(&self.path, &next).is_err() {
+            // The Windows setting and journal item are already rolled back. Keeping the
+            // completed item in memory would invite a second rollback and tell the UI it
+            // is still applied. Keep runtime truth, but fail loudly because disk is stale.
+            *guard = next;
+            return Err(CoreError::recovery_required(
+                "復元は完了しましたが、手動モードの記録をディスクへ保存できませんでした。変更履歴を確認してください。",
+            ));
+        }
+        *guard = next;
+        Ok(())
+    }
     pub fn clear_active_run(&self, id: &str) -> CoreResult<()> {
         let mut guard = self.profiles.lock();
         let index = guard
@@ -1066,6 +1105,48 @@ mod tests {
         // disk上の原本も有効化前のまま。
         let reopened = ProfileStore::open(store.path.clone()).expect("reopen original file");
         assert!(!reopened.list()[0].automation_enabled);
+    }
+
+    #[test]
+    fn rolled_back_item_is_removed_from_memory_even_when_ack_persistence_fails() {
+        let (store, _dir) = temp_store();
+        let created = store
+            .create(CreateProfileRequest {
+                name: "manual rollback acknowledgement".to_owned(),
+                executable_path: None,
+                conflict_policy: None,
+                actions: vec![StoredProfileAction {
+                    action_id: "session.prevent_sleep".to_owned(),
+                    parameters: serde_json::json!({"keepDisplayOn": false}),
+                }],
+                ribbon_color: None,
+            })
+            .unwrap();
+        let transaction_id = Uuid::new_v4().to_string();
+        let remaining = Uuid::new_v4().to_string();
+        store
+            .set_active_run(
+                &created.id,
+                ManualRunRecord {
+                    transaction_id: transaction_id.clone(),
+                    reversible_item_ids: vec![Uuid::new_v4().to_string(), remaining.clone()],
+                },
+            )
+            .unwrap();
+        block_persist_temp(&store);
+
+        store
+            .acknowledge_rolled_back_items(&created.id, &transaction_id, vec![remaining.clone()])
+            .expect_err("durable acknowledgement must report the blocked write");
+        assert_eq!(
+            store
+                .get(&created.id)
+                .unwrap()
+                .active_run
+                .unwrap()
+                .reversible_item_ids,
+            vec![remaining]
+        );
     }
 
     #[test]
