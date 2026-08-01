@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   publicErrorMessage,
@@ -6,6 +6,7 @@ import {
   storageHistoryClear,
   storageHistoryList,
 } from "../backend";
+import { LatestRequestGuard, canRunLiveMutation, formatStorageTimestamp } from "../frontendLogic";
 import type {
   DataMode,
   StorageCategory,
@@ -72,19 +73,24 @@ export function StorageHistoryPanel({ dataMode }: StorageHistoryPanelProps) {
   const [busy, setBusy] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const historyRequests = useRef(new LatestRequestGuard());
 
   useEffect(() => {
-    if (!live) return;
-    let active = true;
+    if (!live) {
+      historyRequests.current.invalidate();
+      setBusy(false);
+      return;
+    }
+    const generation = historyRequests.current.begin();
     void storageHistoryList()
       .then((points) => {
-        if (active) setHistory(points);
+        if (historyRequests.current.isCurrent(generation)) setHistory(points);
       })
       .catch((error: unknown) => {
-        if (active) setMessage(publicErrorMessage(error));
+        if (historyRequests.current.isCurrent(generation)) setMessage(publicErrorMessage(error));
       });
     return () => {
-      active = false;
+      historyRequests.current.invalidate();
     };
   }, [live]);
 
@@ -99,32 +105,39 @@ export function StorageHistoryPanel({ dataMode }: StorageHistoryPanelProps) {
   }
 
   async function capture() {
+    if (!canRunLiveMutation(dataMode)) return;
+    const generation = historyRequests.current.begin();
     setBusy(true);
     setMessage(null);
     setConfirmingClear(false);
     try {
       await storageHistoryCapture(selected);
-      setHistory(await storageHistoryList());
+      const points = await storageHistoryList();
+      if (!historyRequests.current.isCurrent(generation)) return;
+      setHistory(points);
       setMessage("容量の集計を記録しました。Windowsやファイルは変更していません。");
     } catch (error: unknown) {
-      setMessage(publicErrorMessage(error));
+      if (historyRequests.current.isCurrent(generation)) setMessage(publicErrorMessage(error));
     } finally {
-      setBusy(false);
+      if (historyRequests.current.isCurrent(generation)) setBusy(false);
     }
   }
 
   async function clear() {
+    if (!canRunLiveMutation(dataMode)) return;
+    const generation = historyRequests.current.begin();
     setBusy(true);
     setMessage(null);
     try {
       const count = await storageHistoryClear();
+      if (!historyRequests.current.isCurrent(generation)) return;
       setHistory([]);
       setConfirmingClear(false);
       setMessage(`${count}回分の集計履歴を消しました。Windowsのファイルは変更していません。`);
     } catch (error: unknown) {
-      setMessage(publicErrorMessage(error));
+      if (historyRequests.current.isCurrent(generation)) setMessage(publicErrorMessage(error));
     } finally {
-      setBusy(false);
+      if (historyRequests.current.isCurrent(generation)) setBusy(false);
     }
   }
 
@@ -203,11 +216,13 @@ export function StorageHistoryPanel({ dataMode }: StorageHistoryPanelProps) {
         <p className="muted small">まだ記録はありません。2回目から期間ごとの増減を表示します。</p>
       ) : (
         <ol className="storage-history__timeline">
-          {history.map((point, index) => (
+          {history.map((point, index) => {
+            const timestamp = formatStorageTimestamp(point.capturedAtUnixMs);
+            return (
             <li key={`${point.capturedAtUnixMs}-${index}`}>
               <div className="storage-history__point">
-                <time dateTime={new Date(point.capturedAtUnixMs).toISOString()}>
-                  {new Date(point.capturedAtUnixMs).toLocaleString("ja-JP")}
+                <time dateTime={timestamp?.dateTime}>
+                  {timestamp?.label ?? "記録時刻を確認できません"}
                 </time>
                 <strong>空き {formatBytes(point.driveAvailableBytes)}</strong>
                 <span className="muted small">
@@ -240,7 +255,8 @@ export function StorageHistoryPanel({ dataMode }: StorageHistoryPanelProps) {
                 })}
               </ul>
             </li>
-          ))}
+            );
+          })}
         </ol>
       )}
 

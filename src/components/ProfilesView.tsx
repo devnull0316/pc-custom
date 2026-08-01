@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { exportConfig, getWindowLayoutStatus, importApply, importPreview, pickGameExecutable, publicErrorMessage } from "../backend";
+import {
+  LatestRequestGuard,
+  type ImportPreviewSnapshot,
+  isCurrentImportPreview,
+  shouldClearProfileDraft,
+} from "../frontendLogic";
 import type {
   ActionPresentation,
   CreateProfileRequest,
@@ -21,7 +27,7 @@ interface ProfilesViewProps {
   profiles: readonly StoredProfile[];
   actions: readonly ActionPresentation[];
   busy: boolean;
-  onCreate: (request: CreateProfileRequest) => void;
+  onCreate: (request: CreateProfileRequest) => Promise<boolean>;
   onParametersForAction: (actionId: string) => Record<string, JsonValue>;
   onRun: (id: string) => void;
   onRestore: (id: string) => void;
@@ -30,6 +36,7 @@ interface ProfilesViewProps {
   onDelete: (id: string) => void;
   onOpenActions: () => void;
   onChanged?: () => void;
+  profilesReadFailed: boolean;
 }
 
 export function ProfilesView({
@@ -46,6 +53,7 @@ export function ProfilesView({
   onDelete,
   onOpenActions,
   onChanged,
+  profilesReadFailed,
 }: ProfilesViewProps) {
   const [mode, setMode] = useState<"game" | "manual" | "workspace">("game");
   const [name, setName] = useState("");
@@ -54,12 +62,13 @@ export function ProfilesView({
   const [launchBundle, setLaunchBundle] = useState<"study" | "work" | "creative">("study");
   const [exportedJson, setExportedJson] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
-  const [previewItems, setPreviewItems] = useState<readonly ImportPreviewItem[] | null>(null);
+  const [preview, setPreview] = useState<ImportPreviewSnapshot<ImportPreviewItem> | null>(null);
   const [ioBusy, setIoBusy] = useState(false);
   const [ioMessage, setIoMessage] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [ribbonColor, setRibbonColor] = useState<ModeRibbonColor | undefined>();
   const [layoutStatus, setLayoutStatus] = useState<WindowLayoutStatus | null>(null);
+  const importPreviewRequests = useRef(new LatestRequestGuard());
 
   useEffect(() => {
     if (dataMode !== "live") {
@@ -77,6 +86,13 @@ export function ProfilesView({
     return () => {
       cancelled = true;
     };
+  }, [dataMode]);
+
+  useEffect(() => {
+    if (dataMode === "live") return;
+    importPreviewRequests.current.invalidate();
+    setIoBusy(false);
+    setPreview(null);
   }, [dataMode]);
 
   /// 実行ファイルは手で打たせない。打ち間違えれば別のファイルが登録される。
@@ -105,28 +121,35 @@ export function ProfilesView({
   }
 
   async function doPreview() {
+    const source = importText;
+    const generation = importPreviewRequests.current.begin();
     setIoBusy(true);
     setIoMessage(null);
     try {
-      setPreviewItems(await importPreview(importText));
+      const items = await importPreview(source);
+      if (!importPreviewRequests.current.isCurrent(generation)) return;
+      setPreview({ source, items });
     } catch (error: unknown) {
-      setPreviewItems(null);
+      if (!importPreviewRequests.current.isCurrent(generation)) return;
+      setPreview(null);
       setIoMessage(publicErrorMessage(error));
     } finally {
-      setIoBusy(false);
+      if (importPreviewRequests.current.isCurrent(generation)) setIoBusy(false);
     }
   }
 
   async function doApply() {
+    if (!live || !isCurrentImportPreview(preview, importText)) return;
+    const confirmedJson = preview.source;
     setIoBusy(true);
     setIoMessage(null);
     try {
-      const result = await importApply(importText);
+      const result = await importApply(confirmedJson);
       setIoMessage(
         `取り込み ${result.imported.length}件` +
           (result.skipped.length > 0 ? ` / スキップ ${result.skipped.length}件` : ""),
       );
-      setPreviewItems(null);
+      setPreview(null);
       setImportText("");
       onChanged?.();
     } catch (error: unknown) {
@@ -169,7 +192,7 @@ export function ProfilesView({
     });
   }
 
-  function submit() {
+  async function submit() {
     if (!canSubmit) return;
     const request: CreateProfileRequest = {
       name: name.trim(),
@@ -187,11 +210,13 @@ export function ProfilesView({
       ...(ribbonColor === undefined ? {} : { ribbonColor }),
     };
     if (mode === "game") request.executablePath = exePath.trim();
-    onCreate(request);
-    setName("");
-    setExePath("");
-    setSelected(new Set());
-    setRibbonColor(undefined);
+    const created = await onCreate(request);
+    if (shouldClearProfileDraft(created)) {
+      setName("");
+      setExePath("");
+      setSelected(new Set());
+      setRibbonColor(undefined);
+    }
   }
 
   return (
@@ -228,7 +253,7 @@ export function ProfilesView({
           className="profile-create"
           onSubmit={(event) => {
             event.preventDefault();
-            submit();
+            void submit();
           }}
         >
           <h2>新しいモード</h2>
@@ -377,7 +402,12 @@ export function ProfilesView({
 
         <div className="profile-list-panel">
           <h2>登録済みのモード</h2>
-          {profiles.length === 0 && dataMode !== "live" ? (
+          {profilesReadFailed && profiles.length > 0 ? (
+            <p className="inline-note" role="status">
+              最新の一覧を読み取れなかったため、直前に確認できた内容を表示しています。
+            </p>
+          ) : null}
+          {profiles.length === 0 && (dataMode !== "live" || profilesReadFailed) ? (
             /* 0件を「無い」と言い切らない。
                安全コアへ繋がっていないときは、そもそも読めていない。
                読めなかったことを「まだありません」と書くと、
@@ -388,7 +418,9 @@ export function ProfilesView({
               <span>
                 {dataMode === "loading"
                   ? "読み込み中です。"
-                  : "安全コアへ接続できていないため、この一覧は空のままです。登録したモードが消えたわけではありません。"}
+                  : profilesReadFailed
+                    ? "登録済みモードの読み取りに失敗しました。登録内容が消えたわけではありません。"
+                    : "安全コアへ接続できていないため、この一覧は空のままです。登録したモードが消えたわけではありません。"}
               </span>
             </div>
           ) : profiles.length === 0 ? (
@@ -511,7 +543,12 @@ export function ProfilesView({
             aria-label="取り込むバックアップJSON"
             className="config-io__text"
             disabled={!live || ioBusy}
-            onChange={(event) => setImportText(event.target.value)}
+            onChange={(event) => {
+              importPreviewRequests.current.invalidate();
+              setIoBusy(false);
+              setImportText(event.target.value);
+              setPreview(null);
+            }}
             placeholder="ここにバックアップJSONを貼り付けて『内容を確認』"
             rows={4}
             value={importText}
@@ -527,7 +564,7 @@ export function ProfilesView({
             </button>
             <button
               className="primary-button"
-              disabled={!live || ioBusy || previewItems === null}
+              disabled={!live || ioBusy || !isCurrentImportPreview(preview, importText)}
               onClick={() => void doApply()}
               type="button"
             >
@@ -535,9 +572,9 @@ export function ProfilesView({
             </button>
           </div>
         </div>
-        {previewItems === null ? null : (
+        {preview === null ? null : (
           <ul className="config-io__preview">
-            {previewItems.map((item) => (
+            {preview.items.map((item) => (
               <li key={`${item.name}-${item.executablePath}`} className={item.resolvable ? "" : "config-io__preview--blocked"}>
                 <Icon name={item.resolvable ? "check" : "warning"} size={15} />
                 <span><strong>{item.name}</strong> — {item.note}</span>

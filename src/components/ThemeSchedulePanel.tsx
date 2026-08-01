@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { listTimeline, publicErrorMessage, rollbackItem, themeScheduleGet, themeScheduleSet } from "../backend";
+import { LatestRequestGuard, failedRead, loadingRead, successfulRead } from "../frontendLogic";
 import type { DataMode, ThemeSchedule, TimelineItem } from "../model";
 import { Icon } from "./Icon";
 
@@ -25,7 +26,7 @@ function fromTimeInput(value: string): number | null {
 
 export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
   const live = dataMode === "live";
-  const [schedule, setSchedule] = useState<ThemeSchedule | null>(null);
+  const [scheduleRead, setScheduleRead] = useState(() => loadingRead<ThemeSchedule | null>(null));
   const [lastError, setLastError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -33,34 +34,41 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
   // 以前はそれを伝えず、戻すにはタイムラインまで移動する必要があった。
   const [revertableItemId, setRevertableItemId] = useState<string | null>(null);
   const [reverting, setReverting] = useState(false);
+  const loadRequests = useRef(new LatestRequestGuard());
+  const schedule = scheduleRead.value;
+  const editable = live && scheduleRead.status === "ready";
 
   useEffect(() => {
-    let cancelled = false;
+    if (dataMode !== "live") {
+      loadRequests.current.invalidate();
+      return;
+    }
+    const generation = loadRequests.current.begin();
     void (async () => {
       try {
         const state = await themeScheduleGet();
-        if (!cancelled) {
-          setSchedule(state.schedule);
+        if (loadRequests.current.isCurrent(generation)) {
+          setScheduleRead(successfulRead(state.schedule));
           setLastError(state.lastError);
         }
-      } catch {
-        // 安全コア未接続時は閲覧のみ。既定値を表示して操作は無効化する。
-        if (!cancelled) {
-          setSchedule({ enabled: false, lightAtMinutes: 7 * 60, darkAtMinutes: 19 * 60 });
+      } catch (error: unknown) {
+        if (loadRequests.current.isCurrent(generation)) {
+          setScheduleRead((current) => failedRead(current, publicErrorMessage(error)));
         }
       }
     })();
     return () => {
-      cancelled = true;
+      loadRequests.current.invalidate();
     };
-  }, []);
+  }, [dataMode]);
 
   async function save(next: ThemeSchedule) {
+    if (!editable) return;
     setBusy(true);
     setMessage(null);
     try {
       const state = await themeScheduleSet(next);
-      setSchedule(state.schedule);
+      setScheduleRead(successfulRead(state.schedule));
       setLastError(state.lastError);
       if (state.schedule.enabled) {
         setMessage("時間帯に合わせて自動で切り替えます。");
@@ -113,7 +121,20 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
     }
   }
 
-  if (schedule === null) return null;
+  if (schedule === null) {
+    return (
+      <section className="theme-schedule" aria-label="時間帯によるテーマ切り替え">
+        <h2>時間帯で明るさを切り替える</h2>
+        <p className="muted small" role="status">
+          {dataMode !== "live"
+            ? "閲覧モードです。安全コアに接続すると設定を読み取れます。"
+            : scheduleRead.status === "error"
+            ? `設定を読み取れませんでした: ${scheduleRead.message}`
+            : "設定を読み込んでいます。"}
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="theme-schedule" aria-label="時間帯によるテーマ切り替え">
@@ -129,7 +150,7 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
         <label className="theme-schedule__toggle">
           <input
             checked={schedule.enabled}
-            disabled={!live || busy}
+            disabled={!editable || busy}
             onChange={(event) => void save({ ...schedule, enabled: event.target.checked })}
             type="checkbox"
           />
@@ -141,10 +162,10 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
         <label>
           <span>明るくする</span>
           <input
-            disabled={!live || busy}
+            disabled={!editable || busy}
             onChange={(event) => {
               const minutes = fromTimeInput(event.target.value);
-              if (minutes !== null) setSchedule({ ...schedule, lightAtMinutes: minutes });
+              if (minutes !== null) setScheduleRead(successfulRead({ ...schedule, lightAtMinutes: minutes }));
             }}
             type="time"
             value={toTimeInput(schedule.lightAtMinutes)}
@@ -153,10 +174,10 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
         <label>
           <span>暗くする</span>
           <input
-            disabled={!live || busy}
+            disabled={!editable || busy}
             onChange={(event) => {
               const minutes = fromTimeInput(event.target.value);
-              if (minutes !== null) setSchedule({ ...schedule, darkAtMinutes: minutes });
+              if (minutes !== null) setScheduleRead(successfulRead({ ...schedule, darkAtMinutes: minutes }));
             }}
             type="time"
             value={toTimeInput(schedule.darkAtMinutes)}
@@ -164,7 +185,7 @@ export function ThemeSchedulePanel({ dataMode }: ThemeSchedulePanelProps) {
         </label>
         <button
           className="secondary-button"
-          disabled={!live || busy}
+          disabled={!editable || busy}
           onClick={() => void save(schedule)}
           type="button"
         >

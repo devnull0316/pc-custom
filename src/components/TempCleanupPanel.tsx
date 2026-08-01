@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { publicErrorMessage, tempCleanupApply, tempCleanupPlan } from "../backend";
+import { canRunLiveMutation } from "../frontendLogic";
 import type { DataMode, TempCleanupOutcome, TempCleanupPlan } from "../model";
 import { Icon } from "./Icon";
 
@@ -29,6 +30,7 @@ export function TempCleanupPanel({ dataMode }: TempCleanupPanelProps) {
   const [confirming, setConfirming] = useState(false);
 
   async function loadPlan() {
+    if (!canRunLiveMutation(dataMode)) return;
     setBusy(true);
     setMessage(null);
     setOutcome(null);
@@ -44,6 +46,7 @@ export function TempCleanupPanel({ dataMode }: TempCleanupPanelProps) {
   }
 
   async function apply() {
+    if (!canRunLiveMutation(dataMode)) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -77,7 +80,7 @@ export function TempCleanupPanel({ dataMode }: TempCleanupPanelProps) {
         </button>
         {plan === null || plan.candidates.length === 0 ? null : confirming ? (
           <>
-            <button className="primary-button" disabled={busy} onClick={() => void apply()} type="button">
+            <button className="primary-button" disabled={!live || busy} onClick={() => void apply()} type="button">
               {busy ? <Icon className="spin" name="spinner" /> : <Icon name="warning" />}
               本当に削除する（戻せません）
             </button>
@@ -86,7 +89,7 @@ export function TempCleanupPanel({ dataMode }: TempCleanupPanelProps) {
             </button>
           </>
         ) : (
-          <button className="secondary-button" disabled={busy} onClick={() => setConfirming(true)} type="button">
+          <button className="secondary-button" disabled={!live || busy} onClick={() => setConfirming(true)} type="button">
             <Icon name="close" />この{plan.candidates.length}件を削除する
           </button>
         )}

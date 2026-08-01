@@ -2,6 +2,7 @@ import { openWindowsSettings } from "../backend";
 import { useState, type KeyboardEvent } from "react";
 
 import { CATEGORIES } from "../catalog";
+import { selectDisplayedAction } from "../frontendLogic";
 import type {
   ActionPresentation,
   BootstrapStatus,
@@ -124,7 +125,7 @@ export function ActionBrowser({
       })
     : categoryActions;
 
-  const selected = actions.find((action) => action.id === selectedActionId) ?? displayedActions[0];
+  const selected = selectDisplayedAction(displayedActions, selectedActionId);
 
   return (
     <div className="view action-view">

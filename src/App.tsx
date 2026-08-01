@@ -23,6 +23,14 @@ import {
 } from "./backend";
 import { appearanceSceneRequest } from "./appearanceScenes";
 import { STATIC_ACTIONS } from "./catalog";
+import {
+  LatestRequestGuard,
+  failedRead,
+  loadingRead,
+  successfulRead,
+  trialConfirmationSucceeded,
+  withoutCommitItem,
+} from "./frontendLogic";
 import { ActionBrowser } from "./components/ActionBrowser";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette";
 import { Dialog } from "./components/Dialog";
@@ -176,7 +184,9 @@ export function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [draftOpen, setDraftOpen] = useState(false);
   const [profileDraft, setProfileDraft] = useState<readonly ProfileDraftItem[]>([]);
-  const [profiles, setProfiles] = useState<readonly StoredProfile[]>([]);
+  const [profilesRead, setProfilesRead] = useState(() =>
+    loadingRead<readonly StoredProfile[]>([]),
+  );
   const [profileBusy, setProfileBusy] = useState(false);
   const [uiError, setUiError] = useState<UiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -191,6 +201,7 @@ export function App() {
   const [trialLeft, setTrialLeft] = useState(0);
   const initialLoadStarted = useRef(false);
   const rescueNoticeActive = useRef(false);
+  const previewRequests = useRef(new LatestRequestGuard());
 
   const handleUiError = useCallback((error: unknown) => {
     setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
@@ -221,10 +232,11 @@ export function App() {
 
   const refreshProfiles = useCallback(async () => {
     try {
-      setProfiles(await listProfiles());
-    } catch {
-      // 閲覧モード（安全コア未接続）ではモードを空表示にする。
-      setProfiles([]);
+      setProfilesRead(successfulRead(await listProfiles()));
+    } catch (error: unknown) {
+      const message = publicErrorMessage(error);
+      setProfilesRead((current) => failedRead(current, message));
+      setUiError({ message, code: publicErrorCode(error) });
     }
   }, []);
 
@@ -234,6 +246,14 @@ export function App() {
     void refreshSnapshot(true);
     void refreshProfiles();
   }, [refreshProfiles, refreshSnapshot]);
+
+  useEffect(() => {
+    if (dataMode === "live") return;
+    previewRequests.current.invalidate();
+    setPreviewPendingId(null);
+    setPreview(null);
+    setPreviewConfirmed(false);
+  }, [dataMode]);
 
   useEffect(() => {
     if (dataMode !== "live") {
@@ -368,16 +388,19 @@ export function App() {
     request: PreviewActionsRequest,
   ) {
     if (dataMode !== "live") return;
+    const generation = previewRequests.current.begin();
     setPreviewPendingId(pendingId);
     setUiError(null);
     try {
       const result = await previewActions(request);
+      if (!previewRequests.current.isCurrent(generation)) return;
       setPreview(result);
       setPreviewConfirmed(false);
     } catch (error: unknown) {
+      if (!previewRequests.current.isCurrent(generation)) return;
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
     } finally {
-      setPreviewPendingId(null);
+      if (previewRequests.current.isCurrent(generation)) setPreviewPendingId(null);
     }
   }
 
@@ -484,6 +507,7 @@ export function App() {
           setUiError({ message: result.message, code: "RECOVERY_REQUIRED" });
           return;
         }
+        setJustApplied((current) => withoutCommitItem(current, item.itemId));
       }
       setNotice("元へ戻しました。");
       setJustApplied([]);
@@ -500,13 +524,19 @@ export function App() {
   async function keepTrial() {
     if (trial === null) return;
     try {
-      await confirmTrial(trial.transactionId);
+      const confirmed = await confirmTrial(trial.transactionId);
+      if (!trialConfirmationSucceeded(confirmed)) {
+        setUiError({
+          message: "この変更を保存できませんでした。試用中のままなので、もう一度お試しください。",
+          code: "TRIAL_NOT_CONFIRMED",
+        });
+        return;
+      }
       setNotice("この変更を保存しました。");
-    } catch (error: unknown) {
-      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
-    } finally {
       setTrial(null);
       setJustApplied([]);
+    } catch (error: unknown) {
+      setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
     }
   }
 
@@ -550,7 +580,7 @@ export function App() {
     }
   }
 
-  async function handleCreateProfile(request: CreateProfileRequest) {
+  async function handleCreateProfile(request: CreateProfileRequest): Promise<boolean> {
     setProfileBusy(true);
     setUiError(null);
     try {
@@ -564,8 +594,10 @@ export function App() {
             : `手動モード「${created.name}」を作成しました。「いま実行」を押すまで適用しません。`,
       );
       await refreshProfiles();
+      return true;
     } catch (error: unknown) {
       setUiError({ message: publicErrorMessage(error), code: publicErrorCode(error) });
+      return false;
     } finally {
       setProfileBusy(false);
     }
@@ -673,7 +705,7 @@ export function App() {
           ) : view === "actions" ? (
             <ActionBrowser actions={actions} bootstrap={bootstrap} dataMode={dataMode} detectionPendingId={detectionPendingId} draftActionIds={draftIds} onAddToDraft={addToDraft} onDetect={(id) => void handleDetect(id)} onError={handleUiError} onPreview={(action) => void requestPreview(action)} onPreviewScene={(sceneId) => void requestAppearanceScenePreview(sceneId)} onSelectAction={(id) => { const action = actions.find((candidate) => candidate.id === id); if (action !== undefined) openAction(action); }} onSelectCategory={openCategory} previewPendingId={previewPendingId} selectedActionId={selectedActionId} selectedCategory={selectedCategory} />
           ) : view === "profiles" ? (
-            <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={(request) => void handleCreateProfile(request)} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} onSetRibbonColor={(id, color) => void handleSetProfileRibbonColor(id, color)} profiles={profiles} />
+            <ProfilesView actions={actions} busy={profileBusy} dataMode={dataMode} onChanged={() => void refreshProfiles()} onCreate={handleCreateProfile} onDelete={(id) => void handleDeleteProfile(id)} onOpenActions={() => navigate("actions")} onParametersForAction={parametersForAction} onRestore={(id) => void handleRestoreProfile(id)} onRun={(id) => void handleRunProfile(id)} onSetEnabled={(id, enabled) => void handleSetProfileEnabled(id, enabled)} onSetRibbonColor={(id, color) => void handleSetProfileRibbonColor(id, color)} profiles={profilesRead.value} profilesReadFailed={profilesRead.status === "error"} />
           ) : view === "setup" ? (
             <SetupView
               actions={actions}
