@@ -121,20 +121,17 @@ impl PcCustomEngine {
         let mut reverted = 0u32;
         let mut unresolved = false;
         for transaction_id in expired {
-            let items = self.journal.list_timeline(200)?;
+            let items = self.journal.pending_trial_items(transaction_id)?;
             let mut all_ok = true;
-            for item in items
-                .iter()
-                .filter(|item| item.transaction_id == transaction_id)
-            {
-                if !item.rollback_available {
-                    if item.status != "rolled_back" {
+            for (item_id, state) in items {
+                if !matches!(state, ItemState::Applied | ItemState::RollingBack) {
+                    if state != ItemState::RolledBack {
                         all_ok = false;
                         unresolved = true;
                     }
                     continue;
                 }
-                if self.rollback_item(item.item_id).is_err() {
+                if self.rollback_item(item_id).is_err() {
                     all_ok = false;
                     unresolved = true;
                 } else {
@@ -270,7 +267,7 @@ impl PcCustomEngine {
                             remaining = remaining.saturating_add(1);
                             continue;
                         }
-                        self.journal.mark_item_rolling_back(
+                        self.journal.mark_transaction_item_rolling_back(
                             transaction.transaction_id,
                             item.item_id,
                             now_ms(),

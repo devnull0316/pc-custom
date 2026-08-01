@@ -15,11 +15,9 @@ impl PcCustomEngine {
     ) -> CoreResult<CommitResult> {
         // 上限を設ける。長すぎる試用は「戻るはずだったのに戻らない」と同じ体験になる。
         let hold = hold_seconds.clamp(10, 300);
-        let result = self.commit_preview(preview_token)?;
-        if result.status == "succeeded" {
-            let now = now_ms();
-            self.journal
-                .begin_trial(result.transaction_id, now + u64::from(hold) * 1000, now)?;
+        let result = self.commit_preview_inner(preview_token, Some(u64::from(hold) * 1000))?;
+        if result.status == "rolled_back" {
+            self.journal.clear_trial(result.transaction_id)?;
         }
         Ok(result)
     }
@@ -38,6 +36,14 @@ impl PcCustomEngine {
     }
 
     pub fn commit_preview(&self, preview_token: &str) -> CoreResult<CommitResult> {
+        self.commit_preview_inner(preview_token, None)
+    }
+
+    fn commit_preview_inner(
+        &self,
+        preview_token: &str,
+        trial_hold_ms: Option<u64>,
+    ) -> CoreResult<CommitResult> {
         let preview = self.previews.lock().remove(preview_token).ok_or_else(|| {
             CoreError::invalid_request("プレビューが期限切れか、既に使用されています。")
         })?;
@@ -75,20 +81,28 @@ impl PcCustomEngine {
             let validation = action
                 .validate(&context, parameters)
                 .map_err(CoreError::from)?;
-            let current = action
-                .detect_current_state(&context, parameters)
-                .map_err(CoreError::from)?;
-            if preview.before.get(&parameters.action_id()) != Some(&state_fingerprint(&current)?) {
-                return Err(CoreError::new(
+            let expected = preview.before.get(&parameters.action_id()).ok_or_else(|| {
+                CoreError::new(
                     "STALE_PREVIEW",
                     "VALIDATE",
                     false,
-                    "確認後に状態が変わりました。差分を確認し直してください。",
-                ));
-            }
-            let draft = action
-                .create_backup(&context, parameters)
-                .map_err(CoreError::from)?;
+                    "確認した状態を照合できないため、差分を確認し直してください。",
+                )
+            })?;
+            let draft = create_backup_for_preview(
+                expected,
+                || {
+                    action
+                        .detect_current_state(&context, parameters)
+                        .map_err(CoreError::from)
+                        .and_then(|state| state_fingerprint(&state))
+                },
+                || {
+                    action
+                        .create_backup(&context, parameters)
+                        .map_err(CoreError::from)
+                },
+            )?;
             let backup = BackupEnvelope::from_draft(
                 draft,
                 transaction_id,
@@ -114,14 +128,28 @@ impl PcCustomEngine {
             });
         }
 
-        self.journal.record_prepared_transaction(
-            transaction_id,
-            "manual preview",
-            "manual",
-            &os_identity_fingerprint(&identity)?.to_hex(),
-            &prepared,
-            now_ms(),
-        )?;
+        let prepared_at = now_ms();
+        let os_fingerprint = os_identity_fingerprint(&identity)?.to_hex();
+        if let Some(hold_ms) = trial_hold_ms {
+            self.journal.record_prepared_trial_transaction(
+                transaction_id,
+                "manual preview",
+                "manual",
+                &os_fingerprint,
+                &prepared,
+                prepared_at.saturating_add(hold_ms),
+                prepared_at,
+            )?;
+        } else {
+            self.journal.record_prepared_transaction(
+                transaction_id,
+                "manual preview",
+                "manual",
+                &os_fingerprint,
+                &prepared,
+                prepared_at,
+            )?;
+        }
 
         let mut applied_indices = Vec::new();
         let mut result_details = Vec::new();
@@ -322,8 +350,11 @@ impl PcCustomEngine {
                 recovery_required = true;
                 continue;
             }
-            self.journal
-                .mark_item_rolling_back(transaction_id, item.item_id, now_ms())?;
+            self.journal.mark_transaction_item_rolling_back(
+                transaction_id,
+                item.item_id,
+                now_ms(),
+            )?;
             let verification = action
                 .rollback(&context, &item.parameters, &item.backup)
                 .and_then(|_| action.verify_rolled_back(&context, &item.parameters, &item.backup));
@@ -392,5 +423,64 @@ impl PcCustomEngine {
             },
             details: Vec::new(),
         })
+    }
+}
+
+fn create_backup_for_preview(
+    expected: &Fingerprint,
+    mut detect_fingerprint: impl FnMut() -> CoreResult<Fingerprint>,
+    create_backup: impl FnOnce() -> CoreResult<crate::backup::BackupDraft>,
+) -> CoreResult<crate::backup::BackupDraft> {
+    if detect_fingerprint()? != *expected {
+        return Err(stale_preview_error());
+    }
+    let backup = create_backup()?;
+    if detect_fingerprint()? != *expected {
+        return Err(stale_preview_error());
+    }
+    Ok(backup)
+}
+
+fn stale_preview_error() -> CoreError {
+    CoreError::new(
+        "STALE_PREVIEW",
+        "VALIDATE",
+        false,
+        "確認後に状態が変わりました。差分を確認し直してください。",
+    )
+}
+
+#[cfg(test)]
+mod preview_backup_tests {
+    use super::*;
+    use crate::backup::{BackupDraft, BackupPayload, ObservationBackup};
+
+    #[test]
+    fn backup_capture_rejects_a_change_after_the_first_preview_check() {
+        let previewed = Fingerprint::of_bytes(b"previewed");
+        let changed = Fingerprint::of_bytes(b"changed-during-backup");
+        let mut observations = [previewed, changed].into_iter();
+
+        let error = create_backup_for_preview(
+            &previewed,
+            || Ok(observations.next().expect("both observations are required")),
+            || {
+                Ok(BackupDraft {
+                    precondition_fingerprint: changed,
+                    intended_fingerprint: Fingerprint::of_bytes(b"intended"),
+                    payload: BackupPayload::Observation(ObservationBackup {
+                        source: "deterministic race test".to_owned(),
+                    }),
+                })
+            },
+        )
+        .expect_err("a state changed while backup was captured must be stale");
+
+        assert_eq!(error.code, "STALE_PREVIEW");
+        assert_eq!(
+            observations.count(),
+            0,
+            "the post-backup observation must actually run"
+        );
     }
 }

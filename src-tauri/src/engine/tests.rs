@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{Map, Value};
 use tempfile::tempdir;
@@ -19,6 +19,13 @@ use crate::{
 };
 
 use super::PcCustomEngine;
+
+fn real_mutation_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("real mutation test lock")
+}
 
 #[test]
 fn shift_guard_partial_recovery_uses_durable_item_stage() {
@@ -243,6 +250,70 @@ fn rolling_back_stage_and_applied_fingerprint_survive_journal_reopen() {
 }
 
 #[test]
+fn individual_item_rollback_does_not_enqueue_sibling_items_for_reconcile() {
+    let journal = JournalDatabase::open_in_memory().expect("open isolated journal");
+    let transaction_id = Uuid::new_v4();
+    let mut first = power_observation_item(transaction_id, Uuid::new_v4());
+    let mut second = power_observation_item(transaction_id, Uuid::new_v4());
+    second.ordinal = 1;
+    journal
+        .record_prepared_transaction(
+            transaction_id,
+            "individual rollback test",
+            "test",
+            "stable-os-fingerprint",
+            &[first.clone(), second.clone()],
+            1,
+        )
+        .expect("prepare two items");
+    for (order, item) in [&mut first, &mut second].into_iter().enumerate() {
+        journal
+            .mark_item_applying(
+                transaction_id,
+                item.item_id,
+                u32::try_from(order).expect("small order"),
+                2,
+            )
+            .expect("mark applying");
+        item.backup
+            .record_applied(Fingerprint::of_bytes(format!("applied-{order}").as_bytes()));
+        journal
+            .mark_item_applied(transaction_id, item.item_id, &item.backup, 3)
+            .expect("mark applied");
+    }
+    journal
+        .set_transaction_state(
+            transaction_id,
+            crate::journal::TransactionState::Succeeded,
+            true,
+            4,
+        )
+        .expect("finish transaction");
+
+    journal
+        .mark_item_rolling_back(transaction_id, first.item_id, 5)
+        .expect("start only the selected item");
+    journal
+        .mark_item_rolled_back(transaction_id, first.item_id, 6)
+        .expect("finish only the selected item");
+
+    assert!(
+        journal
+            .load_recovery_transactions()
+            .expect("load recovery work")
+            .is_empty(),
+        "a completed item-only rollback must not make its transaction recoverable"
+    );
+    let timeline = journal.list_timeline(10).expect("timeline");
+    let sibling = timeline
+        .iter()
+        .find(|item| item.item_id == second.item_id)
+        .expect("sibling remains visible");
+    assert_eq!(sibling.status, "succeeded");
+    assert!(sibling.rollback_available);
+}
+
+#[test]
 fn journal_items_are_reversed_from_durable_apply_order() {
     let journal = JournalDatabase::open_in_memory().expect("open isolated journal");
     let transaction_id = Uuid::new_v4();
@@ -403,6 +474,7 @@ fn recovery_parameters_union_current_registered_game_identity() {
 /// このプロセスのスリープ抑止要求だけを扱うため、実機で走らせても副作用が残らない。
 #[test]
 fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
+    let _real_mutation_guard = real_mutation_test_guard();
     let identity = match OsIdentity::load() {
         Ok(identity) => identity,
         Err(error) => {
@@ -490,6 +562,189 @@ fn full_user_journey_preview_commit_timeline_rollback_on_real_machine() {
         .find(|entry| entry.item_id == item.item_id)
         .expect("同じ項目が残る");
     assert_eq!(restored.status, "rolled_back", "履歴に復元済みとして残る");
+}
+
+#[test]
+fn trial_registration_failure_happens_before_any_action_is_applied() {
+    let _real_mutation_guard = real_mutation_test_guard();
+    let journal = Arc::new(JournalDatabase::open_in_memory().expect("open journal"));
+    let engine = PcCustomEngine::new(
+        Arc::clone(&journal),
+        Some(OsIdentity::from_test_build(26_100)),
+    )
+    .expect("start engine");
+    let mut parameters = Map::new();
+    parameters.insert("keepDisplayOn".to_owned(), Value::Bool(false));
+    let preview = engine
+        .preview(PreviewActionsRequest {
+            actions: vec![PreviewActionRequest {
+                action_id: "session.prevent_sleep".to_owned(),
+                parameters,
+            }],
+        })
+        .expect("preview");
+    journal
+        .with_connection(|database| {
+            database.execute_batch(
+                "CREATE TRIGGER reject_trial_registration
+                 BEFORE INSERT ON trials
+                 BEGIN
+                   SELECT RAISE(FAIL, 'injected trial registration failure');
+                 END;",
+            )
+        })
+        .expect("install deterministic failure");
+
+    let result = engine.commit_preview_as_trial(&preview.preview_token, 30);
+    let timeline_before_cleanup = engine.list_timeline(10).expect("timeline after failure");
+    for item in &timeline_before_cleanup {
+        if item.rollback_available {
+            let _ = engine.rollback_item(item.item_id);
+        }
+    }
+
+    assert!(
+        result.is_err(),
+        "the injected registration failure must surface"
+    );
+    assert!(
+        timeline_before_cleanup.is_empty(),
+        "no durable applied item may exist when trial registration failed"
+    );
+}
+
+#[test]
+fn expired_trial_older_than_two_hundred_items_is_still_reverted() {
+    let _real_mutation_guard = real_mutation_test_guard();
+    let journal = Arc::new(JournalDatabase::open_in_memory().expect("open journal"));
+    let engine = PcCustomEngine::new(
+        Arc::clone(&journal),
+        Some(OsIdentity::from_test_build(26_100)),
+    )
+    .expect("start engine");
+    let mut parameters = Map::new();
+    parameters.insert("keepDisplayOn".to_owned(), Value::Bool(false));
+    let preview = engine
+        .preview(PreviewActionsRequest {
+            actions: vec![PreviewActionRequest {
+                action_id: "session.prevent_sleep".to_owned(),
+                parameters,
+            }],
+        })
+        .expect("preview old trial");
+    let committed = engine
+        .commit_preview(&preview.preview_token)
+        .expect("apply old trial item");
+    let old_item_id = committed.items[0].item_id;
+    journal
+        .begin_trial(committed.transaction_id, 0, 0)
+        .expect("make trial expired");
+
+    let noise_base = super::now_ms().saturating_add(10_000);
+    for index in 0..201u64 {
+        let transaction_id = Uuid::new_v4();
+        let mut item = power_observation_item(transaction_id, Uuid::new_v4());
+        let started_at = noise_base.saturating_add(index * 4);
+        journal
+            .record_prepared_transaction(
+                transaction_id,
+                "newer timeline noise",
+                "test",
+                "stable-os-fingerprint",
+                std::slice::from_ref(&item),
+                started_at,
+            )
+            .expect("prepare newer item");
+        journal
+            .mark_item_applying(transaction_id, item.item_id, 0, started_at + 1)
+            .expect("mark newer item applying");
+        item.backup
+            .record_applied(Fingerprint::of_bytes(format!("noise-{index}").as_bytes()));
+        journal
+            .mark_item_applied(transaction_id, item.item_id, &item.backup, started_at + 2)
+            .expect("mark newer item applied");
+        journal
+            .set_transaction_state(
+                transaction_id,
+                crate::journal::TransactionState::Succeeded,
+                true,
+                started_at + 3,
+            )
+            .expect("finish newer transaction");
+    }
+
+    let reverted = engine
+        .revert_expired_trials()
+        .expect("revert expired trial");
+    let old_status = engine
+        .list_timeline(500)
+        .expect("timeline after expiry")
+        .into_iter()
+        .find(|item| item.item_id == old_item_id)
+        .map(|item| item.status);
+    if old_status.as_deref() != Some("rolled_back") {
+        let _ = engine.rollback_item(old_item_id);
+    }
+
+    assert_eq!(reverted, 1, "the old trial item must be found and reverted");
+    assert_eq!(old_status.as_deref(), Some("rolled_back"));
+}
+
+#[test]
+fn applied_backups_rejects_parseable_payload_when_stored_integrity_disagrees() {
+    let journal = JournalDatabase::open_in_memory().expect("open isolated journal");
+    let transaction_id = Uuid::new_v4();
+    let mut item = power_observation_item(transaction_id, Uuid::new_v4());
+    journal
+        .record_prepared_transaction(
+            transaction_id,
+            "integrity test",
+            "test",
+            "stable-os-fingerprint",
+            std::slice::from_ref(&item),
+            1,
+        )
+        .expect("prepare item");
+    journal
+        .mark_item_applying(transaction_id, item.item_id, 0, 2)
+        .expect("mark applying");
+    item.backup
+        .record_applied(Fingerprint::of_bytes(b"original-applied"));
+    journal
+        .mark_item_applied(transaction_id, item.item_id, &item.backup, 3)
+        .expect("mark applied");
+    journal
+        .set_transaction_state(
+            transaction_id,
+            crate::journal::TransactionState::Succeeded,
+            true,
+            4,
+        )
+        .expect("finish transaction");
+
+    let mut parseable_tamper = item.backup.clone();
+    parseable_tamper.record_applied(Fingerprint::of_bytes(b"tampered-but-self-consistent"));
+    let tampered_payload = serde_json::to_vec(&parseable_tamper).expect("serialize tamper");
+    journal
+        .with_connection(|database| {
+            database.execute(
+                "UPDATE backups SET payload = ?2, payload_length = ?3 WHERE item_id = ?1",
+                rusqlite::params![
+                    item.item_id.to_string(),
+                    tampered_payload,
+                    i64::try_from(tampered_payload.len()).expect("small payload")
+                ],
+            )?;
+            Ok(())
+        })
+        .expect("tamper payload without changing stored integrity");
+
+    let (applied, unreadable) = journal.applied_backups().expect("scan applied backups");
+    assert!(
+        applied.is_empty(),
+        "tampered backup cannot become a baseline"
+    );
+    assert_eq!(unreadable, 1, "tampered backup is reported as unreadable");
 }
 
 /// 試用は、確定しなければ期限切れとして拾われる。確定すれば拾われない。

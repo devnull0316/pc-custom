@@ -31,6 +31,52 @@ impl JournalDatabase {
         items: &[PreparedItem],
         now_ms: u64,
     ) -> CoreResult<()> {
+        self.record_prepared_transaction_inner(
+            transaction_id,
+            purpose,
+            owner,
+            os_fingerprint,
+            items,
+            None,
+            now_ms,
+        )
+    }
+
+    /// Trial registration and its rollback backup are one durable decision.
+    /// If either insert fails, no prepared transaction is left for the engine to apply.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_prepared_trial_transaction(
+        &self,
+        transaction_id: Uuid,
+        purpose: &str,
+        owner: &str,
+        os_fingerprint: &str,
+        items: &[PreparedItem],
+        expires_at_unix_ms: u64,
+        now_ms: u64,
+    ) -> CoreResult<()> {
+        self.record_prepared_transaction_inner(
+            transaction_id,
+            purpose,
+            owner,
+            os_fingerprint,
+            items,
+            Some(expires_at_unix_ms),
+            now_ms,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_prepared_transaction_inner(
+        &self,
+        transaction_id: Uuid,
+        purpose: &str,
+        owner: &str,
+        os_fingerprint: &str,
+        items: &[PreparedItem],
+        trial_expires_at_unix_ms: Option<u64>,
+        now_ms: u64,
+    ) -> CoreResult<()> {
         let now = to_i64(now_ms);
         self.with_immediate_transaction(|database| {
             database.execute(
@@ -99,6 +145,15 @@ impl JournalDatabase {
                 None,
                 now,
             )?;
+            if let Some(expires_at) = trial_expires_at_unix_ms {
+                require_exactly_one(database.execute(
+                    "INSERT INTO trials(
+                        transaction_id, expires_at_unix_ms,
+                        confirmed_at_unix_ms, created_at_unix_ms
+                     ) VALUES (?1, ?2, NULL, ?3)",
+                    params![transaction_id.to_string(), to_i64(expires_at), now],
+                )?)?;
+            }
             Ok(())
         })
     }
@@ -247,15 +302,36 @@ impl JournalDatabase {
         item_id: Uuid,
         now_ms: u64,
     ) -> CoreResult<()> {
+        self.mark_item_rolling_back_inner(transaction_id, item_id, false, now_ms)
+    }
+
+    pub fn mark_transaction_item_rolling_back(
+        &self,
+        transaction_id: Uuid,
+        item_id: Uuid,
+        now_ms: u64,
+    ) -> CoreResult<()> {
+        self.mark_item_rolling_back_inner(transaction_id, item_id, true, now_ms)
+    }
+
+    fn mark_item_rolling_back_inner(
+        &self,
+        transaction_id: Uuid,
+        item_id: Uuid,
+        transaction_rollback: bool,
+        now_ms: u64,
+    ) -> CoreResult<()> {
         let now = to_i64(now_ms);
         self.with_immediate_transaction(|database| {
-            require_exactly_one(database.execute(
-                "UPDATE transactions SET state = 'ROLLING_BACK'
-                 WHERE transaction_id = ?1
-                   AND state IN ('APPLYING', 'SUCCEEDED', 'ROLLING_BACK',
-                                 'RECOVERY_REQUIRED', 'ROLLBACK_FAILED')",
-                [transaction_id.to_string()],
-            )?)?;
+            if transaction_rollback {
+                require_exactly_one(database.execute(
+                    "UPDATE transactions SET state = 'ROLLING_BACK'
+                     WHERE transaction_id = ?1
+                       AND state IN ('APPLYING', 'SUCCEEDED', 'ROLLING_BACK',
+                                     'RECOVERY_REQUIRED', 'ROLLBACK_FAILED')",
+                    [transaction_id.to_string()],
+                )?)?;
+            }
             require_exactly_one(database.execute(
                 "UPDATE transaction_items SET state = 'ROLLING_BACK', stage = 'ROLLBACK'
                  WHERE item_id = ?1
@@ -567,6 +643,29 @@ impl JournalDatabase {
         })
     }
 
+    /// Items belonging to one still-pending trial, without a timeline-wide limit.
+    pub fn pending_trial_items(&self, transaction_id: Uuid) -> CoreResult<Vec<(Uuid, ItemState)>> {
+        self.with_connection(|database| {
+            let mut statement = database.prepare(
+                "SELECT i.item_id, i.state
+                 FROM trials tr
+                 JOIN transaction_items i ON i.transaction_id = tr.transaction_id
+                 WHERE tr.transaction_id = ?1 AND tr.confirmed_at_unix_ms IS NULL
+                 ORDER BY i.ordinal ASC",
+            )?;
+            let items = statement
+                .query_map([transaction_id.to_string()], |row| {
+                    let item_id = parse_uuid(row.get::<_, String>(0)?, 0)?;
+                    let state_text: String = row.get(1)?;
+                    let state = ItemState::from_db(&state_text)
+                        .ok_or_else(|| sql_message(1, Type::Text, "unknown item state"))?;
+                    Ok((item_id, state))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(items)
+        })
+    }
+
     /// 戻し終えた、または確定済みになった試用を片付ける。
     pub fn clear_trial(&self, transaction_id: Uuid) -> CoreResult<()> {
         self.with_connection(|database| {
@@ -604,7 +703,7 @@ impl JournalDatabase {
     pub fn applied_backups(&self) -> CoreResult<(Vec<AppliedBackup>, usize)> {
         self.with_connection(|database| {
             let mut statement = database.prepare(
-                "SELECT i.action_id, b.payload,
+                "SELECT i.action_id, b.payload, b.integrity_sha256,
                         COALESCE(i.finished_at_unix_ms, t.started_at_unix_ms)
                  FROM transaction_items i
                  JOIN transactions t ON t.transaction_id = i.transaction_id
@@ -617,7 +716,8 @@ impl JournalDatabase {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, Vec<u8>>(1)?,
-                        row.get::<_, i64>(2)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, i64>(3)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -625,7 +725,7 @@ impl JournalDatabase {
             // 古い順に読んで同じ Action を上書きしていくので、残るのは最後の適用。
             let mut latest: BTreeMap<String, AppliedBackup> = BTreeMap::new();
             let mut unreadable = 0usize;
-            for (action_id, payload, applied_at_unix_ms) in rows {
+            for (action_id, payload, stored_integrity, applied_at_unix_ms) in rows {
                 let Ok(backup) = serde_json::from_slice::<BackupEnvelope>(&payload) else {
                     // 読めない記録を「基準どおり」に数えるわけにはいかない。
                     // かといって黙って落とすと、件数のどこにも現れず、
@@ -633,6 +733,12 @@ impl JournalDatabase {
                     unreadable += 1;
                     continue;
                 };
+                if !backup.verify_integrity()
+                    || stored_integrity.as_slice() != backup.integrity_hash.0.as_slice()
+                {
+                    unreadable += 1;
+                    continue;
+                }
                 latest.insert(
                     action_id.clone(),
                     AppliedBackup {
