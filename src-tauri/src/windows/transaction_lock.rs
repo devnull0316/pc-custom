@@ -140,3 +140,48 @@ pub fn acquire_core_mutation_lock() -> WindowsResult<CoreMutationGuard> {
 pub fn acquire_app_instance_lock(_path: &std::path::Path) -> WindowsResult<AppInstanceGuard> {
     Err(WindowsError::unsupported("acquire app instance lock"))
 }
+
+#[cfg(all(test, windows))]
+mod instance_lock_tests {
+    use super::*;
+
+    /// 2つ目の起動が本当に弾かれること。
+    ///
+    /// 実アプリを2つ起動すると**プロセスは2つとも残る**。
+    /// 設計上、2つ目はここで失敗して変更操作を止めた状態で開く。
+    /// 画面を見ないとそこは確かめられないが、**弾かれること自体はここで確かめられる。**
+    /// 「窓が2つ出た」を「排他が効いていない」と読み違えないための土台。
+    #[test]
+    fn a_second_holder_is_refused_while_the_first_still_holds_it() {
+        let dir = std::env::temp_dir().join(format!("pc-custom-lock-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let path = dir.join("instance.lock");
+        let _ = std::fs::remove_file(&path);
+
+        let first = acquire_app_instance_lock(&path).expect("1つ目は取れる");
+
+        let second = acquire_app_instance_lock(&path);
+        let Err(error) = second else {
+            panic!("2つ目が取れてしまった。排他が効いていない");
+        };
+        println!(
+            "EVIDENCE: instance_lock second_attempt kind={:?} os_code={:?}",
+            error.kind, error.os_code
+        );
+        // 共有違反として弾かれること。別の理由で失敗したなら排他が効いた証拠にならない。
+        assert_eq!(
+            error.kind,
+            WindowsErrorKind::ResourceLimit,
+            "共有違反以外の理由で失敗している。排他が効いた証明にならない"
+        );
+
+        // 1つ目を離せば取れる。取れないなら、それは排他ではなく別の不具合。
+        drop(first);
+        let third = acquire_app_instance_lock(&path).expect("1つ目を離せば取れる");
+        drop(third);
+        println!("EVIDENCE: instance_lock released_then_reacquired=true");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+}
