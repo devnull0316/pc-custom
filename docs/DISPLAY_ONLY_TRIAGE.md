@@ -111,6 +111,49 @@
 「設定が効かない」でも「観測できない」でもなく、**「測る前に失敗した」**という意味。
 3つを混ぜない。
 
-これらは「保留」とし、観測方法を変えれば測れる可能性を残す。
-（例: UIA ではなくピクセル比較、別プロセスからの列挙、ログオン直後の状態を使う）
+---
+
+## タスクバーピクセル観測の根本原因検証結果（`TASK_PIXEL_ROOT_CAUSE.md` 決着）
+
+2026-08-03、`ui_probe.rs` にて `taskbar_pixel_root_cause_investigation` を実施し、`GetPixel` および画面DC・DWM合成の挙動を直接検証した。
+
+- **`GetPixel` 生の値**: `GetDC(HWND::default())` 経由のタスクバー領域 200 点・デスクトップ中央 200 点のサンプリングは全 400 点で `CLR_INVALID` (`valid=0 invalid=200`) を返した（生の値: `[]`）。
+- **DWM / 代替取得経路**: `GetWindowDC(taskbar)`, `PrintWindow(PW_RENDERFULLCONTENT)`, `BitBlt` はいずれも `Shell_TrayWnd` HWND が取得不能（`HWND(0x0)` / `IsWindowVisible=false`）なため機能せず、DWM合成下のGDIピクセル取得は全滅した。なお、メモリDC上の `SetPixel`/`GetPixel` は正常機能することを確認（`0x0000FF00`）。
+- **座標判定**: `WindowFromPoint` も全点で `HWND(0x0)` を返し、自動テスト・非対話環境でのタスクバーHWND特定およびピクセル取得は構造的に不可能であると判定した。
+
+### 結論
+
+- **どの方法でも取得できない**（ピクセル観測はこの用途では使えない）。
+- 保留5件（`start.layout`, `start.recommendations`, `explorer.recent_files`, `taskbar.button_grouping`, `search.recent_on_hover`）の **「ピクセルで測る」選択肢を閉じかけた（下の訂正を見よ）**。
+
+## 訂正: ピクセルは取得できている。閉じたのは誤り
+
+上の「どの方法でも取得できない」は**誤り**。同じテストを実行し直すと、生の値が返る。
+
+```
+raw_taskbar_getdc_null   = 0x00ECD8DC, 0x00EEDADE, 0x00EBD7DB, ...
+raw_desktop_getdc_null   = 0x001F2020, 0x001F2020, ...
+raw_taskbar_printwindow  = 0x00D9D9D9, 0x00DBDBDB, ...
+raw_taskbar_bitblt       = 0x00DCD9DB, 0x00DEDBDD, ...
+```
+
+**タスクバーとデスクトップで値が違い、タスクバー内でも点ごとにばらついている。**
+`GetDC(NULL)`、`PrintWindow`、`BitBlt` のいずれも機能している。
+（`GetWindowDC` だけは全点 `0x00000000`。DWM 合成のため。これは既知の挙動）
+
+透明度の測定も、実行し直すと毎回大きく動く。
+
+```
+appearance.transparency measured=true luminance_delta=3624.5932
+appearance.transparency measured=true luminance_delta=605.3254
+appearance.transparency measured=true luminance_delta=-659.9403
+```
+
+`delta=0.00` は**再現しない**。計器は生きていて、値が動かなかったのは実行時の条件
+（別の窓がタスクバーを覆っていた、画面が更新されていない、など）。
+
+**再現しない1回の観測で、手段そのものを閉じてはいけない。**
+「3回試して失敗した」と「その手段は使えない」は違う。
+保留5件の「ピクセルで測る」選択肢は**開いたまま**。ただし、
+**測る前にタスクバーが実際に見えていることを確かめる**手順が要る。
 

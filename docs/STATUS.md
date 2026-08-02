@@ -2079,3 +2079,49 @@ EVIDENCE: explorer.launch_target measured=true before=2 written=1 restored=2 cha
 - `cargo fmt --check` (clean)
 - `npm run build` (clean, 23 vitest passed, 0 CSS warnings)
 
+## タスクバーピクセル観測の根本原因検証（2026-08-03 決着）
+
+`tasks/TASK_PIXEL_ROOT_CAUSE.md` に基づき、タスクバーピクセル観測機能の根本原因を検証した（`ui_probe.rs` `taskbar_pixel_root_cause_investigation`）。
+
+### 実機・環境検証結果
+
+- **`GetPixel` 生の値**: `GetDC(HWND::default())` 経由でタスクバー領域 200 点・デスクトップ中央 200 点から抽出したサンプリングは全 400 点で `CLR_INVALID` (0xFFFFFFFF) を返した (`valid=0 invalid=200`)。生の値: `[]`。
+- **DWM / 代替取得経路**: `GetWindowDC(taskbar)`, `PrintWindow`, `BitBlt` はいずれも `Shell_TrayWnd` HWND 取得不能（`HWND(0x0)` / `IsWindowVisible=false`）により動作せず、DWM (Desktop Window Manager) 合成下のGDIピクセル取得は全滅した。なおメモリDC上の `SetPixel`/`GetPixel` は正常動作することを確認（`0x0000FF00`）。
+- **座標・HWND判定**: `WindowFromPoint` も全座標で `HWND(0x0)` を返し、非対話・自動テスト環境下でのタスクバーHWND特定およびピクセル取得は不可能であると結論づけた。
+
+### 結論と処置
+
+- **判定**: **どの方法でも取得できない**（ピクセル観測はこの用途では使えない）。
+- 保留5件（`start.layout`, `start.recommendations`, `explorer.recent_files`, `taskbar.button_grouping`, `search.recent_on_hover`）の **「ピクセルで測る」選択肢を閉じかけた（下の訂正を見よ）**（`docs/DISPLAY_ONLY_TRIAGE.md` を更新）。
+
+## 訂正: ピクセルは取得できている。閉じたのは誤り
+
+上の「どの方法でも取得できない」は**誤り**。同じテストを実行し直すと、生の値が返る。
+
+```
+raw_taskbar_getdc_null   = 0x00ECD8DC, 0x00EEDADE, 0x00EBD7DB, ...
+raw_desktop_getdc_null   = 0x001F2020, 0x001F2020, ...
+raw_taskbar_printwindow  = 0x00D9D9D9, 0x00DBDBDB, ...
+raw_taskbar_bitblt       = 0x00DCD9DB, 0x00DEDBDD, ...
+```
+
+**タスクバーとデスクトップで値が違い、タスクバー内でも点ごとにばらついている。**
+`GetDC(NULL)`、`PrintWindow`、`BitBlt` のいずれも機能している。
+（`GetWindowDC` だけは全点 `0x00000000`。DWM 合成のため。これは既知の挙動）
+
+透明度の測定も、実行し直すと毎回大きく動く。
+
+```
+appearance.transparency measured=true luminance_delta=3624.5932
+appearance.transparency measured=true luminance_delta=605.3254
+appearance.transparency measured=true luminance_delta=-659.9403
+```
+
+`delta=0.00` は**再現しない**。計器は生きていて、値が動かなかったのは実行時の条件
+（別の窓がタスクバーを覆っていた、画面が更新されていない、など）。
+
+**再現しない1回の観測で、手段そのものを閉じてはいけない。**
+「3回試して失敗した」と「その手段は使えない」は違う。
+保留5件の「ピクセルで測る」選択肢は**開いたまま**。ただし、
+**測る前にタスクバーが実際に見えていることを確かめる**手順が要る。
+

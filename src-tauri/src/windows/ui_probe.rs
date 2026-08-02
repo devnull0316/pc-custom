@@ -5761,15 +5761,370 @@ mod tests {
         } else {
             "separate_process_pixels_changed_and_restored"
         };
-        println!(
-            "EVIDENCE: contrast_trial measured={measured} reason={reason} before=\"{}\" applied=\"{}\" restored=\"{}\" spi_before={original:?} spi_applied={applied_state:?} spi_restored={restored_state:?}",
-            observation_text(before),
-            observation_text(applied),
-            observation_text(restored)
-        );
         assert!(
             measured,
             "high-contrast implementation gate failed: {reason}"
         );
+    }
+
+    #[test]
+    #[ignore = "調査用: タスクバーピクセル取得の根本原因検証"]
+    fn taskbar_pixel_root_cause_investigation() {
+        use windows::Win32::Foundation::{BOOL, HWND, POINT, RECT};
+        use windows::Win32::Graphics::Gdi::{CLR_INVALID, HDC};
+
+        #[link(name = "user32")]
+        extern "system" {
+            fn FindWindowW(lpClassName: *const u16, lpWindowName: *const u16) -> HWND;
+            fn GetWindowRect(hWnd: HWND, lpRect: *mut RECT) -> BOOL;
+            fn GetDC(hWnd: HWND) -> HDC;
+            fn GetWindowDC(hWnd: HWND) -> HDC;
+            fn ReleaseDC(hWnd: HWND, hDC: HDC) -> i32;
+            fn WindowFromPoint(Point: POINT) -> HWND;
+            fn GetSystemMetrics(nIndex: i32) -> i32;
+            fn IsWindowVisible(hWnd: HWND) -> BOOL;
+            fn PrintWindow(hwnd: HWND, hdcBlt: HDC, nFlags: u32) -> BOOL;
+            fn EnumWindows(
+                lpEnumFunc: unsafe extern "system" fn(HWND, isize) -> BOOL,
+                lParam: isize,
+            ) -> BOOL;
+            fn GetClassNameW(hWnd: HWND, lpClassName: *mut u16, nMaxCount: i32) -> i32;
+        }
+
+        #[link(name = "gdi32")]
+        extern "system" {
+            fn GetPixel(hdc: HDC, x: i32, y: i32) -> u32;
+            fn CreateCompatibleDC(hdc: HDC) -> HDC;
+            fn CreateCompatibleBitmap(
+                hdc: HDC,
+                cx: i32,
+                cy: i32,
+            ) -> windows::Win32::Graphics::Gdi::HBITMAP;
+            fn SelectObject(
+                hdc: HDC,
+                h: windows::Win32::Graphics::Gdi::HGDIOBJ,
+            ) -> windows::Win32::Graphics::Gdi::HGDIOBJ;
+            fn DeleteObject(ho: windows::Win32::Graphics::Gdi::HGDIOBJ) -> BOOL;
+            fn DeleteDC(hdc: HDC) -> BOOL;
+            fn BitBlt(
+                hdc: HDC,
+                x: i32,
+                y: i32,
+                cx: i32,
+                cy: i32,
+                hdcSrc: HDC,
+                x1: i32,
+                y1: i32,
+                rop: u32,
+            ) -> BOOL;
+            fn SetPixel(hdc: HDC, x: i32, y: i32, color: u32) -> u32;
+        }
+
+        println!("=== CHECK 0: In-Memory GDI GetPixel Verification ===");
+        let screen_dc0 = unsafe { GetDC(HWND::default()) };
+        let mem_dc0 = unsafe { CreateCompatibleDC(screen_dc0) };
+        let mem_bmp0 = unsafe { CreateCompatibleBitmap(screen_dc0, 10, 10) };
+        let old_bmp0 =
+            unsafe { SelectObject(mem_dc0, windows::Win32::Graphics::Gdi::HGDIOBJ(mem_bmp0.0)) };
+        let set_res = unsafe { SetPixel(mem_dc0, 5, 5, 0x0000FF00) }; // Green
+        let get_res = unsafe { GetPixel(mem_dc0, 5, 5) };
+        println!("Memory DC SetPixel=0x{set_res:08X}, GetPixel=0x{get_res:08X} (expected green 0x0000FF00)");
+        unsafe {
+            let _ = SelectObject(mem_dc0, old_bmp0);
+            let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(mem_bmp0.0));
+            let _ = DeleteDC(mem_dc0);
+            let _ = ReleaseDC(HWND::default(), screen_dc0);
+        }
+
+        struct EnumData {
+            count: usize,
+            classes: Vec<String>,
+            tray_hwnd: Option<HWND>,
+        }
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: isize) -> BOOL {
+            let data = &mut *(lparam as *mut EnumData);
+            data.count += 1;
+            let mut buf = [0u16; 256];
+            let len = GetClassNameW(hwnd, buf.as_mut_ptr(), 256);
+            if len > 0 {
+                let name = String::from_utf16_lossy(&buf[..len as usize]);
+                if data.classes.len() < 30 {
+                    data.classes.push(name.clone());
+                }
+                if name == "Shell_TrayWnd" {
+                    data.tray_hwnd = Some(hwnd);
+                }
+            }
+            BOOL(1)
+        }
+
+        let mut data = EnumData {
+            count: 0,
+            classes: Vec::new(),
+            tray_hwnd: None,
+        };
+        let _ = unsafe { EnumWindows(enum_proc, &mut data as *mut EnumData as isize) };
+        println!("EnumWindows total={}: {:?}", data.count, data.classes);
+
+        let class_name: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
+        let taskbar = unsafe { FindWindowW(class_name.as_ptr(), std::ptr::null()) };
+        println!("FindWindowW Shell_TrayWnd HWND: {taskbar:?}");
+        let is_vis = if !taskbar.0.is_null() {
+            unsafe { IsWindowVisible(taskbar) }.as_bool()
+        } else {
+            false
+        };
+        println!("Taskbar IsWindowVisible: {is_vis}");
+
+        let screen_w = unsafe { GetSystemMetrics(0) }; // SM_CXSCREEN = 0
+        let screen_h = unsafe { GetSystemMetrics(1) }; // SM_CYSCREEN = 1
+
+        let mut t_rect = RECT::default();
+        if !taskbar.0.is_null() {
+            let _ = unsafe { GetWindowRect(taskbar, &mut t_rect) };
+        } else {
+            // Default to bottom of primary monitor (typical Taskbar position on Win11)
+            t_rect = RECT {
+                left: 0,
+                top: screen_h - 48,
+                right: screen_w,
+                bottom: screen_h,
+            };
+        }
+        let t_width = t_rect.right - t_rect.left;
+        let t_height = t_rect.bottom - t_rect.top;
+
+        println!("\n=== STEP 3: Coordinate Verification ===");
+        println!("Taskbar HWND: {taskbar:?}");
+        println!(
+            "Taskbar Rect: left={} top={} right={} bottom={} (w={} h={})",
+            t_rect.left, t_rect.top, t_rect.right, t_rect.bottom, t_width, t_height
+        );
+        println!("Screen Metrics: {screen_w}x{screen_h}");
+
+        // Sample 200 points on Taskbar region
+        let mut sample_pts = Vec::with_capacity(200);
+        for x_step in 0..40 {
+            for y_step in 0..5 {
+                let x = t_rect.left + t_width * (5 + x_step * 90 / 39) / 100;
+                let y = t_rect.top + t_height * (15 + y_step * 70 / 4) / 100;
+                sample_pts.push((x, y));
+            }
+        }
+
+        let mut wfp_taskbar_count = 0;
+        let mut wfp_other_count = 0;
+        for &(x, y) in &sample_pts[..5] {
+            let hwnd_at_pt = unsafe { WindowFromPoint(POINT { x, y }) };
+            println!("WindowFromPoint({x}, {y}) = {hwnd_at_pt:?}");
+            if hwnd_at_pt == taskbar && !taskbar.0.is_null() {
+                wfp_taskbar_count += 1;
+            } else {
+                wfp_other_count += 1;
+            }
+        }
+        for &(x, y) in &sample_pts[5..] {
+            let hwnd_at_pt = unsafe { WindowFromPoint(POINT { x, y }) };
+            if hwnd_at_pt == taskbar && !taskbar.0.is_null() {
+                wfp_taskbar_count += 1;
+            } else {
+                wfp_other_count += 1;
+            }
+        }
+        println!("WindowFromPoint summary: taskbar_direct={wfp_taskbar_count}, child_or_other={wfp_other_count}");
+
+        println!("\n=== STEP 1: GetPixel Raw Values ===");
+        // Method 1: GetDC(NULL) on Taskbar
+        let screen_dc = unsafe { GetDC(HWND::default()) };
+        println!("GetDC(HWND::default()) HDC: {screen_dc:?}");
+        let mut taskbar_colors = Vec::with_capacity(200);
+        let mut invalid_count = 0;
+        for &(x, y) in &sample_pts {
+            let color = unsafe { GetPixel(screen_dc, x, y) };
+            if color == CLR_INVALID {
+                invalid_count += 1;
+            } else {
+                taskbar_colors.push(color);
+            }
+        }
+        let raw_sample: Vec<String> = taskbar_colors
+            .iter()
+            .take(10)
+            .map(|c| format!("0x{c:08X}"))
+            .collect();
+        let unique_taskbar: std::collections::HashSet<u32> =
+            taskbar_colors.iter().copied().collect();
+        println!(
+            "Method 1 (GetDC(NULL) on Taskbar): total={} valid={} invalid={} unique={}",
+            sample_pts.len(),
+            taskbar_colors.len(),
+            invalid_count,
+            unique_taskbar.len()
+        );
+        println!("EVIDENCE: raw_taskbar_getdc_null={raw_sample:?}");
+
+        // Desktop center sampling
+        let cx_start = screen_w / 4;
+        let cy_start = screen_h / 4;
+        let mut desktop_colors = Vec::with_capacity(200);
+        let mut dt_invalid = 0;
+        for dx in 0..20 {
+            for dy in 0..10 {
+                let x = cx_start + dx * (screen_w / 2) / 20;
+                let y = cy_start + dy * (screen_h / 2) / 10;
+                let color = unsafe { GetPixel(screen_dc, x, y) };
+                if color == CLR_INVALID {
+                    dt_invalid += 1;
+                } else {
+                    desktop_colors.push(color);
+                }
+            }
+        }
+        let dt_raw_sample: Vec<String> = desktop_colors
+            .iter()
+            .take(10)
+            .map(|c| format!("0x{c:08X}"))
+            .collect();
+        let unique_desktop: std::collections::HashSet<u32> =
+            desktop_colors.iter().copied().collect();
+        println!(
+            "Method 1 (GetDC(NULL) on Desktop center): total=200 valid={} invalid={} unique={}",
+            desktop_colors.len(),
+            dt_invalid,
+            unique_desktop.len()
+        );
+        println!("EVIDENCE: raw_desktop_getdc_null={dt_raw_sample:?}");
+
+        let _ = unsafe { ReleaseDC(HWND::default(), screen_dc) };
+
+        println!("\n=== STEP 2: DWM / DC Alternatives ===");
+        if !taskbar.0.is_null() {
+            let win_dc = unsafe { GetWindowDC(taskbar) };
+            if !win_dc.0.is_null() {
+                let mut win_dc_colors = Vec::with_capacity(200);
+                let mut win_dc_invalid = 0;
+                for x_step in 0..40 {
+                    for y_step in 0..5 {
+                        let rx = t_width * (5 + x_step * 90 / 39) / 100;
+                        let ry = t_height * (15 + y_step * 70 / 4) / 100;
+                        let color = unsafe { GetPixel(win_dc, rx, ry) };
+                        if color == CLR_INVALID {
+                            win_dc_invalid += 1;
+                        } else {
+                            win_dc_colors.push(color);
+                        }
+                    }
+                }
+                let win_dc_raw: Vec<String> = win_dc_colors
+                    .iter()
+                    .take(10)
+                    .map(|c| format!("0x{c:08X}"))
+                    .collect();
+                let unique_win_dc: std::collections::HashSet<u32> =
+                    win_dc_colors.iter().copied().collect();
+                println!(
+                    "Method 2 (GetWindowDC(taskbar)): valid={} invalid={} unique={}",
+                    win_dc_colors.len(),
+                    win_dc_invalid,
+                    unique_win_dc.len()
+                );
+                println!("EVIDENCE: raw_taskbar_getwindowdc={win_dc_raw:?}");
+                let _ = unsafe { ReleaseDC(taskbar, win_dc) };
+            }
+
+            // Method 3: PrintWindow (PW_RENDERFULLCONTENT=2) to Memory DC
+            let screen_dc2 = unsafe { GetDC(HWND::default()) };
+            let mem_dc = unsafe { CreateCompatibleDC(screen_dc2) };
+            let mem_bmp = unsafe { CreateCompatibleBitmap(screen_dc2, t_width, t_height) };
+            let prev_bmp =
+                unsafe { SelectObject(mem_dc, windows::Win32::Graphics::Gdi::HGDIOBJ(mem_bmp.0)) };
+
+            let print_ok = unsafe { PrintWindow(taskbar, mem_dc, 2) }.as_bool();
+            println!("Method 3 PrintWindow(PW_RENDERFULLCONTENT): ok={print_ok}");
+            if print_ok {
+                let mut print_colors = Vec::with_capacity(200);
+                let mut print_invalid = 0;
+                for x_step in 0..40 {
+                    for y_step in 0..5 {
+                        let rx = t_width * (5 + x_step * 90 / 39) / 100;
+                        let ry = t_height * (15 + y_step * 70 / 4) / 100;
+                        let color = unsafe { GetPixel(mem_dc, rx, ry) };
+                        if color == CLR_INVALID {
+                            print_invalid += 1;
+                        } else {
+                            print_colors.push(color);
+                        }
+                    }
+                }
+                let print_raw: Vec<String> = print_colors
+                    .iter()
+                    .take(10)
+                    .map(|c| format!("0x{c:08X}"))
+                    .collect();
+                let unique_print: std::collections::HashSet<u32> =
+                    print_colors.iter().copied().collect();
+                println!(
+                    "Method 3 (PrintWindow to MemDC): valid={} invalid={} unique={}",
+                    print_colors.len(),
+                    print_invalid,
+                    unique_print.len()
+                );
+                println!("EVIDENCE: raw_taskbar_printwindow={print_raw:?}");
+            }
+
+            // Method 4: BitBlt from screen DC to Memory DC
+            let blt_ok = unsafe {
+                BitBlt(
+                    mem_dc,
+                    0,
+                    0,
+                    t_width,
+                    t_height,
+                    screen_dc2,
+                    t_rect.left,
+                    t_rect.top,
+                    0x00CC0020, // SRCCOPY
+                )
+            }
+            .as_bool();
+            let mut bitblt_colors = Vec::with_capacity(200);
+            let mut bitblt_invalid = 0;
+            for x_step in 0..40 {
+                for y_step in 0..5 {
+                    let rx = t_width * (5 + x_step * 90 / 39) / 100;
+                    let ry = t_height * (15 + y_step * 70 / 4) / 100;
+                    let color = unsafe { GetPixel(mem_dc, rx, ry) };
+                    if color == CLR_INVALID {
+                        bitblt_invalid += 1;
+                    } else {
+                        bitblt_colors.push(color);
+                    }
+                }
+            }
+            let bitblt_raw: Vec<String> = bitblt_colors
+                .iter()
+                .take(10)
+                .map(|c| format!("0x{c:08X}"))
+                .collect();
+            let unique_bitblt: std::collections::HashSet<u32> =
+                bitblt_colors.iter().copied().collect();
+            println!(
+                "Method 4 (BitBlt screen to MemDC): ok={blt_ok} valid={} invalid={} unique={}",
+                bitblt_colors.len(),
+                bitblt_invalid,
+                unique_bitblt.len()
+            );
+            println!("EVIDENCE: raw_taskbar_bitblt={bitblt_raw:?}");
+
+            unsafe {
+                let _ = SelectObject(mem_dc, prev_bmp);
+                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(mem_bmp.0));
+                let _ = DeleteDC(mem_dc);
+                let _ = ReleaseDC(HWND::default(), screen_dc2);
+            }
+        } else {
+            println!("Taskbar HWND is null - DWM alternatives for Shell_TrayWnd skipped");
+        }
     }
 }
