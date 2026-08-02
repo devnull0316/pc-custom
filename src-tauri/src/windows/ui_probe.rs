@@ -2214,6 +2214,629 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "実機のStart_Layout設定を一時変更し、スタートメニューの表示レイアウト変化を測定する"]
+    fn start_layout_write_changes_the_start_menu_layout() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "Start_Layout";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let current_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if current_setting == 1 { 0 } else { 1 };
+
+        let observe_start_layout = || -> Option<(i32, i32)> {
+            use windows::Win32::System::Com::{
+                CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+                COINIT_APARTMENTTHREADED,
+            };
+            use windows::Win32::UI::Accessibility::{
+                CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+                UIA_NamePropertyId,
+            };
+            use windows::Win32::UI::Input::KeyboardAndMouse::{
+                keybd_event, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_ESCAPE, VK_LWIN,
+            };
+
+            unsafe {
+                let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let owns_com = init.is_ok();
+
+                // Winキーを押してスタートメニューを開く
+                keybd_event(VK_LWIN.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+                keybd_event(VK_LWIN.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+                sleep(Duration::from_millis(1500));
+
+                let result = (|| -> Option<(i32, i32)> {
+                    let automation: IUIAutomation =
+                        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+                    let root: IUIAutomationElement = automation.GetRootElement().ok()?;
+
+                    let mut pinned_height = 0;
+                    let mut rec_height = 0;
+
+                    for name in ["ピン留め", "Pinned", "ピン留め済み"] {
+                        let condition = automation
+                            .CreatePropertyCondition(
+                                UIA_NamePropertyId,
+                                &windows::core::VARIANT::from(windows::core::BSTR::from(name)),
+                            )
+                            .ok()?;
+                        if let Ok(elem) = root.FindFirst(TreeScope_Descendants, &condition) {
+                            if let Ok(rect) = elem.CurrentBoundingRectangle() {
+                                pinned_height = rect.bottom - rect.top;
+                            }
+                        }
+                    }
+                    for name in ["おすすめ", "Recommended", "おすすめのアプリ"] {
+                        let condition = automation
+                            .CreatePropertyCondition(
+                                UIA_NamePropertyId,
+                                &windows::core::VARIANT::from(windows::core::BSTR::from(name)),
+                            )
+                            .ok()?;
+                        if let Ok(elem) = root.FindFirst(TreeScope_Descendants, &condition) {
+                            if let Ok(rect) = elem.CurrentBoundingRectangle() {
+                                rec_height = rect.bottom - rect.top;
+                            }
+                        }
+                    }
+
+                    if pinned_height > 0 || rec_height > 0 {
+                        Some((pinned_height, rec_height))
+                    } else {
+                        None
+                    }
+                })();
+
+                keybd_event(VK_ESCAPE.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+                keybd_event(VK_ESCAPE.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+                sleep(Duration::from_millis(300));
+
+                if owns_com {
+                    CoUninitialize();
+                }
+                result
+            }
+        };
+
+        let before = observe_start_layout();
+        let Some(before_layout) = before else {
+            println!(
+                "EVIDENCE: start.layout measured=false reason=baseline_start_menu_unavailable"
+            );
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_start_layout();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_start_layout();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "Start_Layout registry value must be restored exactly"
+        );
+
+        let Some(written_layout) = written else {
+            println!("EVIDENCE: start.layout measured=false reason=written_start_menu_unavailable before={before_layout:?}");
+            return;
+        };
+        let Some(restored_layout) = restored else {
+            println!("EVIDENCE: start.layout measured=false reason=restored_start_menu_unavailable before={before_layout:?} written={written_layout:?}");
+            return;
+        };
+
+        let changed = before_layout != written_layout;
+        let restored_ok = before_layout == restored_layout;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: start.layout measured={measured} before={before_layout:?} written={written_layout:?} restored={restored_layout:?} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のStart_IrisRecommendations設定を一時変更し、スタートメニューのおすすめ表示を測定する"]
+    fn start_recommendations_write_changes_the_start_menu() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "Start_IrisRecommendations";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let current_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if current_setting == 1 { 0 } else { 1 };
+
+        let observe_start_recommendations = || -> Option<bool> {
+            use windows::Win32::System::Com::{
+                CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+                COINIT_APARTMENTTHREADED,
+            };
+            use windows::Win32::UI::Accessibility::{
+                CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+                UIA_NamePropertyId,
+            };
+            use windows::Win32::UI::Input::KeyboardAndMouse::{
+                keybd_event, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_ESCAPE, VK_LWIN,
+            };
+
+            unsafe {
+                let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let owns_com = init.is_ok();
+
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "StartMenuExperienceHost.exe"])
+                    .output();
+                sleep(Duration::from_millis(300));
+
+                keybd_event(VK_LWIN.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+                keybd_event(VK_LWIN.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+                sleep(Duration::from_millis(1000));
+
+                let result = (|| -> Option<bool> {
+                    let automation: IUIAutomation =
+                        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+                    let root: IUIAutomationElement = automation.GetRootElement().ok()?;
+
+                    for name in ["おすすめ", "Recommended"] {
+                        let condition = automation
+                            .CreatePropertyCondition(
+                                UIA_NamePropertyId,
+                                &windows::core::VARIANT::from(windows::core::BSTR::from(name)),
+                            )
+                            .ok()?;
+                        if let Ok(elem) = root.FindFirst(TreeScope_Descendants, &condition) {
+                            let offscreen = elem
+                                .CurrentIsOffscreen()
+                                .map(|v| v.as_bool())
+                                .unwrap_or(false);
+                            if !offscreen {
+                                if let Ok(rect) = elem.CurrentBoundingRectangle() {
+                                    if rect.bottom > rect.top {
+                                        return Some(true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(false)
+                })();
+
+                keybd_event(VK_ESCAPE.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+                keybd_event(VK_ESCAPE.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+                sleep(Duration::from_millis(300));
+
+                if owns_com {
+                    CoUninitialize();
+                }
+                result
+            }
+        };
+
+        let before = observe_start_recommendations();
+        let Some(before_show) = before else {
+            println!("EVIDENCE: start.recommendations measured=false reason=baseline_start_menu_unavailable");
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_start_recommendations();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_start_recommendations();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "Start_IrisRecommendations registry value must be restored exactly"
+        );
+
+        let Some(written_show) = written else {
+            println!("EVIDENCE: start.recommendations measured=false reason=written_start_menu_unavailable before={before_show}");
+            return;
+        };
+        let Some(restored_show) = restored else {
+            println!("EVIDENCE: start.recommendations measured=false reason=restored_start_menu_unavailable before={before_show} written={written_show}");
+            return;
+        };
+
+        let changed = before_show != written_show;
+        let restored_ok = before_show == restored_show;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: start.recommendations measured={measured} before={before_show} written={written_show} restored={restored_show} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のShowRecent設定を一時変更し、新規Explorer窓の「最近」項目表示を測定する"]
+    fn explorer_recent_files_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer";
+        const VALUE_NAME: &str = "ShowRecent";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let current_setting = original_val.unwrap_or(1);
+        let desired_setting: u32 = if current_setting == 1 { 0 } else { 1 };
+
+        let observe_recent_files = || -> Option<usize> {
+            let existing: HashSet<isize> =
+                explorer_windows().into_iter().map(|w| w.handle).collect();
+            let _child = std::process::Command::new("explorer.exe")
+                .arg("shell:::{679f857b-165d-4a25-9a24-998467cca37b}")
+                .spawn()
+                .ok()?;
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while Instant::now() < deadline {
+                sleep(Duration::from_millis(200));
+                if let Some(w) = explorer_windows()
+                    .into_iter()
+                    .find(|w| !existing.contains(&w.handle))
+                {
+                    let handle = w.handle;
+                    let count = explorer_window_item_names(handle)
+                        .map(|names| {
+                            names
+                                .into_iter()
+                                .filter(|name| name.contains("最近") || name.contains("Recent"))
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    close_owned_explorer_window(handle, true);
+                    return Some(count);
+                }
+            }
+            None
+        };
+
+        let before = observe_recent_files();
+        let Some(before_count) = before else {
+            println!(
+                "EVIDENCE: explorer.recent_files measured=false reason=baseline_window_unavailable"
+            );
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_recent_files();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_recent_files();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "ShowRecent registry value must be restored exactly"
+        );
+
+        let Some(written_count) = written else {
+            println!("EVIDENCE: explorer.recent_files measured=false reason=written_window_unavailable before={before_count}");
+            return;
+        };
+        let Some(restored_count) = restored else {
+            println!("EVIDENCE: explorer.recent_files measured=false reason=restored_window_unavailable before={before_count} written={written_count}");
+            return;
+        };
+
+        let changed = before_count != written_count;
+        let restored_ok = before_count == restored_count;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.recent_files measured={measured} before={before_count} written={written_count} restored={restored_count} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のTaskbarGlomLevel設定を一時変更し、タスクバーボタン結合表示を測定する"]
+    fn taskbar_button_grouping_write_changes_the_taskbar() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "TaskbarGlomLevel";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let current_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if current_setting == 2 { 0 } else { 2 };
+
+        let _child1 = std::process::Command::new("notepad.exe").spawn().ok();
+        let _child2 = std::process::Command::new("notepad.exe").spawn().ok();
+        sleep(Duration::from_millis(1500));
+
+        let observe_grouping_buttons = || -> Option<usize> {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::System::Com::{
+                CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+                COINIT_APARTMENTTHREADED,
+            };
+            use windows::Win32::UI::Accessibility::{
+                CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+            };
+            use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+
+            unsafe {
+                let taskbar: HWND = FindWindowW(windows::core::w!("Shell_TrayWnd"), None).ok()?;
+                let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let owns_com = init.is_ok();
+
+                let result = (|| -> Option<usize> {
+                    let automation: IUIAutomation =
+                        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+                    let root: IUIAutomationElement = automation.ElementFromHandle(taskbar).ok()?;
+                    let condition = automation.CreateTrueCondition().ok()?;
+                    let all = root.FindAll(TreeScope_Descendants, &condition).ok()?;
+                    let count = all.Length().ok()?;
+                    let mut button_count = 0;
+                    for i in 0..count {
+                        if let Ok(elem) = all.GetElement(i) {
+                            if let Ok(name) = elem.CurrentName() {
+                                let name_str = name.to_string();
+                                if (name_str.contains("メモ帳") || name_str.contains("Notepad"))
+                                    && elem
+                                        .CurrentIsOffscreen()
+                                        .map(|v| !v.as_bool())
+                                        .unwrap_or(false)
+                                {
+                                    button_count += 1;
+                                }
+                            }
+                        }
+                    }
+                    Some(button_count)
+                })();
+
+                if owns_com {
+                    CoUninitialize();
+                }
+                result
+            }
+        };
+
+        let cleanup = || {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/IM", "notepad.exe"])
+                .output();
+        };
+
+        let before = observe_grouping_buttons();
+        let Some(before_count) = before else {
+            cleanup();
+            println!("EVIDENCE: taskbar.button_grouping measured=false reason=baseline_taskbar_unavailable");
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        let _ = crate::windows::restart_shell();
+        sleep(Duration::from_millis(2000));
+
+        let written = observe_grouping_buttons();
+
+        guard.restore_and_assert();
+        let _ = crate::windows::restart_shell();
+        sleep(Duration::from_millis(2000));
+
+        let restored = observe_grouping_buttons();
+
+        cleanup();
+
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+            let taskbar = FindWindowW(windows::core::w!("Shell_TrayWnd"), None);
+            assert!(
+                taskbar.is_ok(),
+                "Taskbar window Shell_TrayWnd must be present after shell restart"
+            );
+        }
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "TaskbarGlomLevel registry value must be restored exactly"
+        );
+
+        let Some(written_count) = written else {
+            println!("EVIDENCE: taskbar.button_grouping measured=false reason=written_taskbar_unavailable before={before_count}");
+            return;
+        };
+        let Some(restored_count) = restored else {
+            println!("EVIDENCE: taskbar.button_grouping measured=false reason=restored_taskbar_unavailable before={before_count} written={written_count}");
+            return;
+        };
+
+        let changed = before_count != written_count;
+        let restored_ok = before_count == restored_count;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: taskbar.button_grouping measured={measured} before={before_count} written={written_count} restored={restored_count} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のOpenOnHover設定を一時変更し、検索ホバー動作を測定する"]
+    fn search_recent_on_hover_write_changes_the_taskbar() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Feeds\DSB";
+        const VALUE_NAME: &str = "OpenOnHover";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let current_setting = original_val.unwrap_or(1);
+        let desired_setting: u32 = if current_setting == 1 { 0 } else { 1 };
+
+        let observe_hover_search = || -> Option<bool> {
+            use windows::Win32::Foundation::{HWND, RECT};
+            use windows::Win32::System::Com::{
+                CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+                COINIT_APARTMENTTHREADED,
+            };
+            use windows::Win32::UI::Accessibility::{
+                CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+                UIA_NamePropertyId,
+            };
+            use windows::Win32::UI::Input::KeyboardAndMouse::{
+                keybd_event, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_ESCAPE,
+            };
+            use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetCursorPos};
+
+            unsafe {
+                let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let owns_com = init.is_ok();
+
+                let result = (|| -> Option<bool> {
+                    let taskbar: HWND =
+                        FindWindowW(windows::core::w!("Shell_TrayWnd"), None).ok()?;
+                    let automation: IUIAutomation =
+                        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+                    let root: IUIAutomationElement = automation.ElementFromHandle(taskbar).ok()?;
+
+                    let mut search_rect = RECT::default();
+                    let mut found = false;
+
+                    for name in ["検索", "Search"] {
+                        let condition = automation
+                            .CreatePropertyCondition(
+                                UIA_NamePropertyId,
+                                &windows::core::VARIANT::from(windows::core::BSTR::from(name)),
+                            )
+                            .ok()?;
+                        if let Ok(elem) = root.FindFirst(TreeScope_Descendants, &condition) {
+                            if let Ok(rect) = elem.CurrentBoundingRectangle() {
+                                if rect.right > rect.left {
+                                    search_rect = rect;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if !found {
+                        return None;
+                    }
+
+                    let cx = (search_rect.left + search_rect.right) / 2;
+                    let cy = (search_rect.top + search_rect.bottom) / 2;
+                    let _ = SetCursorPos(cx, cy);
+                    sleep(Duration::from_millis(1500));
+
+                    let desktop: IUIAutomationElement = automation.GetRootElement().ok()?;
+                    let mut opened = false;
+
+                    for name in ["検索", "Search", "SearchPane"] {
+                        let condition = automation
+                            .CreatePropertyCondition(
+                                UIA_NamePropertyId,
+                                &windows::core::VARIANT::from(windows::core::BSTR::from(name)),
+                            )
+                            .ok()?;
+                        if let Ok(elem) = desktop.FindFirst(TreeScope_Descendants, &condition) {
+                            if elem
+                                .CurrentIsOffscreen()
+                                .map(|v| !v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                opened = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    let _ = SetCursorPos(0, 0);
+                    keybd_event(VK_ESCAPE.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+                    keybd_event(VK_ESCAPE.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+                    sleep(Duration::from_millis(300));
+
+                    Some(opened)
+                })();
+
+                if owns_com {
+                    CoUninitialize();
+                }
+                result
+            }
+        };
+
+        let before = observe_hover_search();
+        let Some(before_opened) = before else {
+            println!(
+                "EVIDENCE: search.recent_on_hover measured=false reason=search_button_unavailable"
+            );
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_hover_search();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_hover_search();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "OpenOnHover registry value must be restored exactly"
+        );
+
+        let Some(written_opened) = written else {
+            println!("EVIDENCE: search.recent_on_hover measured=false reason=written_search_unavailable before={before_opened}");
+            return;
+        };
+        let Some(restored_opened) = restored else {
+            println!("EVIDENCE: search.recent_on_hover measured=false reason=restored_search_unavailable before={before_opened} written={written_opened}");
+            return;
+        };
+
+        let changed = before_opened != written_opened;
+        let restored_ok = before_opened == restored_opened;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: search.recent_on_hover measured={measured} before={before_opened} written={written_opened} restored={restored_opened} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
     #[ignore = "temporarily changes transparency and samples taskbar pixels"]
     fn appearance_transparency_write_changes_taskbar_pixel_variance() {
         const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";

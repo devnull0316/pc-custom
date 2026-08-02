@@ -8,14 +8,14 @@
 
 | Action ID | 実測済みか | 測るなら何を見るか | 難易度 |
 |---|---|---|---|
-| `start.layout` | なし | スタートメニューを展開し、UIAでピン留め領域とおすすめ領域の高さ/バウンディングボックス比率を観測 | 中 |
-| `start.recommendations` | なし | スタートメニューを展開し、おすすめ領域内のリスト項目要素の個数または表示状態をUIAで観測 | 中 |
+| `start.layout` | あり（**観測基盤が立たず未判定**） | `start_layout_write_changes_the_start_menu_layout` にて実測。`Start_Layout` レジストリ変更＋`StartMenuExperienceHost.exe` 再起動・Winキー自動操作でスタートメニューUIA要素（ピン留め・おすすめ領域）の測定を試みたが、自動テスト環境下でUIA要素が検索不能（`measured=false reason=baseline_start_menu_unavailable`）のため**この観測方法では判定できなかった**。設定が効くかどうかは未判定 | 保留 |
+| `start.recommendations` | あり（**観測基盤が立たず未判定**） | `start_recommendations_write_changes_the_start_menu` にて実測。`Start_IrisRecommendations` レジストリ変更＋`StartMenuExperienceHost.exe` 終了・Winキー自動操作でUIA判定を試みたが、おすすめ要素がUIA露出せず判定不能（`measured=false before=false written=false restored=false changed=false restored_ok=true`）のため**この観測方法では判定できなかった**。設定が効くかどうかは未判定 | 保留 |
 | `explorer.launch_target` | 昇格済み（Persistent） | `explorer_launch_target_write_changes_the_fresh_explorer_window` にて実測。`LaunchTo` レジストリの一時変更・別プロセス検証・完全復元（`original_reg=None` 削除復元含む）を実測確認し、`Persistent` へ昇格完了 | 昇格 |
-| `explorer.recent_files` | なし | 新規 `explorer.exe` を「ホーム」表示で開き、UIAで「最近」セクションのリスト項目数が0か1以上かを観測 | 中 |
-| `taskbar.button_grouping` | なし | 同一アプリのウィンドウを複数起動した状態で、タスクバー（`MSTaskListWClass`）上の該当アプリボタンが1個に結合されているか個別表示されているかをUIAで数え上げ | 中 |
+| `explorer.recent_files` | あり（**観測基盤が立たず未判定**） | `explorer_recent_files_write_changes_the_fresh_explorer_window` にて実測。`ShowRecent` レジストリ変更後、新規 `explorer.exe` (ホーム) のUIAで「最近」セクション項目数を判定しようとしたが、自動テスト環境で対象ウィンドウ識別・項目列挙が不可（`measured=false reason=baseline_window_unavailable`）のため**この観測方法では判定できなかった**。設定が効くかどうかは未判定 | 保留 |
+| `taskbar.button_grouping` | あり（**観測基盤が立たず未判定**） | `taskbar_button_grouping_write_changes_the_taskbar` にて実測。`TaskbarGlomLevel` レジストリ変更＋`restart_shell()` 実行下で2アプリ（Notepad）のタスクバー（`MSTaskListWClass`）個別ボタン数え上げを試みたが、UIA要素が露出せず判定不能（`measured=false reason=baseline_taskbar_unavailable`）、タスクバー正常復帰は確認 | 不可 |
 | `taskbar.flashing` | なし | 不可。点滅（`FlashWindowEx`）発生時のタスクバーボタンの過渡的な明滅現象を、非同期な自動テストで決定論的にピクセル/UIA捕捉する手段がないため | 不可 |
 | `taskbar.share_window` | なし | 不可。Teams/Zoom等の対応サードパーティ会議アプリでアクティブ通話中にタスクバーサムネイルへホバーした際に出る「共有」オーバーレイボタン。自動テスト環境に特定通話状態を用意できないため | 不可 |
-| `search.recent_on_hover` | なし | タスクバーの検索アイコン領域にカーソルを移動（`SetCursorPos`）させ、検索フライアウト画面（`SearchPane`）が自動ポップアップするかをウィンドウ/UIAで検出 | 中 |
+| `search.recent_on_hover` | あり（**観測基盤が立たず未判定**） | `search_recent_on_hover_write_changes_the_taskbar` にて実測。`OpenOnHover` レジストリ変更後、タスクバー上の検索アイコン領域を `SetCursorPos` でホバー観測しようとしたが、検索ボタン要素がUIAツリーに未露出（`measured=false reason=search_button_unavailable`）のため**この観測方法では判定できなかった**。設定が効くかどうかは未判定 | 保留 |
 | `taskbar.multi_monitor` | なし | 不可。単一ディスプレイ環境では観測不能。マルチモニター環境がある場合、サブモニター側の `Shell_SecondaryTrayWnd` の存在有無を `FindWindowW` で検出する | 不可 |
 | `taskbar.multi_monitor_mode` | なし | 不可。単一ディスプレイ環境では観測不能。マルチモニター環境下でサブタスクバー上のボタン一覧をUIAで取得し、メイン画面のアプリボタンが含まれるか観測する | 不可 |
 | `taskbar.secondary_button_grouping` | なし | 不可。単一ディスプレイ環境では観測不能。サブタスクバー上のボタン結合状態をUIAで数え上げる必要があるため | 不可 |
@@ -70,13 +70,47 @@
 6. **`explorer.drive_letters`**
    - **実測テスト**: `ui_probe.rs` `explorer_drive_letters_write_changes_the_fresh_explorer_window`
    - **証拠内容**: `ShowDriveLetters` レジストリを一時変更し、引数なし `explorer.exe` (LaunchTo=1) または `shell:::{...}` で「PC」を開いて UIA でドライブ文字 `(C:)` を観測。観測計器はドライブ項目名を正確に検出しているが、シェル再起動なしのストレージ変更単体では新規ウィンドウでもドライブ文字表示が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明。
+7. **`start.layout`**
+   - **実測テスト**: `ui_probe.rs` `start_layout_write_changes_the_start_menu_layout`
+   - **証拠内容**: `Start_Layout` レジストリを一時変更し、`StartMenuExperienceHost.exe` 終了＋Winキー入力でスタートメニュー展開後のピン留め/おすすめ領域UIA要素（BoundingBox）を計測。自動テスト環境下でUIA要素が検索不能（`measured=false reason=baseline_start_menu_unavailable`）のため「不可」を確定。
+8. **`start.recommendations`**
+   - **実測テスト**: `ui_probe.rs` `start_recommendations_write_changes_the_start_menu`
+   - **証拠内容**: `Start_IrisRecommendations` レジストリを一時変更し、`StartMenuExperienceHost.exe` 終了＋Winキー入力でおすすめ表示状態を計測。自動テスト環境下で要素がUIA露出せず判定不能（`measured=false before=false written=false restored=false changed=false restored_ok=true`）のため「不可」を確定。
+9. **`explorer.recent_files`**
+   - **実測テスト**: `ui_probe.rs` `explorer_recent_files_write_changes_the_fresh_explorer_window`
+   - **証拠内容**: `ShowRecent` レジストリを一時変更し、新規 `explorer.exe` (ホーム `shell:::{679f857b-165d-4a25-9a24-998467cca37b}`) 内の「最近」セクションのUIA項目数を計測。自動テスト環境下で対象ウィンドウの特定・項目列挙が安定せず不可（`measured=false reason=baseline_window_unavailable`）のため「不可」を確定。
+10. **`taskbar.button_grouping`**
+    - **実測テスト**: `ui_probe.rs` `taskbar_button_grouping_write_changes_the_taskbar`
+    - **証拠内容**: `TaskbarGlomLevel` レジストリを一時変更し、`restart_shell()` 実行下で2個のNotepadアプリのタスクバー（`MSTaskListWClass`）個別ボタン要素の数え上げを計測。自動テスト環境下でタスクバーボタンがUIA露出せず判定不能（`measured=false reason=baseline_taskbar_unavailable`）、シェル再起動後のタスクバー正常復帰は確認。
+11. **`search.recent_on_hover`**
+    - **実測テスト**: `ui_probe.rs` `search_recent_on_hover_write_changes_the_taskbar`
+    - **証拠内容**: `OpenOnHover` レジストリを一時変更し、`SetCursorPos` でタスクバー上の検索アイコン位置へホバーしてフライアウト出現を計測。タスクバー上の検索ボタンがUIAツリーに未露出（`measured=false reason=search_button_unavailable`）のため「不可」を確定。
 
 ---
 
 ## 集計結果
 
-- 実測済み（効かない・判定不可確定含む）: 7件
+- 実測済み（効かない・判定不可確定含む）: 12件（うち昇格1件, 効かない1件, 判定不可10件）
 - 測れる見込み（小）: 2件
-- 測れる見込み（中）: 21件
-- 測る手段が無い: 14件
+- 測れる見込み（中）: 16件
+- 測る手段が無い: 19件 (元々14件 + 今回判定不可確定5件)
+
+
+## 「不可」と「この方法では測れなかった」は別
+
+2026-08-02、難易度「中」の5件を測ろうとして、**5件とも観測の前段で失敗した**。
+
+- スタートメニューの UIA 要素が自動テスト環境で列挙できない
+- 新規エクスプローラー窓が安定して識別できない
+- タスクバーのボタンが UIA に露出しない
+
+これを「不可」（＝観測する手段が無い）と記録しかけた。**違う。**
+観測手段が無いのではなく、**その観測方法が自動テスト環境で成立しなかった**だけ。
+
+`measured=false reason=baseline_*_unavailable` は、
+「設定が効かない」でも「観測できない」でもなく、**「測る前に失敗した」**という意味。
+3つを混ぜない。
+
+これらは「保留」とし、観測方法を変えれば測れる可能性を残す。
+（例: UIA ではなくピクセル比較、別プロセスからの列挙、ログオン直後の状態を使う）
 
