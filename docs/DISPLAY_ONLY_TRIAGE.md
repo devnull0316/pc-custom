@@ -1,16 +1,16 @@
-# 表示専用 Action 39件の仕分けレポート
+# 表示専用 Action 38件の仕分けレポート
 
-`BRIEF.md` および `docs/RULES.md` の制約に基づき、`src-tauri/src/action/registry.rs` に登録されている `MethodClass::UnverifiedStorage` の Action 39件について、`src-tauri/src/windows/ui_probe.rs` のテストコードの中身を直接読んだ上で、外部観測の実現性と難易度を仕分けした。
+`BRIEF.md` および `docs/RULES.md` の制約に基づき、`src-tauri/src/action/registry.rs` に登録されている `MethodClass::UnverifiedStorage` の Action 38件について、`src-tauri/src/windows/ui_probe.rs` のテストコードの中身を直接読んだ上で、外部観測の実現性と難易度を仕分けした。
 
 ---
 
-## 仕分け表（全39件）
+## 仕分け表（全38件）
 
 | Action ID | 実測済みか | 測るなら何を見るか | 難易度 |
 |---|---|---|---|
 | `start.layout` | なし | スタートメニューを展開し、UIAでピン留め領域とおすすめ領域の高さ/バウンディングボックス比率を観測 | 中 |
 | `start.recommendations` | なし | スタートメニューを展開し、おすすめ領域内のリスト項目要素の個数または表示状態をUIAで観測 | 中 |
-| `explorer.launch_target` | なし | 新規 `explorer.exe` を引数なしで起動し、最初に開いたウィンドウのタイトル（「ホーム」「PC」「ダウンロード」等）またはアドレスバーのパスを観測 | 小 |
+| `explorer.launch_target` | 昇格済み（Persistent） | `explorer_launch_target_write_changes_the_fresh_explorer_window` にて実測。`LaunchTo` レジストリの一時変更・別プロセス検証・完全復元（`original_reg=None` 削除復元含む）を実測確認し、`Persistent` へ昇格完了 | 昇格 |
 | `explorer.recent_files` | なし | 新規 `explorer.exe` を「ホーム」表示で開き、UIAで「最近」セクションのリスト項目数が0か1以上かを観測 | 中 |
 | `taskbar.button_grouping` | なし | 同一アプリのウィンドウを複数起動した状態で、タスクバー（`MSTaskListWClass`）上の該当アプリボタンが1個に結合されているか個別表示されているかをUIAで数え上げ | 中 |
 | `taskbar.flashing` | なし | 不可。点滅（`FlashWindowEx`）発生時のタスクバーボタンの過渡的な明滅現象を、非同期な自動テストで決定論的にピクセル/UIA捕捉する手段がないため | 不可 |
@@ -41,7 +41,7 @@
 | `explorer.nav_show_all` | なし | 新規 Explorer の左側ナビゲーションツリーペインで、「ごみ箱」や「コントロールパネル」等の特殊フォルダーノードが露出しているかをUIAで観測 | 中 |
 | `explorer.separate_process` | あり（実測済み） | `separate_process_setting_changes_owned_explorer_window_process_pattern` にて実測済み。`set_shell_state_separate_process` で変更し、新規 Explorer 窓の PID（`GetWindowThreadProcessId`）が Shell PID（`GetShellWindow`）と異なるかを測定（`SeparateProcessRestoreGuard` を使用） | 小 |
 | `explorer.icons_only` | なし | 画像ファイルを置いたフォルダーを新規 Explorer で大アイコン表示で開き、`PrintWindow` でファイルアイコン領域のサムネイル描画（画像内容か汎用アイコンか）のピクセル分散を比較 | 中 |
-| `explorer.drive_letters` | なし | 新規 Explorer で「PC」を開き、ドライブ表示要素のUIA名前文字列が「ローカル ディスク (C:)」等のドライブ文字付与パターンを満たしているか判定 | 小 |
+| `explorer.drive_letters` | あり（実測済み・効かない） | `explorer_drive_letters_write_changes_the_fresh_explorer_window` にて実測。`ShowDriveLetters` レジストリを一時変更し、引数なし `explorer.exe`（LaunchTo=1）または `shell:::{...}` で「PC」を開き UIA でドライブ文字 `(C:)` を観測。観測計器は項目名を正確に検出しているが、シェル再起動なしのストレージ変更単体では新規ウィンドウでもドライブ文字表示が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 小 |
 | `explorer.preview_handlers` | なし | プレビューペインを有効にした新規 Explorer でファイルを選択した際、プレビュー領域内に描画コントロール（`PreviewPane`）が出現するか観測 | 中 |
 | `explorer.sharing_wizard` | なし | フォルダーのコンテキストメニュー等から「共有」を選択した際、出現するダイアログが「共有ウィザード」（`SharingWizard`）か従来のプロパティかを識別 | 中 |
 | `explorer.always_show_menus` | あり（試行済み・判定不可と確認） | `batch_measure_explorer_candidates` で実測試行されたが、高さ測定手法では判定不能と判明。測定するなら新規 Explorer 窓内で Classic MenuBar UIA 要素の有無・可視性を捉える専用プローブが必要 | 中 |
@@ -53,23 +53,30 @@
 ## 証拠の位置と既知の実測結果（`ui_probe.rs` / `STATUS.md`）
 
 1. **`explorer.info_tips`**
-   - **実測テスト**: `ui_probe.rs:L1483` `info_tip_setting_changes_owned_explorer_tooltip_visibility`
+   - **実測テスト**: `ui_probe.rs` `info_tip_setting_changes_owned_explorer_tooltip_visibility`
    - **証拠内容**: `set_shell_state_show_info_tip` (文書化API `SHGetSetSettings` / `SSF_SHOWINFOTIP`) 経由で設定を一時変更し、自己所有の Explorer 窓内で Cursor をファイル中央へ動かし UIA (`UIA_ToolTipControlTypeId`) の出現をカウントした。
 2. **`explorer.separate_process`**
-   - **実測テスト**: `ui_probe.rs:L1626` `separate_process_setting_changes_owned_explorer_window_process_pattern`
+   - **実測テスト**: `ui_probe.rs` `separate_process_setting_changes_owned_explorer_window_process_pattern`
    - **証拠内容**: `set_shell_state_separate_process` (文書化API `SHGetSetSettings` / `SSF_SEPPROCESS`) 経由で変更し、新規に開いた自己所有 Explorer 窓の PID と Shell の PID を比較してプロセス分離を検証した。
 3. **`taskbar.show_desktop`**
-   - **実測テスト**: `ui_probe.rs:L2920` `batch_measure_taskbar_candidates_after_shell_restart`
+   - **実測テスト**: `ui_probe.rs` `batch_measure_taskbar_candidates_after_shell_restart`
    - **証拠内容**: `TaskbarSd` レジストリを変更して `restart_shell()` を実行後、タスクバー上の UIA 要素 `"デスクトップを表示する"` の有無を観測した。
 4. **`explorer.status_bar` 及び `explorer.always_show_menus`**
-   - **実測テスト**: `ui_probe.rs:L2422` `batch_measure_explorer_candidates`
+   - **実測テスト**: `ui_probe.rs` `batch_measure_explorer_candidates`
    - **証拠内容**: レジストリ変更＋新規 Explorer 窓の一覧高さ測定等を行ったが、コード内に `println!("この経路では判定できない...観測手段を作り直すこと");` と明記されており、現行プローブ手法では「測れていない（判定不可）」と実測証明されている。
+5. **`explorer.launch_target`**
+   - **実測テスト**: `ui_probe.rs` `explorer_launch_target_write_changes_the_fresh_explorer_window`
+   - **証拠内容**: `LaunchTo` レジストリを一時変更し、引数なし `explorer.exe` を起動して観測。`/n` 引数付き起動から引数なし起動（新規ウィンドウ生成を確認）に修正した結果、設定変更で新規 Explorer 窓のターゲット種別が即座に変化し（`before=2 written=1 restored=2 changed=true restored_ok=true`）、設定が機能して変更・復元が正確に行われることを実測証明（昇格候補）。
+6. **`explorer.drive_letters`**
+   - **実測テスト**: `ui_probe.rs` `explorer_drive_letters_write_changes_the_fresh_explorer_window`
+   - **証拠内容**: `ShowDriveLetters` レジストリを一時変更し、引数なし `explorer.exe` (LaunchTo=1) または `shell:::{...}` で「PC」を開いて UIA でドライブ文字 `(C:)` を観測。観測計器はドライブ項目名を正確に検出しているが、シェル再起動なしのストレージ変更単体では新規ウィンドウでもドライブ文字表示が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明。
 
 ---
 
 ## 集計結果
 
-- 実測済み（効かない・判定不可確定含む）: 5件
-- 測れる見込み（小）: 4件 ← **次に測る候補**
+- 実測済み（効かない・判定不可確定含む）: 7件
+- 測れる見込み（小）: 2件
 - 測れる見込み（中）: 21件
 - 測る手段が無い: 14件
+

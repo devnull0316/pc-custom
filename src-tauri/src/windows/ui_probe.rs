@@ -1176,6 +1176,59 @@ mod tests {
             .expect("prepare typed probe backup")
     }
 
+    fn prepare_dword_probe(target: RegistryTarget, desired: u32) -> RegistryBackup {
+        prepare_registry_backup(target, REG_DWORD, desired.to_le_bytes().to_vec(), 1, 26_200)
+            .expect("prepare typed dword probe backup")
+    }
+
+    fn explorer_window_has_drive_letter(window_handle: isize) -> WindowsResult<bool> {
+        fn fail(operation: &'static str) -> WindowsError {
+            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+        }
+
+        unsafe {
+            let window = HWND(window_handle as *mut core::ffi::c_void);
+            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let owns_com = init.is_ok();
+            let result = (|| -> WindowsResult<bool> {
+                let automation: IUIAutomation =
+                    CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                        .map_err(|_| fail("CoCreateInstance"))?;
+                let root: IUIAutomationElement = automation
+                    .ElementFromHandle(window)
+                    .map_err(|_| fail("ElementFromHandle explorer"))?;
+                let condition = automation
+                    .CreateTrueCondition()
+                    .map_err(|_| fail("CreateTrueCondition"))?;
+                let all = root
+                    .FindAll(TreeScope_Descendants, &condition)
+                    .map_err(|_| fail("FindAll"))?;
+                let count = all.Length().map_err(|_| fail("Length"))?;
+                for index in 0..count {
+                    let Ok(element) = all.GetElement(index) else {
+                        continue;
+                    };
+                    let Ok(name) = element.CurrentName() else {
+                        continue;
+                    };
+                    let s = name.to_string();
+                    if s.contains("(C:)")
+                        || s.contains("(D:)")
+                        || s.contains("(E:)")
+                        || s.contains("(F:)")
+                    {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })();
+            if owns_com {
+                CoUninitialize();
+            }
+            result
+        }
+    }
+
     fn probe_folder(prefix: &str, item_names: &[&str]) -> tempfile::TempDir {
         let dir = tempfile::Builder::new()
             .prefix(prefix)
@@ -2027,6 +2080,137 @@ mod tests {
         } else {
             println!("EVIDENCE: compact view did not change measurable four-item list height");
         }
+    }
+
+    fn current_dword_value(target: RegistryTarget) -> Option<u32> {
+        let state = read_registry_state(&target.location()).ok()?;
+        if state.value_existed && state.value_type == Some(REG_DWORD) && state.raw_bytes.len() == 4
+        {
+            Some(u32::from_le_bytes(state.raw_bytes[..4].try_into().ok()?))
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    #[ignore = "実機のLaunchTo設定を一時変更し、測定する"]
+    fn explorer_launch_target_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "LaunchTo";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let before_setting = original_val.unwrap_or(1);
+        let desired_setting: u32 = if before_setting == 1 { 2 } else { 1 };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+
+        let written_val = current_dword_value(target);
+        assert_eq!(
+            written_val,
+            Some(desired_setting),
+            "LaunchTo registry value must match desired setting after apply"
+        );
+
+        guard.restore_and_assert();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "LaunchTo registry value must be restored exactly to original (or None if missing)"
+        );
+
+        let changed = before_setting != desired_setting;
+        let restored_ok = restored_val == original_val;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.launch_target measured={measured} before={before_setting} written={desired_setting} restored={before_setting} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のShowDriveLetters設定を一時変更し、新規Explorer窓のドライブ文字表示を測定する"]
+    fn explorer_drive_letters_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "ShowDriveLetters";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        // 0 = Show drive letters after name (default), 1 = Show before name, 2 = Hide drive letters
+        let current_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if current_setting == 2 { 0 } else { 2 };
+        let observe_drive_letters_window = || -> Option<bool> {
+            let existing: HashSet<isize> =
+                explorer_windows().into_iter().map(|w| w.handle).collect();
+            let _child = std::process::Command::new("explorer.exe")
+                .arg("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}")
+                .spawn()
+                .ok()?;
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while Instant::now() < deadline {
+                sleep(Duration::from_millis(200));
+                if let Some(w) = explorer_windows()
+                    .into_iter()
+                    .find(|w| !existing.contains(&w.handle))
+                {
+                    let handle = w.handle;
+                    let has_letter = explorer_window_has_drive_letter(handle).unwrap_or(false);
+                    close_owned_explorer_window(handle, true);
+                    return Some(has_letter);
+                }
+            }
+            None
+        };
+
+        let before = observe_drive_letters_window();
+        let Some(before_has_letter) = before else {
+            println!("EVIDENCE: explorer.drive_letters measured=false reason=baseline_window_unavailable");
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_drive_letters_window();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_drive_letters_window();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "ShowDriveLetters registry value must be restored exactly"
+        );
+
+        let Some(written_has_letter) = written else {
+            println!("EVIDENCE: explorer.drive_letters measured=false reason=written_window_unavailable before={before_has_letter}");
+            return;
+        };
+        let Some(restored_has_letter) = restored else {
+            println!("EVIDENCE: explorer.drive_letters measured=false reason=restored_window_unavailable before={before_has_letter} written={written_has_letter}");
+            return;
+        };
+
+        let changed = before_has_letter != written_has_letter;
+        let restored_ok = before_has_letter == restored_has_letter;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.drive_letters measured={measured} before={before_has_letter} written={written_has_letter} restored={restored_has_letter} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
     }
 
     #[test]

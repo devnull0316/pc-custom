@@ -839,14 +839,14 @@ action_metadata!(
     "スタートのおすすめ表示を選択状態へ変更します。"
 );
 
-action_metadata!(
+verified_action_metadata!(
     EXPLORER_LAUNCH_TARGET_METADATA,
     EXPLORER_LAUNCH_TARGET_ACTION,
     ExplorerLaunchTarget,
     "Explorerを開いたときの場所を選ぶ",
     "ホーム、PC、ダウンロードから開始場所を選びます。既存ウィンドウの位置は変更しません。",
     "explorer",
-    &["explorer", "launch", "explicit-only"],
+    &["explorer", "launch", "explorer-restart"],
     r#"{"target":"home|this_pc|downloads"}"#,
     "registry:hkcu:64:software/microsoft/windows/currentversion/explorer/advanced:launchto",
     Caution,
@@ -2242,14 +2242,6 @@ mod tests {
         START_RECOMMENDATIONS_ACTION,
         ActionParameters::StartRecommendations { enabled: false },
         Some(1)
-    );
-    blocked_mutation_test!(
-        explorer_launch_target_mutation_is_blocked_and_storage_is_unchanged,
-        EXPLORER_LAUNCH_TARGET_ACTION,
-        ActionParameters::ExplorerLaunchTarget {
-            target: crate::action::ExplorerLaunchTarget::ThisPc
-        },
-        Some(2)
     );
     blocked_mutation_test!(
         explorer_recent_files_mutation_is_blocked_and_storage_is_unchanged,

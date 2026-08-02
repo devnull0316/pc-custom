@@ -2049,3 +2049,33 @@ vpn_unreachable_failure registered_before=0 registered_with_test=1
 **成功経路は依然として未実証。** 到達する VPN が要る。
 失敗と後始末が確かめられただけで、繋がることは確かめていない。
 
+## `explorer.launch_target` を Persistent へ昇格（2026-08-01 実測）
+
+`tasks/TASK_PROMOTE_LAUNCH_TARGET.md` に基づき、`explorer.launch_target`（Explorer を開いたときの場所を選ぶ設定: 1=This PC, 2=Home）を `verified_action_metadata!` で定義し直し、変更可能な Action へ昇格した。
+
+### 実機観測証拠
+
+```
+EVIDENCE: explorer.launch_target measured=true before=2 written=1 restored=2 changed=true restored_ok=true original_reg=Some(2) desired_reg=1
+```
+
+- レジストリ `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\LaunchTo` の書き込み、別プロセス観測、元状態への完全復元を確認。
+- `original_reg=None`（HKCUの `LaunchTo` キーが存在しない状態）におけるリストア処理時にも、既定値を書き込まずレジストリ値を正確に削除復元することを動作確認済み。
+
+### 件数・テーブル更新
+
+- 総 Action 件数: 75件
+- 変更できる Action (Persistent + Session): 20件 → **21件**
+- 表示専用 Action (UnverifiedStorage): 39件 → **38件**
+- `README.md`, `docs/DISPLAY_ONLY_TRIAGE.md`, `src-tauri/src/presentation.rs` (dump_action_counts) のすべての手動合わせ表および件数ガードを整合更新。
+
+### 全検証の通過確認
+
+- `cargo test --lib` (404 passed, 0 failed, 76 ignored)
+- `cargo test --lib count_report -- --nocapture --test-threads=1` (総数=75 変更できる=21 表示専用=38)
+- `cargo test --lib request_round_trip -- --test-threads=1` (2 passed)
+- `cargo test --lib category_contract -- --test-threads=1` (1 passed)
+- `cargo clippy --all-targets -- -D warnings` (clean, 0 warnings)
+- `cargo fmt --check` (clean)
+- `npm run build` (clean, 23 vitest passed, 0 CSS warnings)
+

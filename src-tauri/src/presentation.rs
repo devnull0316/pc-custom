@@ -2331,7 +2331,7 @@ mod count_report {
         );
         assert_eq!(total, 75, "総数が変わったら README も直すこと");
         assert!(
-            guided_candidate <= 39,
+            guided_candidate <= 38,
             "表示専用が増えている。確認していないものを足していないか"
         );
     }
