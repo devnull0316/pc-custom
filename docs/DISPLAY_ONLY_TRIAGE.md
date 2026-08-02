@@ -38,10 +38,10 @@
 | `explorer.info_tips` | あり（実測済み） | `info_tip_setting_changes_owned_explorer_tooltip_visibility` にて実測済み。自己所有の Explorer 窓内のファイル項目上にカーソルを動かし、出現する ToolTip（`UIA_ToolTipControlTypeId`）要素の数・名前を観測（`InfoTipRestoreGuard` を使用） | 小 |
 | `explorer.hide_empty_drives` | あり（実測済み・効かない） | `explorer_hide_empty_drives_write_changes_the_fresh_explorer_window` にて実測。`HideDrivesWithNoMedia` レジストリを一時変更し、自己所有 Explorer 窓内のドライブ項目を観測。シェル再起動なしの変更単体では新規ウィンドウでもドライブ表示数が変化しない（`before=3 written=3 restored=3 changed=false`）ことを実測証明 | 中 |
 | `explorer.nav_expand_current` | あり（実測済み・効かない） | `explorer_nav_expand_current_write_changes_the_fresh_explorer_window` にて実測。`NavPaneExpandToCurrentFolder` レジストリを一時変更し、ネストしたフォルダーへ新規 Explorer 窓を開いてナビゲーションツリーの展開動作を観測。シェル再起動なしの変更単体では新規ウィンドウでも自動展開が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 中 |
-| `explorer.nav_show_all` | あり（実測済み・効かない） | `explorer_nav_show_all_write_changes_the_fresh_explorer_window` にて実測。`NavPaneShowAllFolders` レジストリを一時変更し、新規 Explorer 窓を開いてナビゲーションペインの特殊フォルダー（ごみ箱等）露出を観測。シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 中 |
+| `explorer.nav_show_all` | あり（実測済み・効かない） | `explorer_nav_show_all_write_changes_the_fresh_explorer_window` にて実測。新規観測関数 `explorer_window_nav_pane_item_names` により左ペインの UIA TreeItem 要素（`calibration_nav_pane_count=34`）を取得して校正通過。`NavPaneShowAllFolders` レジストリを一時変更したが、シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しない（`before=false written=false restored=false changed=false restored_ok=true`）ことを 2 回連続実測で完全一致証明 | 中 |
 | `explorer.separate_process` | あり（実測済み） | `separate_process_setting_changes_owned_explorer_window_process_pattern` にて実測済み。`set_shell_state_separate_process` で変更し、新規 Explorer 窓の PID（`GetWindowThreadProcessId`）が Shell PID（`GetShellWindow`）と異なるかを測定（`SeparateProcessRestoreGuard` を使用） | 小 |
 | `explorer.icons_only` | なし | 画像ファイルを置いたフォルダーを新規 Explorer で大アイコン表示で開き、`PrintWindow` でファイルアイコン領域のサムネイル描画（画像内容か汎用アイコンか）のピクセル分散を比較 | 中 |
-| `explorer.drive_letters` | あり（実測済み・効かない） | `explorer_drive_letters_write_changes_the_fresh_explorer_window` にて実測。`ShowDriveLetters` レジストリを一時変更し、引数なし `explorer.exe`（LaunchTo=1）または `shell:::{...}` で「PC」を開き UIA でドライブ文字 `(C:)` を観測。観測計器は項目名を正確に検出しているが、シェル再起動なしのストレージ変更単体では新規ウィンドウでもドライブ文字表示が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 小 |
+| `explorer.drive_letters` | あり（実測済み・効かない） | `explorer_drive_letters_write_changes_the_fresh_explorer_window` にて実測。観測対象を `shell:MyComputerFolder`（「PC」）へ変更し、ドライブ項目（`calibration_drive_count=5`）のドライブ文字位置（先頭表記 `(C:)`）を取得して校正通過。`ShowDriveLetters` レジストリを一時変更したが、シェル再起動なしのストレージ変更単体では新規ウィンドウでもドライブ文字表示順序が変化しない（`before=false written=false restored=false changed=false restored_ok=true`）ことを 2 回連続実測で完全一致証明 | 小 |
 | `explorer.preview_handlers` | なし | プレビューペインを有効にした新規 Explorer でファイルを選択した際、プレビュー領域内に描画コントロール（`PreviewPane`）が出現するか観測 | 中 |
 | `explorer.sharing_wizard` | なし | フォルダーのコンテキストメニュー等から「共有」を選択した際、出現するダイアログが「共有ウィザード」（`SharingWizard`）か従来のプロパティかを識別 | 中 |
 | `explorer.always_show_menus` | あり（試行済み・判定不可と確認） | `batch_measure_explorer_candidates` で実測試行されたが、高さ測定手法では判定不能と判明。測定するなら新規 Explorer 窓内で Classic MenuBar UIA 要素の有無・可視性を捉える専用プローブが必要 | 中 |
@@ -221,27 +221,45 @@ before=3 written=3 restored=3 changed=false
 「空のドライブを隠す」設定なので、隠す対象がゼロなら差が出なくて当然。
 **効かないのではなく、この機では測れない。** 空のリムーバブルドライブが要る。
 
-### `explorer.nav_show_all` — 効かない場所を観測していた
+### `explorer.nav_show_all` — 左ペイン校正通過・実測して効かないと確定（2026-08-03決着）
+
+新規観測関数 `explorer_window_nav_pane_item_names` を導入し、左ペインの UIA TreeItem 要素 34 件（`calibration_nav_pane_count=34`）を取得して校正を通過。
+`NavPaneShowAllFolders` レジストリを一時変更して測定した結果、シェル再起動なしの変更単体では新規 Explorer 窓の左ペイン表示内容が変化しない（`before=false written=false restored=false changed=false restored_ok=true`）ことを 2 回連続実行で完全一致検証し、「実測して効かない」へ格上げした。
+
+### `explorer.drive_letters` — 「PC」校正通過・実測して効かないと確定（2026-08-03決着）
+
+観測対象を `shell:MyComputerFolder`（「PC」）へ変更し、ドライブ項目 5 件（`calibration_drive_count=5`）のドライブ文字位置（先頭表記 `(C:)`）を取得して校正を通過。
+`ShowDriveLetters` レジストリを一時変更して測定した結果、シェル再起動なしの変更単体では新規 Explorer 窓のドライブ文字表示順序が変化しない（`before=false written=false restored=false changed=false restored_ok=true`）ことを 2 回連続実行で完全一致検証し、「実測して効かない」へ格上げした。
+
+## 観測場所を直したら、初めて意味のある `changed=false` が出た（2026-08-03）
+
+左ペイン用の観測（`explorer_window_nav_pane_item_names`）と、
+「PC」を開いてのドライブ観測に直し、**校正を先に通した。**
 
 ```
-before=true written=true restored=true changed=false
+nav_show_all   calibration_nav_pane_count=34  changed=false （2回とも）
+drive_letters  calibration_drive_count=5      changed=false （2回とも）
 ```
 
-`NavPaneShowAllFolders` は**左のナビゲーションペイン**の設定。
-観測は `explorer_window_item_names`、つまり**右のファイル一覧**を読んでいた。
-`launch_target` で `/n` を付けて測ったのと同じ形の誤り。
-**設定が効く場所を観測していない。** 左ペインの項目を読む観測が要る。
-
-### `explorer.drive_letters` — 同上の疑い
+左ペインは実際に読めている:
 
 ```
-before=true written=true restored=true changed=false
+["デスクトップ", "ホーム", "ギャラリー", "クイック アクセスの開始 - デスクトップ (ピン留め)",
+ "ダウンロード (ピン留め)", "ドキュメント (ピン留め)", "PC (ピン留め)", ...]
 ```
 
-`ShowDriveLettersFirst` はドライブ名の表示順の設定。
-観測が「PC」を開いた一覧の項目名を見ているかを確認する必要がある。
-一時フォルダーを開いて観測しているなら、**そこにドライブは出ない。**
+34項目が読めていて、「ごみ箱」「コントロール パネル」は無い。
+`NavPaneShowAllFolders` を書いても現れなかった。**Windows 11 では効かない設定と考えられる。**
 
-### 3件とも保留
+ドライブも5項目が読めていて、`ShowDriveLettersFirst` の変更で表示順が変わらなかった。
 
-「効かない」へ格上げしない。**観測方法が設定に届いていない。**
+### 前と何が違うか
+
+前回の `changed=false` は**右のファイル一覧を見ていた**ので、無意味だった。
+今回は**設定が効くはずの場所を見て**、そこに読める項目があることを確認した上での `changed=false`。
+
+**同じ文字列でも、校正が通っているかどうかで意味がまるで違う。**
+
+判定は「実測して効かない」へ格上げしてよい水準だが、
+Windows 11 のどのビルドで効かなくなったかは調べていない。
+`docs/STATUS.md` の他の降格項目と同じ扱いにする。

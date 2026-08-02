@@ -474,6 +474,65 @@ pub fn explorer_window_item_names(window_handle: isize) -> WindowsResult<Vec<Str
     }
 }
 
+/// 開いているExplorerウィンドウの左ペイン（ナビゲーションツリー）が表示している項目名。
+/// `explorer_window_item_names` は右の一覧（メインビュー）も含むため、左ペインの検証にはこちらを使う。
+#[cfg(windows)]
+pub fn explorer_window_nav_pane_item_names(window_handle: isize) -> WindowsResult<Vec<String>> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+    };
+
+    fn fail(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
+    unsafe {
+        let window = HWND(window_handle as *mut core::ffi::c_void);
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+        let result = (|| -> WindowsResult<Vec<String>> {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|_| fail("CoCreateInstance"))?;
+            let root: IUIAutomationElement = automation
+                .ElementFromHandle(window)
+                .map_err(|_| fail("ElementFromHandle explorer"))?;
+            let condition = automation
+                .CreateTrueCondition()
+                .map_err(|_| fail("CreateTrueCondition"))?;
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .map_err(|_| fail("FindAll"))?;
+            let count = all.Length().map_err(|_| fail("Length"))?;
+            let mut names = Vec::new();
+            for index in 0..count {
+                if let Ok(element) = all.GetElement(index) {
+                    let control_type = element.CurrentControlType().map(|c| c.0).unwrap_or(0);
+                    // UIA_TreeItemControlTypeId is 50024
+                    if control_type == 50024 {
+                        if let Ok(name) = element.CurrentName() {
+                            let text = name.to_string();
+                            if !text.trim().is_empty() {
+                                names.push(text);
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(names)
+        })();
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
 /// エクスプローラーの窓の中で、名前が一致する要素の矩形を返す。
 ///
 /// 「要素が在るか」では、ステータスバーの表示切替を判定できなかった。
@@ -549,6 +608,11 @@ pub fn explorer_element_rect(
 #[cfg(not(windows))]
 pub fn explorer_window_item_names(window_handle: isize) -> WindowsResult<Vec<String>> {
     Err(WindowsError::unsupported("explorer window items"))
+}
+
+#[cfg(not(windows))]
+pub fn explorer_window_nav_pane_item_names(_window_handle: isize) -> WindowsResult<Vec<String>> {
+    Err(WindowsError::unsupported("explorer nav pane items"))
 }
 
 /// タスクバー上に、指定した名前の要素が存在するか。表示切替の反映確認に使う。
@@ -1486,54 +1550,6 @@ mod tests {
             .expect("prepare typed dword probe backup")
     }
 
-    fn explorer_window_has_drive_letter(window_handle: isize) -> WindowsResult<bool> {
-        fn fail(operation: &'static str) -> WindowsError {
-            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
-        }
-
-        unsafe {
-            let window = HWND(window_handle as *mut core::ffi::c_void);
-            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-            let owns_com = init.is_ok();
-            let result = (|| -> WindowsResult<bool> {
-                let automation: IUIAutomation =
-                    CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
-                        .map_err(|_| fail("CoCreateInstance"))?;
-                let root: IUIAutomationElement = automation
-                    .ElementFromHandle(window)
-                    .map_err(|_| fail("ElementFromHandle explorer"))?;
-                let condition = automation
-                    .CreateTrueCondition()
-                    .map_err(|_| fail("CreateTrueCondition"))?;
-                let all = root
-                    .FindAll(TreeScope_Descendants, &condition)
-                    .map_err(|_| fail("FindAll"))?;
-                let count = all.Length().map_err(|_| fail("Length"))?;
-                for index in 0..count {
-                    let Ok(element) = all.GetElement(index) else {
-                        continue;
-                    };
-                    let Ok(name) = element.CurrentName() else {
-                        continue;
-                    };
-                    let s = name.to_string();
-                    if s.contains("(C:)")
-                        || s.contains("(D:)")
-                        || s.contains("(E:)")
-                        || s.contains("(F:)")
-                    {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            })();
-            if owns_com {
-                CoUninitialize();
-            }
-            result
-        }
-    }
-
     fn probe_folder(prefix: &str, item_names: &[&str]) -> tempfile::TempDir {
         let dir = tempfile::Builder::new()
             .prefix(prefix)
@@ -2450,12 +2466,12 @@ mod tests {
 
         // 0 = Show drive letters after name (default), 1 = Show before name, 2 = Hide drive letters
         let current_setting = original_val.unwrap_or(0);
-        let desired_setting: u32 = if current_setting == 2 { 0 } else { 2 };
-        let observe_drive_letters_window = || -> Option<bool> {
+        let desired_setting: u32 = if current_setting == 1 { 0 } else { 1 };
+        let observe_drive_letters_window = || -> Option<(usize, bool)> {
             let existing: HashSet<isize> =
                 explorer_windows().into_iter().map(|w| w.handle).collect();
             let _child = std::process::Command::new("explorer.exe")
-                .arg("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}")
+                .arg("shell:MyComputerFolder")
                 .spawn()
                 .ok()?;
             let deadline = Instant::now() + Duration::from_secs(8);
@@ -2466,19 +2482,35 @@ mod tests {
                     .find(|w| !existing.contains(&w.handle))
                 {
                     let handle = w.handle;
-                    let has_letter = explorer_window_has_drive_letter(handle).unwrap_or(false);
+                    let names = explorer_window_item_names(handle).unwrap_or_default();
+                    let drive_items: Vec<&String> = names
+                        .iter()
+                        .filter(|s| {
+                            s.contains("(C:)")
+                                || s.contains("(D:)")
+                                || s.contains("(E:)")
+                                || s.contains("(F:)")
+                                || s.contains("(G:)")
+                        })
+                        .collect();
+                    let count = drive_items.len();
+                    let first = drive_items.iter().any(|s| s.trim_start().starts_with('('));
                     close_owned_explorer_window(handle, true);
-                    return Some(has_letter);
+                    return Some((count, first));
                 }
             }
             None
         };
 
         let before = observe_drive_letters_window();
-        let Some(before_has_letter) = before else {
+        let Some((before_count, before_first)) = before else {
             println!("EVIDENCE: explorer.drive_letters measured=false reason=baseline_window_unavailable");
             return;
         };
+        if before_count == 0 {
+            println!("EVIDENCE: explorer.drive_letters measured=false reason=no_drive_items calibration_drive_count=0");
+            return;
+        }
 
         let mut guard = RegistryRestoreGuard::new(
             vec![prepare_dword_probe(target, desired_setting)],
@@ -2500,21 +2532,21 @@ mod tests {
             "ShowDriveLetters registry value must be restored exactly"
         );
 
-        let Some(written_has_letter) = written else {
-            println!("EVIDENCE: explorer.drive_letters measured=false reason=written_window_unavailable before={before_has_letter}");
+        let Some((_written_count, written_first)) = written else {
+            println!("EVIDENCE: explorer.drive_letters measured=false reason=written_window_unavailable before={before_first} calibration_drive_count={before_count}");
             return;
         };
-        let Some(restored_has_letter) = restored else {
-            println!("EVIDENCE: explorer.drive_letters measured=false reason=restored_window_unavailable before={before_has_letter} written={written_has_letter}");
+        let Some((_restored_count, restored_first)) = restored else {
+            println!("EVIDENCE: explorer.drive_letters measured=false reason=restored_window_unavailable before={before_first} written={written_first} calibration_drive_count={before_count}");
             return;
         };
 
-        let changed = before_has_letter != written_has_letter;
-        let restored_ok = before_has_letter == restored_has_letter;
+        let changed = before_first != written_first;
+        let restored_ok = before_first == restored_first;
         let measured = changed && restored_ok;
 
         println!(
-            "EVIDENCE: explorer.drive_letters measured={measured} before={before_has_letter} written={written_has_letter} restored={restored_has_letter} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+            "EVIDENCE: explorer.drive_letters measured={measured} before={before_first} written={written_first} restored={restored_first} changed={changed} restored_ok={restored_ok} calibration_drive_count={before_count} original_reg={original_val:?} desired_reg={desired_setting}"
         );
     }
 
@@ -2678,28 +2710,45 @@ mod tests {
         let before_setting = original_val.unwrap_or(0);
         let desired_setting: u32 = if before_setting == 1 { 0 } else { 1 };
 
-        let observe_show_all_window = || -> Option<bool> {
+        let observe_show_all_window = || -> Option<(usize, bool)> {
             let dir = tempfile::tempdir().ok()?;
             let folder_name = dir.path().file_name()?.to_str()?;
             let window = OwnedExplorerWindow::open(dir.path(), folder_name).ok()?;
-            let names = explorer_window_item_names(window.handle()).unwrap_or_default();
-            let shows_all = names.iter().any(|name| {
+            let nav_names =
+                explorer_window_nav_pane_item_names(window.handle()).unwrap_or_default();
+            let count = nav_names.len();
+            // 何が読めているのかを出す。34項目あって判定 false なら、
+            // 探している名前が実際に無いのか、別の名前で出ているのかを見分ける必要がある。
+            println!(
+                "EVIDENCE: nav_pane_sample count={} names={:?}",
+                nav_names.len(),
+                nav_names.iter().take(12).collect::<Vec<_>>()
+            );
+            let shows_all = nav_names.iter().any(|name| {
                 name.contains("ごみ箱")
                     || name.contains("Recycle Bin")
                     || name.contains("コントロール")
                     || name.contains("Control Panel")
+                    || name.contains("ライブラリ")
+                    || name.contains("Libraries")
             });
             window.close_and_assert();
-            Some(shows_all)
+            Some((count, shows_all))
         };
 
         let before = observe_show_all_window();
-        let Some(before_state) = before else {
+        let Some((before_count, before_state)) = before else {
             println!(
                 "EVIDENCE: explorer.nav_show_all measured=false reason=baseline_window_unavailable"
             );
             return;
         };
+        if before_count == 0 {
+            println!(
+                "EVIDENCE: explorer.nav_show_all measured=false reason=nav_pane_not_readable calibration_nav_pane_count=0"
+            );
+            return;
+        }
 
         let mut guard = RegistryRestoreGuard::new(
             vec![prepare_dword_probe(target, desired_setting)],
@@ -2721,12 +2770,12 @@ mod tests {
             "NavPaneShowAllFolders registry value must be restored exactly"
         );
 
-        let Some(written_state) = written else {
-            println!("EVIDENCE: explorer.nav_show_all measured=false reason=written_window_unavailable before={before_state}");
+        let Some((_written_count, written_state)) = written else {
+            println!("EVIDENCE: explorer.nav_show_all measured=false reason=written_window_unavailable before={before_state} calibration_nav_pane_count={before_count}");
             return;
         };
-        let Some(restored_state) = restored else {
-            println!("EVIDENCE: explorer.nav_show_all measured=false reason=restored_window_unavailable before={before_state} written={written_state}");
+        let Some((_restored_count, restored_state)) = restored else {
+            println!("EVIDENCE: explorer.nav_show_all measured=false reason=restored_window_unavailable before={before_state} written={written_state} calibration_nav_pane_count={before_count}");
             return;
         };
 
@@ -2735,7 +2784,7 @@ mod tests {
         let measured = changed && restored_ok;
 
         println!(
-            "EVIDENCE: explorer.nav_show_all measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+            "EVIDENCE: explorer.nav_show_all measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} calibration_nav_pane_count={before_count} original_reg={original_val:?} desired_reg={desired_setting}"
         );
     }
 
