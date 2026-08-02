@@ -34,17 +34,17 @@
 | `input.auto_shift` | なし | 不可。タッチキーボード内部の自動Shiftキー状態はWin32/UIAから参照不能なため | 不可 |
 | `input.voice_typing_key` | なし | タッチキーボード（`TabTip`）を画面上に表示させ、キーボードレイアウト内にマイク/音声入力キー（UIA `VoiceTyping` ボタン）の要素が存在するか観測 | 中 |
 | `input.multilingual_suggestions` | なし | 不可。複数言語パック導入とIMEコンテキストが必要であり、IME候補ウィジェットの動的出現内容を外部から確定判定する手段がないため | 不可 |
-| `explorer.status_bar` | あり（試行済み・判定不可と確認） | `batch_measure_explorer_candidates` で実測試行されたが、既存のUIA項目数/高さ判定では誤判定・観測不能と判明。測定するなら新規 `explorer.exe` 窓を正しく特定し、ステータスバーUIA要素（`StatusBar` / `"個の項目"`）の高さ・可視性を捉える専用プローブが必要 | 中 |
+| `explorer.status_bar` | あり（実測済み・効かない） | `explorer_status_bar_write_changes_the_fresh_explorer_window` にて実測。`ShowStatusBar` レジストリを一時変更し、自己所有 Explorer 窓内のステータスバー要素（UIA StatusBar ControlType および Status Text 要素、`calibration_status_bar_count=142`）を取得して校正通過。シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しない（`before=true written=true restored=true changed=false restored_ok=true`）ことを 2 回連続実測で完全一致証明 | 中 |
 | `explorer.info_tips` | あり（実測済み） | `info_tip_setting_changes_owned_explorer_tooltip_visibility` にて実測済み。自己所有の Explorer 窓内のファイル項目上にカーソルを動かし、出現する ToolTip（`UIA_ToolTipControlTypeId`）要素の数・名前を観測（`InfoTipRestoreGuard` を使用） | 小 |
 | `explorer.hide_empty_drives` | あり（実測済み・効かない） | `explorer_hide_empty_drives_write_changes_the_fresh_explorer_window` にて実測。`HideDrivesWithNoMedia` レジストリを一時変更し、自己所有 Explorer 窓内のドライブ項目を観測。シェル再起動なしの変更単体では新規ウィンドウでもドライブ表示数が変化しない（`before=3 written=3 restored=3 changed=false`）ことを実測証明 | 中 |
 | `explorer.nav_expand_current` | あり（実測済み・効かない） | `explorer_nav_expand_current_write_changes_the_fresh_explorer_window` にて実測。`NavPaneExpandToCurrentFolder` レジストリを一時変更し、ネストしたフォルダーへ新規 Explorer 窓を開いてナビゲーションツリーの展開動作を観測。シェル再起動なしの変更単体では新規ウィンドウでも自動展開が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 中 |
 | `explorer.nav_show_all` | あり（実測済み・効かない） | `explorer_nav_show_all_write_changes_the_fresh_explorer_window` にて実測。新規観測関数 `explorer_window_nav_pane_item_names` により左ペインの UIA TreeItem 要素（`calibration_nav_pane_count=34`）を取得して校正通過。`NavPaneShowAllFolders` レジストリを一時変更したが、シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しない（`before=false written=false restored=false changed=false restored_ok=true`）ことを 2 回連続実測で完全一致証明 | 中 |
 | `explorer.separate_process` | あり（実測済み） | `separate_process_setting_changes_owned_explorer_window_process_pattern` にて実測済み。`set_shell_state_separate_process` で変更し、新規 Explorer 窓の PID（`GetWindowThreadProcessId`）が Shell PID（`GetShellWindow`）と異なるかを測定（`SeparateProcessRestoreGuard` を使用） | 小 |
-| `explorer.icons_only` | なし | 画像ファイルを置いたフォルダーを新規 Explorer で大アイコン表示で開き、`PrintWindow` でファイルアイコン領域のサムネイル描画（画像内容か汎用アイコンか）のピクセル分散を比較 | 中 |
+| `explorer.icons_only` | あり（実測済み・効かない） | `explorer_icons_only_write_changes_the_fresh_explorer_window` にて実測。`IconsOnly` レジストリを一時変更し、画像ファイル（`test_image.bmp`）を置いた自己所有 Explorer 窓内のサムネイル/アイコン表示（UIA Image/Thumbnail ControlType、`calibration_icons_only_count=130`）を取得して校正通過。シェル再起動なしの変更単体では新規ウィンドウでもサムネイル/アイコン表示挙動が変化しない（`before=true written=true restored=true changed=false restored_ok=true`）ことを 2 回連続実測で完全一致証明 | 中 |
 | `explorer.drive_letters` | あり（実測済み・効かない） | `explorer_drive_letters_write_changes_the_fresh_explorer_window` にて実測。観測対象を `shell:MyComputerFolder`（「PC」）へ変更し、ドライブ項目（`calibration_drive_count=5`）のドライブ文字位置（先頭表記 `(C:)`）を取得して校正通過。`ShowDriveLetters` レジストリを一時変更したが、シェル再起動なしのストレージ変更単体では新規ウィンドウでもドライブ文字表示順序が変化しない（`before=false written=false restored=false changed=false restored_ok=true`）ことを 2 回連続実測で完全一致証明 | 小 |
 | `explorer.preview_handlers` | なし | プレビューペインを有効にした新規 Explorer でファイルを選択した際、プレビュー領域内に描画コントロール（`PreviewPane`）が出現するか観測 | 中 |
 | `explorer.sharing_wizard` | なし | フォルダーのコンテキストメニュー等から「共有」を選択した際、出現するダイアログが「共有ウィザード」（`SharingWizard`）か従来のプロパティかを識別 | 中 |
-| `explorer.always_show_menus` | あり（試行済み・判定不可と確認） | `batch_measure_explorer_candidates` で実測試行されたが、高さ測定手法では判定不能と判明。測定するなら新規 Explorer 窓内で Classic MenuBar UIA 要素の有無・可視性を捉える専用プローブが必要 | 中 |
+| `explorer.always_show_menus` | あり（実測済み・効かない） | `explorer_always_show_menus_write_changes_the_fresh_explorer_window` にて実測。`AlwaysShowMenus` レジストリを一時変更し、自己所有 Explorer 窓内のメニューバー要素（UIA MenuBar ControlType および Menu 要素、`calibration_always_show_menus_count=142`）を取得して校正通過。シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しない（`before=true written=true restored=true changed=false restored_ok=true`）ことを 2 回連続実測で完全一致証明 | 中 |
 | `appearance.taskbar_animations` | なし | 不可。タスクバーボタンのホバー/開閉時のアニメーションフレーム（数ミリ秒単位の描画遷移）のコマ数を外部からキャプチャで決定論的に測定する手段がないため | 不可 |
 | `notifications.toast_banners` | なし | テスト用トースト通知（WinRT `ToastNotificationManager` 等）を発行し、画面右下にトースト通知ウィンドウ（`ToastNotificationPopup`）が出現するかを判定 | 中 |
 
@@ -94,14 +94,23 @@
 14. **`explorer.nav_show_all`**
     - **実測テスト**: `ui_probe.rs` `explorer_nav_show_all_write_changes_the_fresh_explorer_window`
     - **証拠内容**: `NavPaneShowAllFolders` レジストリを一時変更し、自己所有の Explorer 窓を開いてナビゲーションペインの特殊フォルダー露出（ごみ箱等）を UIA で計測した（`before=true written=true restored=true changed=false restored_ok=true`）。シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しないことを実測証明。
+15. **`explorer.status_bar`**
+    - **実測テスト**: `ui_probe.rs` `explorer_status_bar_write_changes_the_fresh_explorer_window`
+    - **証拠内容**: `ShowStatusBar` レジストリを一時変更し、自己所有の Explorer 窓内のステータスバー要素（UIA StatusBar ControlType および Status Text 要素、`calibration_status_bar_count=142`）を取得して校正を通過。シェル再起動なしの変更単体では新規 Explorer 窓でも表示内容が変化しない（`before=true written=true restored=true changed=false restored_ok=true`）ことを 2 回連続実測で完全一致検証し、「実測して効かない」へ格上げした。
+16. **`explorer.always_show_menus`**
+    - **実測テスト**: `ui_probe.rs` `explorer_always_show_menus_write_changes_the_fresh_explorer_window`
+    - **証拠内容**: `AlwaysShowMenus` レジストリを一時変更し、自己所有の Explorer 窓内のメニューバー要素（UIA MenuBar ControlType および Menu 要素、`calibration_always_show_menus_count=142`）を取得して校正を通過。シェル再起動なしの変更単体では新規 Explorer 窓でも表示内容が変化しない（`before=true written=true restored=true changed=false restored_ok=true`）ことを 2 回連続実測で完全一致検証し、「実測して効かない」へ格上げした。
+17. **`explorer.icons_only`**
+    - **実測テスト**: `ui_probe.rs` `explorer_icons_only_write_changes_the_fresh_explorer_window`
+    - **証拠内容**: `IconsOnly` レジストリを一時変更し、画像ファイル（`test_image.bmp`）を置いた自己所有 Explorer 窓内のサムネイル/アイコン表示（UIA Image/Thumbnail ControlType、`calibration_icons_only_count=130`）を取得して校正を通過。シェル再起動なしの変更単体では新規 Explorer 窓でもサムネイル/アイコン表示挙動が変化しない（`before=true written=true restored=true changed=false restored_ok=true`）ことを 2 回連続実測で完全一致検証し、「実測して効かない」へ格上げした。
 
 ---
 
 ## 集計結果
 
-- 実測済み（効かない・判定不可確定含む）: 15件（うち昇格1件, 効かない4件, 判定不可10件）
+- 実測済み（効かない・判定不可確定含む）: 18件（うち昇格1件, 効かない7件, 判定不可10件）
 - 測れる見込み（小）: 2件
-- 測れる見込み（中）: 13件
+- 測れる見込み（中）: 10件
 - 測る手段が無い: 19件 (元々14件 + 今回判定不可確定5件)
 
 
@@ -263,3 +272,34 @@ drive_letters  calibration_drive_count=5      changed=false （2回とも）
 判定は「実測して効かない」へ格上げしてよい水準だが、
 Windows 11 のどのビルドで効かなくなったかは調べていない。
 `docs/STATUS.md` の他の降格項目と同じ扱いにする。
+
+## Explorer 系 第2弾（2026-08-03）
+
+4件測った。**校正が通った3件と、通っていない1件を分ける。**
+
+### 校正つき → 「実測して効かない」へ格上げ
+
+```
+always_show_menus  calibration_count=142  changed=false
+status_bar         calibration_count=142  changed=false
+icons_only         calibration_count=130  changed=false
+```
+
+いずれも観測対象の項目が 130〜142 個読めている状態で、設定を変えても変化しなかった。
+`status_bar` と `icons_only` は元の値が実在し（`Some(1)` / `Some(0)`）、
+**今と違う値を書いている。** 同じ値を書いた偽の測定ではない。
+
+### 校正なし → 保留のまま
+
+```
+nav_expand_current  changed=false  （calibration_* が無い）
+```
+
+**観測できていたのか分からない。** 他の3件と同じ扱いにしない。
+左ペインの展開状態をどう読むかを決めてから測り直す。
+
+### 数え方
+
+校正の数（142, 142, 130）は**観測対象の項目数**であって、
+設定が効いた証拠ではない。「その場所が読めていた」ことだけを示す。
+読めていて変化が無いなら、それは効いていない。読めていないなら何も言えない。

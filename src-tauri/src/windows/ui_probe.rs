@@ -533,6 +533,261 @@ pub fn explorer_window_nav_pane_item_names(window_handle: isize) -> WindowsResul
     }
 }
 
+#[cfg(windows)]
+pub fn explorer_status_bar_observation(window_handle: isize) -> WindowsResult<(usize, bool)> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+        UIA_StatusBarControlTypeId, UIA_TextControlTypeId,
+    };
+
+    fn fail(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
+    unsafe {
+        let window = HWND(window_handle as *mut core::ffi::c_void);
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+        let result = (|| -> WindowsResult<(usize, bool)> {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|_| fail("CoCreateInstance status bar"))?;
+            let root: IUIAutomationElement = automation
+                .ElementFromHandle(window)
+                .map_err(|_| fail("ElementFromHandle explorer status bar"))?;
+            let condition = automation
+                .CreateTrueCondition()
+                .map_err(|_| fail("CreateTrueCondition status bar"))?;
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .map_err(|_| fail("FindAll status bar"))?;
+            let count = all.Length().map_err(|_| fail("Length status bar"))? as usize;
+
+            let mut shows_bar = false;
+            for index in 0..(count as i32) {
+                let Ok(element) = all.GetElement(index) else {
+                    continue;
+                };
+                let control_type = element.CurrentControlType().map(|c| c.0).unwrap_or(0);
+                let class_name = element
+                    .CurrentClassName()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let name = element
+                    .CurrentName()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+
+                let is_offscreen = element
+                    .CurrentIsOffscreen()
+                    .map(|b| b.as_bool())
+                    .unwrap_or(true);
+                let bounds = element.CurrentBoundingRectangle().ok();
+                let is_visible =
+                    !is_offscreen && bounds.is_some_and(|r| r.bottom > r.top && r.right > r.left);
+
+                if is_visible {
+                    if control_type == UIA_StatusBarControlTypeId.0
+                        || class_name == "msctls_statusbar32"
+                    {
+                        shows_bar = true;
+                        break;
+                    }
+                    if control_type == UIA_TextControlTypeId.0
+                        && (name.contains("個の項目")
+                            || name.contains("個のオブジェクト")
+                            || name.contains("item")
+                            || name.contains("items"))
+                    {
+                        shows_bar = true;
+                        break;
+                    }
+                }
+            }
+            Ok((count, shows_bar))
+        })();
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+#[cfg(windows)]
+pub fn explorer_menu_bar_observation(window_handle: isize) -> WindowsResult<(usize, bool)> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+        UIA_MenuBarControlTypeId, UIA_MenuControlTypeId, UIA_MenuItemControlTypeId,
+    };
+
+    fn fail(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
+    unsafe {
+        let window = HWND(window_handle as *mut core::ffi::c_void);
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+        let result = (|| -> WindowsResult<(usize, bool)> {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|_| fail("CoCreateInstance menu bar"))?;
+            let root: IUIAutomationElement = automation
+                .ElementFromHandle(window)
+                .map_err(|_| fail("ElementFromHandle explorer menu bar"))?;
+            let condition = automation
+                .CreateTrueCondition()
+                .map_err(|_| fail("CreateTrueCondition menu bar"))?;
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .map_err(|_| fail("FindAll menu bar"))?;
+            let count = all.Length().map_err(|_| fail("Length menu bar"))? as usize;
+
+            let mut shows_menu = false;
+            for index in 0..(count as i32) {
+                let Ok(element) = all.GetElement(index) else {
+                    continue;
+                };
+                let control_type = element.CurrentControlType().map(|c| c.0).unwrap_or(0);
+                let _class_name = element
+                    .CurrentClassName()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let name = element
+                    .CurrentName()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+
+                let is_offscreen = element
+                    .CurrentIsOffscreen()
+                    .map(|b| b.as_bool())
+                    .unwrap_or(true);
+                let bounds = element.CurrentBoundingRectangle().ok();
+                let is_visible =
+                    !is_offscreen && bounds.is_some_and(|r| r.bottom > r.top && r.right > r.left);
+
+                if is_visible {
+                    if control_type == UIA_MenuBarControlTypeId.0
+                        || name == "メニュー バー"
+                        || name == "Menu Bar"
+                    {
+                        shows_menu = true;
+                        break;
+                    }
+                    if (control_type == UIA_MenuControlTypeId.0
+                        || control_type == UIA_MenuItemControlTypeId.0)
+                        && (name == "ファイル"
+                            || name == "編集"
+                            || name == "表示"
+                            || name == "ツール"
+                            || name == "ヘルプ"
+                            || name == "File"
+                            || name == "Edit"
+                            || name == "View"
+                            || name == "Tools"
+                            || name == "Help")
+                    {
+                        shows_menu = true;
+                        break;
+                    }
+                }
+            }
+            Ok((count, shows_menu))
+        })();
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+#[cfg(windows)]
+pub fn explorer_icons_only_observation(window_handle: isize) -> WindowsResult<(usize, bool)> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
+        UIA_ImageControlTypeId,
+    };
+
+    fn fail(operation: &'static str) -> WindowsError {
+        WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+    }
+
+    unsafe {
+        let window = HWND(window_handle as *mut core::ffi::c_void);
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+        let result = (|| -> WindowsResult<(usize, bool)> {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|_| fail("CoCreateInstance icons only"))?;
+            let root: IUIAutomationElement = automation
+                .ElementFromHandle(window)
+                .map_err(|_| fail("ElementFromHandle explorer icons only"))?;
+            let condition = automation
+                .CreateTrueCondition()
+                .map_err(|_| fail("CreateTrueCondition icons only"))?;
+            let all = root
+                .FindAll(TreeScope_Descendants, &condition)
+                .map_err(|_| fail("FindAll icons only"))?;
+            let count = all.Length().map_err(|_| fail("Length icons only"))? as usize;
+
+            let mut has_thumbnail = false;
+            for index in 0..(count as i32) {
+                let Ok(element) = all.GetElement(index) else {
+                    continue;
+                };
+                let control_type = element.CurrentControlType().map(|c| c.0).unwrap_or(0);
+                let class_name = element
+                    .CurrentClassName()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let name = element
+                    .CurrentName()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+
+                let is_offscreen = element
+                    .CurrentIsOffscreen()
+                    .map(|b| b.as_bool())
+                    .unwrap_or(true);
+                let bounds = element.CurrentBoundingRectangle().ok();
+                let is_visible =
+                    !is_offscreen && bounds.is_some_and(|r| r.bottom > r.top && r.right > r.left);
+
+                if is_visible
+                    && (control_type == UIA_ImageControlTypeId.0
+                        || class_name.contains("Thumbnail")
+                        || name.contains("縮小版")
+                        || name.contains("Thumbnail"))
+                {
+                    has_thumbnail = true;
+                    break;
+                }
+            }
+            Ok((count, has_thumbnail))
+        })();
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
 /// エクスプローラーの窓の中で、名前が一致する要素の矩形を返す。
 ///
 /// 「要素が在るか」では、ステータスバーの表示切替を判定できなかった。
@@ -613,6 +868,21 @@ pub fn explorer_window_item_names(window_handle: isize) -> WindowsResult<Vec<Str
 #[cfg(not(windows))]
 pub fn explorer_window_nav_pane_item_names(_window_handle: isize) -> WindowsResult<Vec<String>> {
     Err(WindowsError::unsupported("explorer nav pane items"))
+}
+
+#[cfg(not(windows))]
+pub fn explorer_status_bar_observation(_window_handle: isize) -> WindowsResult<(usize, bool)> {
+    Err(WindowsError::unsupported("explorer status bar observation"))
+}
+
+#[cfg(not(windows))]
+pub fn explorer_menu_bar_observation(_window_handle: isize) -> WindowsResult<(usize, bool)> {
+    Err(WindowsError::unsupported("explorer menu bar observation"))
+}
+
+#[cfg(not(windows))]
+pub fn explorer_icons_only_observation(_window_handle: isize) -> WindowsResult<(usize, bool)> {
+    Err(WindowsError::unsupported("explorer icons only observation"))
 }
 
 /// タスクバー上に、指定した名前の要素が存在するか。表示切替の反映確認に使う。
@@ -2785,6 +3055,235 @@ mod tests {
 
         println!(
             "EVIDENCE: explorer.nav_show_all measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} calibration_nav_pane_count={before_count} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のShowStatusBar設定を一時変更し、新規Explorer窓のステータスバー表示動作を測定する"]
+    fn explorer_status_bar_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "ShowStatusBar";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let before_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if before_setting == 1 { 0 } else { 1 };
+
+        let observe_status_bar_window = || -> Option<(usize, bool)> {
+            let dir = tempfile::tempdir().ok()?;
+            let folder_name = dir.path().file_name()?.to_str()?;
+            std::fs::write(dir.path().join("sample.txt"), b"sample").ok()?;
+            let window = OwnedExplorerWindow::open(dir.path(), folder_name).ok()?;
+            let (count, shows_bar) = explorer_status_bar_observation(window.handle()).ok()?;
+            window.close_and_assert();
+            Some((count, shows_bar))
+        };
+
+        let before = observe_status_bar_window();
+        let Some((before_count, before_state)) = before else {
+            println!(
+                "EVIDENCE: explorer.status_bar measured=false reason=baseline_window_unavailable"
+            );
+            return;
+        };
+        if before_count == 0 {
+            println!(
+                "EVIDENCE: explorer.status_bar measured=false reason=status_bar_not_readable calibration_status_bar_count=0"
+            );
+            return;
+        }
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_status_bar_window();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_status_bar_window();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "ShowStatusBar registry value must be restored exactly"
+        );
+
+        let Some((_written_count, written_state)) = written else {
+            println!("EVIDENCE: explorer.status_bar measured=false reason=written_window_unavailable before={before_state} calibration_status_bar_count={before_count}");
+            return;
+        };
+        let Some((_restored_count, restored_state)) = restored else {
+            println!("EVIDENCE: explorer.status_bar measured=false reason=restored_window_unavailable before={before_state} written={written_state} calibration_status_bar_count={before_count}");
+            return;
+        };
+
+        let changed = before_state != written_state;
+        let restored_ok = before_state == restored_state;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.status_bar measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} calibration_status_bar_count={before_count} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のAlwaysShowMenus設定を一時変更し、新規Explorer窓のメニューバー表示動作を測定する"]
+    fn explorer_always_show_menus_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "AlwaysShowMenus";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let before_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if before_setting == 1 { 0 } else { 1 };
+
+        let observe_menu_bar_window = || -> Option<(usize, bool)> {
+            let dir = tempfile::tempdir().ok()?;
+            let folder_name = dir.path().file_name()?.to_str()?;
+            std::fs::write(dir.path().join("sample.txt"), b"sample").ok()?;
+            let window = OwnedExplorerWindow::open(dir.path(), folder_name).ok()?;
+            let (count, shows_menu) = explorer_menu_bar_observation(window.handle()).ok()?;
+            window.close_and_assert();
+            Some((count, shows_menu))
+        };
+
+        let before = observe_menu_bar_window();
+        let Some((before_count, before_state)) = before else {
+            println!(
+                "EVIDENCE: explorer.always_show_menus measured=false reason=baseline_window_unavailable"
+            );
+            return;
+        };
+        if before_count == 0 {
+            println!(
+                "EVIDENCE: explorer.always_show_menus measured=false reason=menu_bar_not_readable calibration_always_show_menus_count=0"
+            );
+            return;
+        }
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_menu_bar_window();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_menu_bar_window();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "AlwaysShowMenus registry value must be restored exactly"
+        );
+
+        let Some((_written_count, written_state)) = written else {
+            println!("EVIDENCE: explorer.always_show_menus measured=false reason=written_window_unavailable before={before_state} calibration_always_show_menus_count={before_count}");
+            return;
+        };
+        let Some((_restored_count, restored_state)) = restored else {
+            println!("EVIDENCE: explorer.always_show_menus measured=false reason=restored_window_unavailable before={before_state} written={written_state} calibration_always_show_menus_count={before_count}");
+            return;
+        };
+
+        let changed = before_state != written_state;
+        let restored_ok = before_state == restored_state;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.always_show_menus measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} calibration_always_show_menus_count={before_count} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のIconsOnly設定を一時変更し、新規Explorer窓のサムネイル/アイコン表示動作を測定する"]
+    fn explorer_icons_only_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "IconsOnly";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let before_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if before_setting == 1 { 0 } else { 1 };
+
+        let observe_icons_only_window = || -> Option<(usize, bool)> {
+            let dir = tempfile::tempdir().ok()?;
+            let folder_name = dir.path().file_name()?.to_str()?;
+            let bmp_data = [
+                0x42, 0x4D, 0x3A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00,
+                0x28, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
+                0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00,
+                0x00, 0x00,
+            ];
+            std::fs::write(dir.path().join("test_image.bmp"), bmp_data).ok()?;
+            let window = OwnedExplorerWindow::open(dir.path(), folder_name).ok()?;
+            let (count, has_thumbnail) = explorer_icons_only_observation(window.handle()).ok()?;
+            window.close_and_assert();
+            Some((count, has_thumbnail))
+        };
+
+        let before = observe_icons_only_window();
+        let Some((before_count, before_state)) = before else {
+            println!(
+                "EVIDENCE: explorer.icons_only measured=false reason=baseline_window_unavailable"
+            );
+            return;
+        };
+        if before_count == 0 {
+            println!(
+                "EVIDENCE: explorer.icons_only measured=false reason=icons_only_not_readable calibration_icons_only_count=0"
+            );
+            return;
+        }
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_icons_only_window();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_icons_only_window();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "IconsOnly registry value must be restored exactly"
+        );
+
+        let Some((_written_count, written_state)) = written else {
+            println!("EVIDENCE: explorer.icons_only measured=false reason=written_window_unavailable before={before_state} calibration_icons_only_count={before_count}");
+            return;
+        };
+        let Some((_restored_count, restored_state)) = restored else {
+            println!("EVIDENCE: explorer.icons_only measured=false reason=restored_window_unavailable before={before_state} written={written_state} calibration_icons_only_count={before_count}");
+            return;
+        };
+
+        let changed = before_state != written_state;
+        let restored_ok = before_state == restored_state;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.icons_only measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} calibration_icons_only_count={before_count} original_reg={original_val:?} desired_reg={desired_setting}"
         );
     }
 
