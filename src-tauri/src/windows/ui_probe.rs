@@ -1034,8 +1034,11 @@ mod tests {
             WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
         }
 
-        let taskbar = unsafe { FindWindowW(windows::core::w!("Shell_TrayWnd"), None) }
-            .map_err(|_| fail("FindWindowW Shell_TrayWnd"))?;
+        let taskbar = unsafe {
+            windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0));
+            FindWindowW(windows::core::w!("Shell_TrayWnd"), None)
+        }
+        .map_err(|_| fail("FindWindowW Shell_TrayWnd"))?;
         if !unsafe { IsWindowVisible(taskbar) }.as_bool() {
             return Err(WindowsError::new(
                 WindowsErrorKind::InvalidData,
@@ -2469,6 +2472,169 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "実機のTaskbarGlomLevel設定を一時変更し、タスクバーピクセル変化からボタン結合表示を測定する"]
+    fn taskbar_button_grouping_write_changes_the_taskbar() {
+        struct NotepadGuard {
+            processes: Vec<std::process::Child>,
+        }
+
+        impl NotepadGuard {
+            fn new() -> Self {
+                Self {
+                    processes: Vec::new(),
+                }
+            }
+
+            fn spawn(&mut self, count: usize) {
+                for _ in 0..count {
+                    if let Ok(child) = std::process::Command::new("notepad.exe").spawn() {
+                        self.processes.push(child);
+                    }
+                }
+            }
+
+            fn cleanup(&mut self) {
+                for child in &mut self.processes {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                self.processes.clear();
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "notepad.exe"])
+                    .output();
+            }
+        }
+
+        impl Drop for NotepadGuard {
+            fn drop(&mut self) {
+                self.cleanup();
+            }
+        }
+
+        fn stats_delta(a: &PixelStats, b: &PixelStats) -> f64 {
+            (a.luminance_mean - b.luminance_mean).abs()
+                + (a.luminance_variance - b.luminance_variance).abs()
+                + (a.saturation_mean - b.saturation_mean).abs()
+                + (a.saturation_variance - b.saturation_variance).abs()
+        }
+
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "TaskbarGlomLevel";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let current_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if current_setting == 2 { 0 } else { 2 };
+
+        // 1. 既知の変化（0個 vs 2個のメモ帳起動）でピクセル計器の閾値/感度を検証
+        let baseline_0 = match taskbar_pixel_stats() {
+            Ok(stats) => stats,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: taskbar.button_grouping measured=false reason=baseline_taskbar_unavailable error={error:?}"
+                );
+                return;
+            }
+        };
+
+        let mut notepad_guard = NotepadGuard::new();
+        notepad_guard.spawn(2);
+        sleep(Duration::from_millis(1500));
+
+        let before = match taskbar_pixel_stats() {
+            Ok(stats) => stats,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: taskbar.button_grouping measured=false reason=calibration_taskbar_unavailable error={error:?}"
+                );
+                return;
+            }
+        };
+
+        let known_change_delta = stats_delta(&baseline_0, &before);
+        println!(
+            "EVIDENCE: taskbar.button_grouping calibration known_change_delta={known_change_delta:.4} baseline_0_lum={:.2} before_2_lum={:.2}",
+            baseline_0.luminance_mean, before.luminance_mean
+        );
+
+        // 計器が変化を捕捉できるか（閾値妥当性確認）
+        let threshold_valid = known_change_delta > 0.0001;
+        if !threshold_valid {
+            println!(
+                "EVIDENCE: taskbar.button_grouping measured=false reason=pixel_meter_insensitive known_change_delta={known_change_delta:.4}"
+            );
+            return;
+        }
+
+        // 2. TaskbarGlomLevel 設定の書き込みと測定
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        let _ = crate::windows::restart_shell();
+        sleep(Duration::from_millis(2000));
+
+        let written = match taskbar_pixel_stats() {
+            Ok(stats) => stats,
+            Err(error) => {
+                guard.restore_and_assert();
+                let _ = crate::windows::restart_shell();
+                println!(
+                    "EVIDENCE: taskbar.button_grouping measured=false reason=written_taskbar_unavailable error={error:?}"
+                );
+                return;
+            }
+        };
+
+        // 3. 設定の復元と再測定
+        guard.restore_and_assert();
+        let _ = crate::windows::restart_shell();
+        sleep(Duration::from_millis(2000));
+
+        let restored = match taskbar_pixel_stats() {
+            Ok(stats) => stats,
+            Err(error) => {
+                println!(
+                    "EVIDENCE: taskbar.button_grouping measured=false reason=restored_taskbar_unavailable error={error:?}"
+                );
+                return;
+            }
+        };
+
+        // 手動クリーンアップ（Dropでも保証）
+        drop(notepad_guard);
+
+        // 終了時にタスクバーが存在することを必ず確認
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindowVisible};
+            let taskbar = FindWindowW(windows::core::w!("Shell_TrayWnd"), None);
+            assert!(
+                taskbar.is_ok() && IsWindowVisible(taskbar.unwrap()).as_bool(),
+                "Taskbar window Shell_TrayWnd must be present and visible at exit"
+            );
+        }
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "TaskbarGlomLevel registry value must be restored exactly"
+        );
+
+        let written_delta = stats_delta(&before, &written);
+        let restored_delta = stats_delta(&before, &restored);
+
+        let changed = written_delta > 0.0001;
+        let restored_ok = restored_delta <= written_delta / 2.0 || restored_delta < 0.01;
+        let measured = threshold_valid && changed && restored_ok;
+
+        println!(
+            "EVIDENCE: taskbar.button_grouping measured={measured} known_change_delta={known_change_delta:.4} written_delta={written_delta:.4} restored_delta={restored_delta:.4} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
     #[ignore = "実機のShowRecent設定を一時変更し、新規Explorer窓の「最近」項目表示を測定する"]
     fn explorer_recent_files_write_changes_the_fresh_explorer_window() {
         const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer";
@@ -2553,135 +2719,6 @@ mod tests {
 
         println!(
             "EVIDENCE: explorer.recent_files measured={measured} before={before_count} written={written_count} restored={restored_count} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
-        );
-    }
-
-    #[test]
-    #[ignore = "実機のTaskbarGlomLevel設定を一時変更し、タスクバーボタン結合表示を測定する"]
-    fn taskbar_button_grouping_write_changes_the_taskbar() {
-        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
-        const VALUE_NAME: &str = "TaskbarGlomLevel";
-
-        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
-        let original_val = current_dword_value(target);
-
-        let current_setting = original_val.unwrap_or(0);
-        let desired_setting: u32 = if current_setting == 2 { 0 } else { 2 };
-
-        let _child1 = std::process::Command::new("notepad.exe").spawn().ok();
-        let _child2 = std::process::Command::new("notepad.exe").spawn().ok();
-        sleep(Duration::from_millis(1500));
-
-        let observe_grouping_buttons = || -> Option<usize> {
-            use windows::Win32::Foundation::HWND;
-            use windows::Win32::System::Com::{
-                CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-                COINIT_APARTMENTTHREADED,
-            };
-            use windows::Win32::UI::Accessibility::{
-                CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants,
-            };
-            use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
-
-            unsafe {
-                let taskbar: HWND = FindWindowW(windows::core::w!("Shell_TrayWnd"), None).ok()?;
-                let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-                let owns_com = init.is_ok();
-
-                let result = (|| -> Option<usize> {
-                    let automation: IUIAutomation =
-                        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
-                    let root: IUIAutomationElement = automation.ElementFromHandle(taskbar).ok()?;
-                    let condition = automation.CreateTrueCondition().ok()?;
-                    let all = root.FindAll(TreeScope_Descendants, &condition).ok()?;
-                    let count = all.Length().ok()?;
-                    let mut button_count = 0;
-                    for i in 0..count {
-                        if let Ok(elem) = all.GetElement(i) {
-                            if let Ok(name) = elem.CurrentName() {
-                                let name_str = name.to_string();
-                                if (name_str.contains("メモ帳") || name_str.contains("Notepad"))
-                                    && elem
-                                        .CurrentIsOffscreen()
-                                        .map(|v| !v.as_bool())
-                                        .unwrap_or(false)
-                                {
-                                    button_count += 1;
-                                }
-                            }
-                        }
-                    }
-                    Some(button_count)
-                })();
-
-                if owns_com {
-                    CoUninitialize();
-                }
-                result
-            }
-        };
-
-        let cleanup = || {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/IM", "notepad.exe"])
-                .output();
-        };
-
-        let before = observe_grouping_buttons();
-        let Some(before_count) = before else {
-            cleanup();
-            println!("EVIDENCE: taskbar.button_grouping measured=false reason=baseline_taskbar_unavailable");
-            return;
-        };
-
-        let mut guard = RegistryRestoreGuard::new(
-            vec![prepare_dword_probe(target, desired_setting)],
-            ProbeNotification::Explorer,
-        );
-        guard.apply();
-        let _ = crate::windows::restart_shell();
-        sleep(Duration::from_millis(2000));
-
-        let written = observe_grouping_buttons();
-
-        guard.restore_and_assert();
-        let _ = crate::windows::restart_shell();
-        sleep(Duration::from_millis(2000));
-
-        let restored = observe_grouping_buttons();
-
-        cleanup();
-
-        unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
-            let taskbar = FindWindowW(windows::core::w!("Shell_TrayWnd"), None);
-            assert!(
-                taskbar.is_ok(),
-                "Taskbar window Shell_TrayWnd must be present after shell restart"
-            );
-        }
-
-        let restored_val = current_dword_value(target);
-        assert_eq!(
-            restored_val, original_val,
-            "TaskbarGlomLevel registry value must be restored exactly"
-        );
-
-        let Some(written_count) = written else {
-            println!("EVIDENCE: taskbar.button_grouping measured=false reason=written_taskbar_unavailable before={before_count}");
-            return;
-        };
-        let Some(restored_count) = restored else {
-            println!("EVIDENCE: taskbar.button_grouping measured=false reason=restored_taskbar_unavailable before={before_count} written={written_count}");
-            return;
-        };
-
-        let changed = before_count != written_count;
-        let restored_ok = before_count == restored_count;
-        let measured = changed && restored_ok;
-
-        println!(
-            "EVIDENCE: taskbar.button_grouping measured={measured} before={before_count} written={written_count} restored={restored_count} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
         );
     }
 

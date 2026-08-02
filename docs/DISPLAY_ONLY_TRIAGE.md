@@ -12,7 +12,7 @@
 | `start.recommendations` | あり（**観測基盤が立たず未判定**） | `start_recommendations_write_changes_the_start_menu` にて実測。`Start_IrisRecommendations` レジストリ変更＋`StartMenuExperienceHost.exe` 終了・Winキー自動操作でUIA判定を試みたが、おすすめ要素がUIA露出せず判定不能（`measured=false before=false written=false restored=false changed=false restored_ok=true`）のため**この観測方法では判定できなかった**。設定が効くかどうかは未判定 | 保留 |
 | `explorer.launch_target` | 昇格済み（Persistent） | `explorer_launch_target_write_changes_the_fresh_explorer_window` にて実測。`LaunchTo` レジストリの一時変更・別プロセス検証・完全復元（`original_reg=None` 削除復元含む）を実測確認し、`Persistent` へ昇格完了 | 昇格 |
 | `explorer.recent_files` | あり（**観測基盤が立たず未判定**） | `explorer_recent_files_write_changes_the_fresh_explorer_window` にて実測。`ShowRecent` レジストリ変更後、新規 `explorer.exe` (ホーム) のUIAで「最近」セクション項目数を判定しようとしたが、自動テスト環境で対象ウィンドウ識別・項目列挙が不可（`measured=false reason=baseline_window_unavailable`）のため**この観測方法では判定できなかった**。設定が効くかどうかは未判定 | 保留 |
-| `taskbar.button_grouping` | あり（**観測基盤が立たず未判定**） | `taskbar_button_grouping_write_changes_the_taskbar` にて実測。`TaskbarGlomLevel` レジストリ変更＋`restart_shell()` 実行下で2アプリ（Notepad）のタスクバー（`MSTaskListWClass`）個別ボタン数え上げを試みたが、UIA要素が露出せず判定不能（`measured=false reason=baseline_taskbar_unavailable`）、タスクバー正常復帰は確認 | 不可 |
+| `taskbar.button_grouping` | あり（ピクセル観測実測済み） | `taskbar_button_grouping_write_changes_the_taskbar` にて実測。既知の変化（メモ帳2個起動）による `taskbar_pixel_stats()` の感度/閾値検証（`known_change_delta`）を行った上で `TaskbarGlomLevel` レジストリ変更＋`restart_shell()` 実行下のタスクバーピクセル変化・完全復元および終了時 `Shell_TrayWnd` 存在確認を検証 | 保留 |
 | `taskbar.flashing` | なし | 不可。点滅（`FlashWindowEx`）発生時のタスクバーボタンの過渡的な明滅現象を、非同期な自動テストで決定論的にピクセル/UIA捕捉する手段がないため | 不可 |
 | `taskbar.share_window` | なし | 不可。Teams/Zoom等の対応サードパーティ会議アプリでアクティブ通話中にタスクバーサムネイルへホバーした際に出る「共有」オーバーレイボタン。自動テスト環境に特定通話状態を用意できないため | 不可 |
 | `search.recent_on_hover` | あり（**観測基盤が立たず未判定**） | `search_recent_on_hover_write_changes_the_taskbar` にて実測。`OpenOnHover` レジストリ変更後、タスクバー上の検索アイコン領域を `SetCursorPos` でホバー観測しようとしたが、検索ボタン要素がUIAツリーに未露出（`measured=false reason=search_button_unavailable`）のため**この観測方法では判定できなかった**。設定が効くかどうかは未判定 | 保留 |
@@ -81,7 +81,7 @@
    - **証拠内容**: `ShowRecent` レジストリを一時変更し、新規 `explorer.exe` (ホーム `shell:::{679f857b-165d-4a25-9a24-998467cca37b}`) 内の「最近」セクションのUIA項目数を計測。自動テスト環境下で対象ウィンドウの特定・項目列挙が安定せず不可（`measured=false reason=baseline_window_unavailable`）のため「不可」を確定。
 10. **`taskbar.button_grouping`**
     - **実測テスト**: `ui_probe.rs` `taskbar_button_grouping_write_changes_the_taskbar`
-    - **証拠内容**: `TaskbarGlomLevel` レジストリを一時変更し、`restart_shell()` 実行下で2個のNotepadアプリのタスクバー（`MSTaskListWClass`）個別ボタン要素の数え上げを計測。自動テスト環境下でタスクバーボタンがUIA露出せず判定不能（`measured=false reason=baseline_taskbar_unavailable`）、シェル再起動後のタスクバー正常復帰は確認。
+    - **証拠内容**: UIA要素未露出に対し、`taskbar_pixel_stats()` を用いたピクセル観測プローブを活用。既知の変化（メモ帳0個 vs 2個起動）でピクセル計器の感度/閾値（`known_change_delta`）を事前検証した上で、`TaskbarGlomLevel` レジストリ変更＋`restart_shell()` 実行によるタスクバーピクセル変化・完全復元、および終了時のタスクバー（`Shell_TrayWnd`）存在・可視性を実測検証。
 11. **`search.recent_on_hover`**
     - **実測テスト**: `ui_probe.rs` `search_recent_on_hover_write_changes_the_taskbar`
     - **証拠内容**: `OpenOnHover` レジストリを一時変更し、`SetCursorPos` でタスクバー上の検索アイコン位置へホバーしてフライアウト出現を計測。タスクバー上の検索ボタンがUIAツリーに未露出（`measured=false reason=search_button_unavailable`）のため「不可」を確定。
