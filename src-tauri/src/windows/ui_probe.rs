@@ -2519,6 +2519,227 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "実機のHideDrivesWithNoMedia設定を一時変更し、新規Explorer窓の空ドライブ表示を測定する"]
+    fn explorer_hide_empty_drives_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "HideDrivesWithNoMedia";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let before_setting = original_val.unwrap_or(1);
+        let desired_setting: u32 = if before_setting == 1 { 0 } else { 1 };
+
+        let observe_drives_window = || -> Option<usize> {
+            let dir = tempfile::tempdir().ok()?;
+            let folder_name = dir.path().file_name()?.to_str()?;
+            let window = OwnedExplorerWindow::open(dir.path(), folder_name).ok()?;
+            let names = explorer_window_item_names(window.handle()).unwrap_or_default();
+            let count = names
+                .into_iter()
+                .filter(|name| {
+                    name.contains("ローカル ディスク")
+                        || name.contains("Local Disk")
+                        || name.contains("ドライブ")
+                        || name.contains("Drive")
+                })
+                .count();
+            window.close_and_assert();
+            Some(count)
+        };
+
+        let before = observe_drives_window();
+        let Some(before_count) = before else {
+            println!(
+                "EVIDENCE: explorer.hide_empty_drives measured=false reason=baseline_window_unavailable"
+            );
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_drives_window();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_drives_window();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "HideDrivesWithNoMedia registry value must be restored exactly"
+        );
+
+        let Some(written_count) = written else {
+            println!("EVIDENCE: explorer.hide_empty_drives measured=false reason=written_window_unavailable before={before_count}");
+            return;
+        };
+        let Some(restored_count) = restored else {
+            println!("EVIDENCE: explorer.hide_empty_drives measured=false reason=restored_window_unavailable before={before_count} written={written_count}");
+            return;
+        };
+
+        let changed = before_count != written_count;
+        let restored_ok = before_count == restored_count;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.hide_empty_drives measured={measured} before={before_count} written={written_count} restored={restored_count} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のNavPaneExpandToCurrentFolder設定を一時変更し、新規Explorer窓の自動展開動作を測定する"]
+    fn explorer_nav_expand_current_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "NavPaneExpandToCurrentFolder";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let before_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if before_setting == 1 { 0 } else { 1 };
+
+        let observe_expand_window = || -> Option<bool> {
+            let dir = tempfile::tempdir().ok()?;
+            let deep_dir = dir.path().join("FolderA").join("FolderB");
+            std::fs::create_dir_all(&deep_dir).ok()?;
+            let folder_name = deep_dir.file_name()?.to_str()?;
+            let window = OwnedExplorerWindow::open(&deep_dir, folder_name).ok()?;
+            let names = explorer_window_item_names(window.handle()).unwrap_or_default();
+            let expanded = names
+                .iter()
+                .any(|name| name.contains("FolderB") || name.contains("FolderA"));
+            window.close_and_assert();
+            Some(expanded)
+        };
+
+        let before = observe_expand_window();
+        let Some(before_state) = before else {
+            println!(
+                "EVIDENCE: explorer.nav_expand_current measured=false reason=baseline_window_unavailable"
+            );
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_expand_window();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_expand_window();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "NavPaneExpandToCurrentFolder registry value must be restored exactly"
+        );
+
+        let Some(written_state) = written else {
+            println!("EVIDENCE: explorer.nav_expand_current measured=false reason=written_window_unavailable before={before_state}");
+            return;
+        };
+        let Some(restored_state) = restored else {
+            println!("EVIDENCE: explorer.nav_expand_current measured=false reason=restored_window_unavailable before={before_state} written={written_state}");
+            return;
+        };
+
+        let changed = before_state != written_state;
+        let restored_ok = before_state == restored_state;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.nav_expand_current measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
+    #[ignore = "実機のNavPaneShowAllFolders設定を一時変更し、新規Explorer窓の全フォルダー表示動作を測定する"]
+    fn explorer_nav_show_all_write_changes_the_fresh_explorer_window() {
+        const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+        const VALUE_NAME: &str = "NavPaneShowAllFolders";
+
+        let target = RegistryTarget::current_user_64(SUBKEY, VALUE_NAME);
+        let original_val = current_dword_value(target);
+
+        let before_setting = original_val.unwrap_or(0);
+        let desired_setting: u32 = if before_setting == 1 { 0 } else { 1 };
+
+        let observe_show_all_window = || -> Option<bool> {
+            let dir = tempfile::tempdir().ok()?;
+            let folder_name = dir.path().file_name()?.to_str()?;
+            let window = OwnedExplorerWindow::open(dir.path(), folder_name).ok()?;
+            let names = explorer_window_item_names(window.handle()).unwrap_or_default();
+            let shows_all = names.iter().any(|name| {
+                name.contains("ごみ箱")
+                    || name.contains("Recycle Bin")
+                    || name.contains("コントロール")
+                    || name.contains("Control Panel")
+            });
+            window.close_and_assert();
+            Some(shows_all)
+        };
+
+        let before = observe_show_all_window();
+        let Some(before_state) = before else {
+            println!(
+                "EVIDENCE: explorer.nav_show_all measured=false reason=baseline_window_unavailable"
+            );
+            return;
+        };
+
+        let mut guard = RegistryRestoreGuard::new(
+            vec![prepare_dword_probe(target, desired_setting)],
+            ProbeNotification::Explorer,
+        );
+        guard.apply();
+        sleep(Duration::from_millis(500));
+
+        let written = observe_show_all_window();
+
+        guard.restore_and_assert();
+        sleep(Duration::from_millis(500));
+
+        let restored = observe_show_all_window();
+
+        let restored_val = current_dword_value(target);
+        assert_eq!(
+            restored_val, original_val,
+            "NavPaneShowAllFolders registry value must be restored exactly"
+        );
+
+        let Some(written_state) = written else {
+            println!("EVIDENCE: explorer.nav_show_all measured=false reason=written_window_unavailable before={before_state}");
+            return;
+        };
+        let Some(restored_state) = restored else {
+            println!("EVIDENCE: explorer.nav_show_all measured=false reason=restored_window_unavailable before={before_state} written={written_state}");
+            return;
+        };
+
+        let changed = before_state != written_state;
+        let restored_ok = before_state == restored_state;
+        let measured = changed && restored_ok;
+
+        println!(
+            "EVIDENCE: explorer.nav_show_all measured={measured} before={before_state} written={written_state} restored={restored_state} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+        );
+    }
+
+    #[test]
     #[ignore = "実機のStart_Layout設定を一時変更し、スタートメニューの表示レイアウト変化を測定する"]
     fn start_layout_write_changes_the_start_menu_layout() {
         const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";

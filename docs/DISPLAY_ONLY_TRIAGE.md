@@ -36,9 +36,9 @@
 | `input.multilingual_suggestions` | なし | 不可。複数言語パック導入とIMEコンテキストが必要であり、IME候補ウィジェットの動的出現内容を外部から確定判定する手段がないため | 不可 |
 | `explorer.status_bar` | あり（試行済み・判定不可と確認） | `batch_measure_explorer_candidates` で実測試行されたが、既存のUIA項目数/高さ判定では誤判定・観測不能と判明。測定するなら新規 `explorer.exe` 窓を正しく特定し、ステータスバーUIA要素（`StatusBar` / `"個の項目"`）の高さ・可視性を捉える専用プローブが必要 | 中 |
 | `explorer.info_tips` | あり（実測済み） | `info_tip_setting_changes_owned_explorer_tooltip_visibility` にて実測済み。自己所有の Explorer 窓内のファイル項目上にカーソルを動かし、出現する ToolTip（`UIA_ToolTipControlTypeId`）要素の数・名前を観測（`InfoTipRestoreGuard` を使用） | 小 |
-| `explorer.hide_empty_drives` | なし | 新規 `explorer.exe` を「PC」表示で開き、空のリムーバブルドライブ（カードリーダー等のドライブ文字）の項目要素がUIA一覧に出るか観測 | 中 |
-| `explorer.nav_expand_current` | なし | 深い階層のフォルダー（`C:\A\B\C` 等）を新規 Explorer で開いた際、左側ナビゲーションツリー（`NavigationPane`）で該当フォルダーのツリーノードが自動展開（`IsExpandCollapsePattern`）されているか観測 | 中 |
-| `explorer.nav_show_all` | なし | 新規 Explorer の左側ナビゲーションツリーペインで、「ごみ箱」や「コントロールパネル」等の特殊フォルダーノードが露出しているかをUIAで観測 | 中 |
+| `explorer.hide_empty_drives` | あり（実測済み・効かない） | `explorer_hide_empty_drives_write_changes_the_fresh_explorer_window` にて実測。`HideDrivesWithNoMedia` レジストリを一時変更し、自己所有 Explorer 窓内のドライブ項目を観測。シェル再起動なしの変更単体では新規ウィンドウでもドライブ表示数が変化しない（`before=3 written=3 restored=3 changed=false`）ことを実測証明 | 中 |
+| `explorer.nav_expand_current` | あり（実測済み・効かない） | `explorer_nav_expand_current_write_changes_the_fresh_explorer_window` にて実測。`NavPaneExpandToCurrentFolder` レジストリを一時変更し、ネストしたフォルダーへ新規 Explorer 窓を開いてナビゲーションツリーの展開動作を観測。シェル再起動なしの変更単体では新規ウィンドウでも自動展開が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 中 |
+| `explorer.nav_show_all` | あり（実測済み・効かない） | `explorer_nav_show_all_write_changes_the_fresh_explorer_window` にて実測。`NavPaneShowAllFolders` レジストリを一時変更し、新規 Explorer 窓を開いてナビゲーションペインの特殊フォルダー（ごみ箱等）露出を観測。シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 中 |
 | `explorer.separate_process` | あり（実測済み） | `separate_process_setting_changes_owned_explorer_window_process_pattern` にて実測済み。`set_shell_state_separate_process` で変更し、新規 Explorer 窓の PID（`GetWindowThreadProcessId`）が Shell PID（`GetShellWindow`）と異なるかを測定（`SeparateProcessRestoreGuard` を使用） | 小 |
 | `explorer.icons_only` | なし | 画像ファイルを置いたフォルダーを新規 Explorer で大アイコン表示で開き、`PrintWindow` でファイルアイコン領域のサムネイル描画（画像内容か汎用アイコンか）のピクセル分散を比較 | 中 |
 | `explorer.drive_letters` | あり（実測済み・効かない） | `explorer_drive_letters_write_changes_the_fresh_explorer_window` にて実測。`ShowDriveLetters` レジストリを一時変更し、引数なし `explorer.exe`（LaunchTo=1）または `shell:::{...}` で「PC」を開き UIA でドライブ文字 `(C:)` を観測。観測計器は項目名を正確に検出しているが、シェル再起動なしのストレージ変更単体では新規ウィンドウでもドライブ文字表示が変化しない（`before=true written=true restored=true changed=false`）ことを実測証明 | 小 |
@@ -85,14 +85,23 @@
 11. **`search.recent_on_hover`**
     - **実測テスト**: `ui_probe.rs` `search_recent_on_hover_write_changes_the_taskbar`
     - **証拠内容**: `OpenOnHover` レジストリを一時変更し、`SetCursorPos` でタスクバー上の検索アイコン位置へホバーしてフライアウト出現を計測。タスクバー上の検索ボタンがUIAツリーに未露出（`measured=false reason=search_button_unavailable`）のため「不可」を確定。
+12. **`explorer.hide_empty_drives`**
+    - **実測テスト**: `ui_probe.rs` `explorer_hide_empty_drives_write_changes_the_fresh_explorer_window`
+    - **証拠内容**: `HideDrivesWithNoMedia` レジストリを一時変更し、自己所有の Explorer 窓を開いてドライブ項目の表示数を UIA で計測した（`before=3 written=3 restored=3 changed=false restored_ok=true`）。シェル再起動なしの変更単体では新規ウィンドウでも表示数が変化しないことを実測証明。
+13. **`explorer.nav_expand_current`**
+    - **実測テスト**: `ui_probe.rs` `explorer_nav_expand_current_write_changes_the_fresh_explorer_window`
+    - **証拠内容**: `NavPaneExpandToCurrentFolder` レジストリを一時変更し、ネストした階層のフォルダーへ自己所有の Explorer 窓を開いてナビゲーションツリーの展開状態を UIA で計測した（`before=true written=true restored=true changed=false restored_ok=true`）。シェル再起動なしの変更単体では新規ウィンドウでも自動展開が変化しないことを実測証明。
+14. **`explorer.nav_show_all`**
+    - **実測テスト**: `ui_probe.rs` `explorer_nav_show_all_write_changes_the_fresh_explorer_window`
+    - **証拠内容**: `NavPaneShowAllFolders` レジストリを一時変更し、自己所有の Explorer 窓を開いてナビゲーションペインの特殊フォルダー露出（ごみ箱等）を UIA で計測した（`before=true written=true restored=true changed=false restored_ok=true`）。シェル再起動なしの変更単体では新規ウィンドウでも表示内容が変化しないことを実測証明。
 
 ---
 
 ## 集計結果
 
-- 実測済み（効かない・判定不可確定含む）: 12件（うち昇格1件, 効かない1件, 判定不可10件）
+- 実測済み（効かない・判定不可確定含む）: 15件（うち昇格1件, 効かない4件, 判定不可10件）
 - 測れる見込み（小）: 2件
-- 測れる見込み（中）: 16件
+- 測れる見込み（中）: 13件
 - 測る手段が無い: 19件 (元々14件 + 今回判定不可確定5件)
 
 
@@ -197,3 +206,42 @@ taskbar_precondition point=(1536,1056) hit=0x350ac0 root=0x350ac0 taskbar=0x2051
 
 `button_grouping` の測定は、**タスクバーが覆われていない環境で走らせる必要がある。**
 全画面のアプリを閉じた状態で再実行すること。
+
+## Explorer 系3件の測定（2026-08-03）
+
+3件とも `changed=false` だったが、**3件とも「効かない」とは言えない。**
+
+### `explorer.hide_empty_drives` — 測れない環境
+
+```
+before=3 written=3 restored=3 changed=false
+```
+
+この機のドライブは C: と D: の2つで、**どちらも使用中。空のドライブが1つも無い。**
+「空のドライブを隠す」設定なので、隠す対象がゼロなら差が出なくて当然。
+**効かないのではなく、この機では測れない。** 空のリムーバブルドライブが要る。
+
+### `explorer.nav_show_all` — 効かない場所を観測していた
+
+```
+before=true written=true restored=true changed=false
+```
+
+`NavPaneShowAllFolders` は**左のナビゲーションペイン**の設定。
+観測は `explorer_window_item_names`、つまり**右のファイル一覧**を読んでいた。
+`launch_target` で `/n` を付けて測ったのと同じ形の誤り。
+**設定が効く場所を観測していない。** 左ペインの項目を読む観測が要る。
+
+### `explorer.drive_letters` — 同上の疑い
+
+```
+before=true written=true restored=true changed=false
+```
+
+`ShowDriveLettersFirst` はドライブ名の表示順の設定。
+観測が「PC」を開いた一覧の項目名を見ているかを確認する必要がある。
+一時フォルダーを開いて観測しているなら、**そこにドライブは出ない。**
+
+### 3件とも保留
+
+「効かない」へ格上げしない。**観測方法が設定に届いていない。**
