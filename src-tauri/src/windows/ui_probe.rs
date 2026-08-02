@@ -1079,6 +1079,189 @@ mod tests {
         pixel_stats(&colors)
     }
 
+    #[derive(Debug, Clone, PartialEq)]
+    struct TaskbarFinePixelObservation {
+        samples: usize,
+        edge_count: usize,
+        center_40_variance: f64,
+        profile: Vec<f64>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TaskbarObservationMethod {
+        EdgeCount,
+        CenterVariance,
+        ProfilePattern,
+    }
+
+    fn taskbar_fine_pixel_stats() -> WindowsResult<TaskbarFinePixelObservation> {
+        fn fail(operation: &'static str) -> WindowsError {
+            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+        }
+
+        let taskbar = unsafe {
+            windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0));
+            FindWindowW(windows::core::w!("Shell_TrayWnd"), None)
+        }
+        .map_err(|_| fail("FindWindowW Shell_TrayWnd"))?;
+        if !unsafe { IsWindowVisible(taskbar) }.as_bool() {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "taskbar is not visible",
+                None,
+            ));
+        }
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(taskbar, &mut rect) }.map_err(|_| fail("GetWindowRect taskbar"))?;
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width < 20 || height < 20 {
+            return Err(WindowsError::new(
+                WindowsErrorKind::InvalidData,
+                "taskbar is too small for colour sampling",
+                None,
+            ));
+        }
+
+        let screen = unsafe { GetDC(HWND::default()) };
+        if screen.0.is_null() {
+            return Err(fail("GetDC screen"));
+        }
+
+        // 観測1: 中央領域（幅の 10%〜90%）での色境界数（1px刻み）
+        let x_start = rect.left + width * 10 / 100;
+        let x_end = rect.left + width * 90 / 100;
+        let y_lines = [
+            rect.top + height * 30 / 100,
+            rect.top + height * 50 / 100,
+            rect.top + height * 70 / 100,
+        ];
+
+        let mut samples = 0;
+        let mut edge_count = 0;
+
+        for &y in &y_lines {
+            let mut prev_color: Option<u32> = None;
+            for x in x_start..x_end {
+                let color = unsafe { GetPixel(screen, x, y) }.0;
+                if color == CLR_INVALID {
+                    continue;
+                }
+                samples += 1;
+                let red = f64::from(color & 0xff);
+                let green = f64::from((color >> 8) & 0xff);
+                let blue = f64::from((color >> 16) & 0xff);
+
+                if let Some(prev) = prev_color {
+                    let pr = f64::from(prev & 0xff);
+                    let pg = f64::from((prev >> 8) & 0xff);
+                    let pb = f64::from((prev >> 16) & 0xff);
+                    let diff = (red - pr).abs() + (green - pg).abs() + (blue - pb).abs();
+                    if diff > 25.0 {
+                        edge_count += 1;
+                    }
+                }
+                prev_color = Some(color);
+            }
+        }
+
+        // 観測2: 中央 40% (x: 30%..70%, y: 20%..80%) の輝度分散
+        let cx_start = rect.left + width * 30 / 100;
+        let cx_end = rect.left + width * 70 / 100;
+        let cy_start = rect.top + height * 20 / 100;
+        let cy_end = rect.top + height * 80 / 100;
+
+        let mut c_samples = 0f64;
+        let mut c_lum_sum = 0.0;
+        let mut c_lum_sq_sum = 0.0;
+
+        for x in (cx_start..cx_end).step_by(2) {
+            for y in (cy_start..cy_end).step_by(2) {
+                let color = unsafe { GetPixel(screen, x, y) }.0;
+                if color == CLR_INVALID {
+                    continue;
+                }
+                let red = f64::from(color & 0xff);
+                let green = f64::from((color >> 8) & 0xff);
+                let blue = f64::from((color >> 16) & 0xff);
+                let lum = (red * 299.0 + green * 587.0 + blue * 114.0) / 1000.0;
+                c_samples += 1.0;
+                c_lum_sum += lum;
+                c_lum_sq_sum += lum * lum;
+            }
+        }
+
+        let center_40_variance = if c_samples > 0.0 {
+            let mean = c_lum_sum / c_samples;
+            (c_lum_sq_sum / c_samples - mean * mean).max(0.0)
+        } else {
+            0.0
+        };
+
+        // 観測3: 左端〜中央 (x: 5%..55%) の輝度変化パターン（100点）
+        let mut profile = Vec::with_capacity(100);
+        let px_start = rect.left + width * 5 / 100;
+        let px_end = rect.left + width * 55 / 100;
+        let py = rect.top + height * 50 / 100;
+
+        for i in 0..100 {
+            let x = px_start + (px_end - px_start) * i / 99;
+            let color = unsafe { GetPixel(screen, x, py) }.0;
+            if color != CLR_INVALID {
+                let red = f64::from(color & 0xff);
+                let green = f64::from((color >> 8) & 0xff);
+                let blue = f64::from((color >> 16) & 0xff);
+                let lum = (red * 299.0 + green * 587.0 + blue * 114.0) / 1000.0;
+                profile.push(lum);
+            } else {
+                profile.push(0.0);
+            }
+        }
+
+        unsafe {
+            let _ = ReleaseDC(HWND::default(), screen);
+        }
+
+        Ok(TaskbarFinePixelObservation {
+            samples,
+            edge_count,
+            center_40_variance,
+            profile,
+        })
+    }
+
+    fn fine_stats_delta(
+        a: &TaskbarFinePixelObservation,
+        b: &TaskbarFinePixelObservation,
+        method: TaskbarObservationMethod,
+    ) -> f64 {
+        match method {
+            TaskbarObservationMethod::EdgeCount => {
+                if a.samples == 0 || b.samples == 0 {
+                    0.0
+                } else {
+                    (a.edge_count as f64 - b.edge_count as f64).abs() / (a.samples as f64) * 1000.0
+                }
+            }
+            TaskbarObservationMethod::CenterVariance => {
+                (a.center_40_variance - b.center_40_variance).abs()
+            }
+            TaskbarObservationMethod::ProfilePattern => {
+                if a.profile.len() != b.profile.len() || a.profile.is_empty() {
+                    0.0
+                } else {
+                    let sum: f64 = a
+                        .profile
+                        .iter()
+                        .zip(b.profile.iter())
+                        .map(|(p1, p2)| (p1 - p2).abs())
+                        .sum();
+                    sum / (a.profile.len() as f64)
+                }
+            }
+        }
+    }
+
     fn explorer_window_luminance(window_handle: isize) -> WindowsResult<u32> {
         fn fail(operation: &'static str) -> WindowsError {
             WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
@@ -2511,13 +2694,6 @@ mod tests {
             }
         }
 
-        fn stats_delta(a: &PixelStats, b: &PixelStats) -> f64 {
-            (a.luminance_mean - b.luminance_mean).abs()
-                + (a.luminance_variance - b.luminance_variance).abs()
-                + (a.saturation_mean - b.saturation_mean).abs()
-                + (a.saturation_variance - b.saturation_variance).abs()
-        }
-
         const SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
         const VALUE_NAME: &str = "TaskbarGlomLevel";
 
@@ -2527,8 +2703,8 @@ mod tests {
         let current_setting = original_val.unwrap_or(0);
         let desired_setting: u32 = if current_setting == 2 { 0 } else { 2 };
 
-        // 1. 既知の変化（0個 vs 2個のメモ帳起動）でピクセル計器の閾値/感度を検証
-        let baseline_0 = match taskbar_pixel_stats() {
+        // 1. 既知の変化（0個 vs 2個のメモ帳起動）でピクセル計器の閾値/感度を検証（校正）
+        let baseline_0 = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
             Err(error) => {
                 println!(
@@ -2542,7 +2718,7 @@ mod tests {
         notepad_guard.spawn(2);
         sleep(Duration::from_millis(1500));
 
-        let before = match taskbar_pixel_stats() {
+        let before = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
             Err(error) => {
                 println!(
@@ -2552,20 +2728,36 @@ mod tests {
             }
         };
 
-        let known_change_delta = stats_delta(&baseline_0, &before);
+        // 観測候補 3 種を順番に校正試行（3回変えても出なければ ..._insensitive で止めろ）
+        let methods = [
+            (TaskbarObservationMethod::EdgeCount, "edge_count"),
+            (TaskbarObservationMethod::CenterVariance, "center_variance"),
+            (TaskbarObservationMethod::ProfilePattern, "profile_pattern"),
+        ];
+
+        let mut calibrated_method = None;
+        let mut calibrated_delta = 0.0;
+
+        for (method, _name) in methods {
+            let delta = fine_stats_delta(&baseline_0, &before, method);
+            if delta > 0.0001 {
+                calibrated_method = Some(method);
+                calibrated_delta = delta;
+                break;
+            }
+        }
+
+        let known_change_delta = calibrated_delta;
         println!(
-            "EVIDENCE: taskbar.button_grouping calibration known_change_delta={known_change_delta:.4} baseline_0_lum={:.2} before_2_lum={:.2}",
-            baseline_0.luminance_mean, before.luminance_mean
+            "EVIDENCE: taskbar.button_grouping calibration known_change_delta={known_change_delta:.4} method={calibrated_method:?}"
         );
 
-        // 計器が変化を捕捉できるか（閾値妥当性確認）
-        let threshold_valid = known_change_delta > 0.0001;
-        if !threshold_valid {
+        let Some(active_method) = calibrated_method else {
             println!(
                 "EVIDENCE: taskbar.button_grouping measured=false reason=pixel_meter_insensitive known_change_delta={known_change_delta:.4}"
             );
             return;
-        }
+        };
 
         // 2. TaskbarGlomLevel 設定の書き込みと測定
         let mut guard = RegistryRestoreGuard::new(
@@ -2576,7 +2768,7 @@ mod tests {
         let _ = crate::windows::restart_shell();
         sleep(Duration::from_millis(2000));
 
-        let written = match taskbar_pixel_stats() {
+        let written = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
             Err(error) => {
                 guard.restore_and_assert();
@@ -2593,7 +2785,7 @@ mod tests {
         let _ = crate::windows::restart_shell();
         sleep(Duration::from_millis(2000));
 
-        let restored = match taskbar_pixel_stats() {
+        let restored = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
             Err(error) => {
                 println!(
@@ -2622,12 +2814,12 @@ mod tests {
             "TaskbarGlomLevel registry value must be restored exactly"
         );
 
-        let written_delta = stats_delta(&before, &written);
-        let restored_delta = stats_delta(&before, &restored);
+        let written_delta = fine_stats_delta(&before, &written, active_method);
+        let restored_delta = fine_stats_delta(&before, &restored, active_method);
 
         let changed = written_delta > 0.0001;
         let restored_ok = restored_delta <= written_delta / 2.0 || restored_delta < 0.01;
-        let measured = threshold_valid && changed && restored_ok;
+        let measured = changed && restored_ok;
 
         println!(
             "EVIDENCE: taskbar.button_grouping measured={measured} known_change_delta={known_change_delta:.4} written_delta={written_delta:.4} restored_delta={restored_delta:.4} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
@@ -2912,6 +3104,8 @@ mod tests {
                 return;
             }
         };
+        let luminance_delta = applied.luminance_variance - before.luminance_variance;
+        let saturation_delta = applied.saturation_variance - before.saturation_variance;
         println!(
             "applied: samples={} luminance_mean={:.2} luminance_variance={:.2} saturation_mean={:.2} saturation_variance={:.2} luminance_variance_delta={:.2} saturation_variance_delta={:.2}",
             applied.samples,
@@ -2919,9 +3113,26 @@ mod tests {
             applied.luminance_variance,
             applied.saturation_mean,
             applied.saturation_variance,
-            applied.luminance_variance - before.luminance_variance,
-            applied.saturation_variance - before.saturation_variance,
+            luminance_delta,
+            saturation_delta,
         );
+
+        // **数値を印字するだけで assert が無かった。**
+        // `delta=0.00`、つまり何も検出していない状態でも緑になっていた。
+        // 「取得できた」は「変化を捉えた」ではない。
+        //
+        // ここで落とさず `measured=false` を出すのは、
+        // この計器が透明度の変化を捉えられないと分かっているため。
+        // 捉えられない計器で「効いた／効かない」を言わない。
+        if luminance_delta.abs() < f64::EPSILON && saturation_delta.abs() < f64::EPSILON {
+            println!(
+                "EVIDENCE: appearance.transparency measured=false reason=pixel_meter_insensitive                  luminance_delta={luminance_delta:.4} saturation_delta={saturation_delta:.4}"
+            );
+        } else {
+            println!(
+                "EVIDENCE: appearance.transparency measured=true                  luminance_delta={luminance_delta:.4} saturation_delta={saturation_delta:.4}"
+            );
+        }
 
         guard.restore_and_assert();
         sleep(Duration::from_millis(1_500));
