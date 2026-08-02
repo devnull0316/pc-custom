@@ -1094,6 +1094,125 @@ mod tests {
         ProfilePattern,
     }
 
+    fn check_taskbar_visible_precondition() -> WindowsResult<()> {
+        use windows::Win32::Foundation::{HWND, POINT, RECT};
+        use windows::Win32::Graphics::Gdi::{GetDC, GetPixel, ReleaseDC, CLR_INVALID};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            FindWindowW, GetAncestor, GetWindowRect, IsWindowVisible, WindowFromPoint, GA_ROOT,
+        };
+
+        fn fail(operation: &'static str) -> WindowsError {
+            WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
+        }
+
+        let taskbar = unsafe {
+            windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0));
+            FindWindowW(windows::core::w!("Shell_TrayWnd"), None)
+        }
+        .map_err(|_| fail("FindWindowW Shell_TrayWnd"))?;
+
+        if taskbar.0.is_null() || !unsafe { IsWindowVisible(taskbar) }.as_bool() {
+            return Err(fail("Shell_TrayWnd is null or not visible"));
+        }
+
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(taskbar, &mut rect) }.map_err(|_| fail("GetWindowRect taskbar"))?;
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width < 20 || height < 20 {
+            return Err(fail("taskbar rectangle too small"));
+        }
+
+        // 1. WindowFromPoint による観測点のタスクバー到達確認
+        // 選定理由: サンプリング点に別ウィンドウが覆いかぶさっている場合、
+        // WindowFromPoint は Shell_TrayWnd ではなく上層ウィンドウの HWND を返すため、
+        // タスクバーが直接露出しているかを最も確実かつ直接的に検証できる。
+        let points_to_check = [
+            POINT {
+                x: rect.left + width * 20 / 100,
+                y: rect.top + height * 50 / 100,
+            },
+            POINT {
+                x: rect.left + width * 50 / 100,
+                y: rect.top + height * 50 / 100,
+            },
+            POINT {
+                x: rect.left + width * 80 / 100,
+                y: rect.top + height * 50 / 100,
+            },
+        ];
+
+        let mut hit = false;
+        for pt in points_to_check {
+            let hit_hwnd = unsafe { WindowFromPoint(pt) };
+            if !hit_hwnd.0.is_null() {
+                let root = unsafe { GetAncestor(hit_hwnd, GA_ROOT) };
+                if hit_hwnd == taskbar || root == taskbar {
+                    hit = true;
+                    break;
+                }
+            }
+        }
+        if !hit {
+            // 何が返っているのかを出す。**弾く理由を数字で言えないなら、弾く資格がない。**
+            for pt in points_to_check {
+                let hit_hwnd = unsafe { WindowFromPoint(pt) };
+                let root = if hit_hwnd.0.is_null() {
+                    HWND::default()
+                } else {
+                    unsafe { GetAncestor(hit_hwnd, GA_ROOT) }
+                };
+                let mut class_name = [0u16; 128];
+                let len = unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::GetClassNameW(
+                        hit_hwnd,
+                        &mut class_name,
+                    )
+                };
+                let class = String::from_utf16_lossy(&class_name[..len.max(0) as usize]);
+                println!(
+                    "EVIDENCE: taskbar_precondition point=({},{}) hit={:?} root={:?} taskbar={:?} class={class}",
+                    pt.x, pt.y, hit_hwnd.0, root.0, taskbar.0
+                );
+            }
+            return Err(fail(
+                "WindowFromPoint shows taskbar is covered by another window",
+            ));
+        }
+
+        // 2. ピクセル取得と分散チェック（全点同色・無効色による誤検出排除）
+        let screen = unsafe { GetDC(HWND::default()) };
+        if screen.0.is_null() {
+            return Err(fail("GetDC screen is null"));
+        }
+
+        let mut samples = Vec::new();
+        for i in 0..10 {
+            let x = rect.left + width * (10 + i * 8) / 100;
+            let y = rect.top + height * 50 / 100;
+            let color = unsafe { GetPixel(screen, x, y) }.0;
+            if color != CLR_INVALID {
+                samples.push(color);
+            }
+        }
+        unsafe {
+            let _ = ReleaseDC(HWND::default(), screen);
+        }
+
+        if samples.is_empty() {
+            return Err(fail("all sample pixels are CLR_INVALID"));
+        }
+
+        let first = samples[0];
+        if samples.len() > 1 && samples.iter().all(|&c| c == first) {
+            return Err(fail(
+                "sample pixels have zero variance (covered or invalid surface)",
+            ));
+        }
+
+        Ok(())
+    }
+
     fn taskbar_fine_pixel_stats() -> WindowsResult<TaskbarFinePixelObservation> {
         fn fail(operation: &'static str) -> WindowsError {
             WindowsError::new(WindowsErrorKind::ApiFailure, operation, None)
@@ -2704,6 +2823,12 @@ mod tests {
         let desired_setting: u32 = if current_setting == 2 { 0 } else { 2 };
 
         // 1. 既知の変化（0個 vs 2個のメモ帳起動）でピクセル計器の閾値/感度を検証（校正）
+        if let Err(error) = check_taskbar_visible_precondition() {
+            println!(
+                "EVIDENCE: taskbar.button_grouping measured=false reason=taskbar_not_visible precondition_error={error:?}"
+            );
+            return;
+        }
         let baseline_0 = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
             Err(error) => {
@@ -2718,6 +2843,12 @@ mod tests {
         notepad_guard.spawn(2);
         sleep(Duration::from_millis(1500));
 
+        if let Err(error) = check_taskbar_visible_precondition() {
+            println!(
+                "EVIDENCE: taskbar.button_grouping measured=false reason=taskbar_not_visible precondition_error={error:?}"
+            );
+            return;
+        }
         let before = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
             Err(error) => {
@@ -2754,7 +2885,7 @@ mod tests {
 
         let Some(active_method) = calibrated_method else {
             println!(
-                "EVIDENCE: taskbar.button_grouping measured=false reason=pixel_meter_insensitive known_change_delta={known_change_delta:.4}"
+                "EVIDENCE: taskbar.button_grouping measured=false reason=pixel_meter_insensitive precondition_ok=true known_change_delta={known_change_delta:.4}"
             );
             return;
         };
@@ -2767,6 +2898,15 @@ mod tests {
         guard.apply();
         let _ = crate::windows::restart_shell();
         sleep(Duration::from_millis(2000));
+
+        if let Err(error) = check_taskbar_visible_precondition() {
+            guard.restore_and_assert();
+            let _ = crate::windows::restart_shell();
+            println!(
+                "EVIDENCE: taskbar.button_grouping measured=false reason=taskbar_not_visible precondition_error={error:?}"
+            );
+            return;
+        }
 
         let written = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
@@ -2784,6 +2924,13 @@ mod tests {
         guard.restore_and_assert();
         let _ = crate::windows::restart_shell();
         sleep(Duration::from_millis(2000));
+
+        if let Err(error) = check_taskbar_visible_precondition() {
+            println!(
+                "EVIDENCE: taskbar.button_grouping measured=false reason=taskbar_not_visible precondition_error={error:?}"
+            );
+            return;
+        }
 
         let restored = match taskbar_fine_pixel_stats() {
             Ok(stats) => stats,
@@ -2822,7 +2969,7 @@ mod tests {
         let measured = changed && restored_ok;
 
         println!(
-            "EVIDENCE: taskbar.button_grouping measured={measured} known_change_delta={known_change_delta:.4} written_delta={written_delta:.4} restored_delta={restored_delta:.4} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
+            "EVIDENCE: taskbar.button_grouping measured={measured} precondition_ok=true known_change_delta={known_change_delta:.4} written_delta={written_delta:.4} restored_delta={restored_delta:.4} changed={changed} restored_ok={restored_ok} original_reg={original_val:?} desired_reg={desired_setting}"
         );
     }
 

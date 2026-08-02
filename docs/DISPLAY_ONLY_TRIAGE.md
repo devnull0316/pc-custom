@@ -157,3 +157,43 @@ appearance.transparency measured=true luminance_delta=-659.9403
 保留5件の「ピクセルで測る」選択肢は**開いたまま**。ただし、
 **測る前にタスクバーが実際に見えていることを確かめる**手順が要る。
 
+---
+
+## タスクバー視認性前提条件（Precondition）の導入と再測定結果（`TASK_PIXEL_WITH_PRECONDITION.md` 決着）
+
+2026-08-03、タスクバーピクセルサンプリング直前に**タスクバーが実際に見えていることを確認する前提条件判定関数 `check_taskbar_visible_precondition`** を `ui_probe.rs` へ導入した。
+
+### 選定した前提条件の判定手段と理由
+- **判定手段**: `WindowFromPoint` によるサンプリング座標（タスクバー中央・左右領域）の `Shell_TrayWnd` 属判定、および取得サンプルピクセルの分散チェック（全点同色・無効色のチェック）。
+- **選定理由**: `WindowFromPoint` はサンプリング点上に別のウィンドウが開いて遮蔽している場合、`Shell_TrayWnd` ではなく最上層ウィンドウの `HWND` を返すため、タスクバーが他窓に覆われず露出しているかを直接かつ最も確実に検出できる。さらにサンプルピクセルの分散チェックにより画面未更新や単色グラフィック面による偽検出を二重に排除するため。
+
+### 再測定結果（2回試行・結果の完全一致を検証）
+前提条件を組み込んだ上で、`taskbar.button_grouping` の測定（`taskbar_button_grouping_write_changes_the_taskbar`）を独立して **2回連続実行** し、挙動と結果の一致を確認した。
+
+1. **1回目**: `EVIDENCE: taskbar.button_grouping measured=false reason=taskbar_not_visible precondition_error=WindowsError { kind: ApiFailure, operation: "FindWindowW Shell_TrayWnd", os_code: None }`
+2. **2回目**: `EVIDENCE: taskbar.button_grouping measured=false reason=taskbar_not_visible precondition_error=WindowsError { kind: ApiFailure, operation: "FindWindowW Shell_TrayWnd", os_code: None }`
+
+自動テスト（非対話セッション）環境下では `Shell_TrayWnd` が検索不能なため、前提条件により安全に `measured=false reason=taskbar_not_visible` と判定・中断され、誤って「効かない」や「変更不能」と結論付けることなく覆われた状態での誤判定を防止した。
+判定は **保留のまま** 維持する。
+
+## 前提条件は正しく働いた。覆っていたのは `GLFW30` の窓
+
+`taskbar.button_grouping` の測定に「タスクバーが見えているか」の前提を足したところ、
+`measured=false reason=taskbar_not_visible` で止まった。
+**厳しすぎるのではと疑って、弾く理由を数字で出させた。**
+
+```
+taskbar_precondition point=(384,1056)  hit=0x350ac0 root=0x350ac0 taskbar=0x2051a class=GLFW30
+taskbar_precondition point=(960,1056)  hit=0x350ac0 root=0x350ac0 taskbar=0x2051a class=GLFW30
+taskbar_precondition point=(1536,1056) hit=0x350ac0 root=0x350ac0 taskbar=0x2051a class=GLFW30
+```
+
+**3点すべてで別の窓（`GLFW30`）が手前にある。** 前提条件は正しい。
+`delta=0.00` が出ていたのも、これが原因だったと考えられる。
+
+同じ状態で透明度が `measured=true` になるのは、
+そちらが画面全体の統計を見ていて、覆われていても値が動くため。
+**同じ「タスクバーのピクセル」でも、測っている対象が違えば結論も違う。**
+
+`button_grouping` の測定は、**タスクバーが覆われていない環境で走らせる必要がある。**
+全画面のアプリを閉じた状態で再実行すること。
